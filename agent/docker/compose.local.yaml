@@ -1,0 +1,65 @@
+name: naibaji-feeding-agent-local
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: naibaji-feeding-agent:local
+    restart: unless-stopped
+    init: true
+    environment:
+      PORT: "8080"
+      AGENT_CONFIG_PATH: /data/runtime-config.enc.json
+      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?set CONFIG_ENCRYPTION_KEY}
+      AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?set AGENT_GATEWAY_SECRET}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?set SUPABASE_PUBLISHABLE_KEY}
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-8080}:8080"
+    volumes:
+      - agent-config:/data
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  caddy:
+    image: caddy:2.10.2-alpine
+    profiles: ["proxy", "tunnel"]
+    restart: unless-stopped
+    depends_on:
+      agent:
+        condition: service_healthy
+    environment:
+      AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?set AGENT_GATEWAY_SECRET}
+    ports:
+      - "127.0.0.1:${CADDY_PORT:-8788}:8080"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+    networks:
+      - edge
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.7.0
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on:
+      - caddy
+    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TOKEN:?set CLOUDFLARED_TOKEN}"]
+    networks:
+      - edge
+
+volumes:
+  agent-config:
+
+networks:
+  edge:

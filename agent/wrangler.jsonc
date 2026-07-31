@@ -46,6 +46,20 @@
     "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
   },
   "env": {
+    "local": {
+      "name": "bold-night-870f-feeding-agent-local",
+      "workers_dev": true,
+      "preview_urls": false,
+      "vars": {
+        "AGENT_ENABLED": "false",
+        "SOP_ENABLED": "true",
+        "LLM_PROVIDER": "anthropic",
+        "LLM_MODEL": "claude-sonnet-4-6",
+        "LOCAL_AGENT_URL": "http://127.0.0.1:8080",
+        "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+      }
+    },
     "staging": {
       "name": "bold-night-870f-feeding-agent-staging",
       "workers_dev": true,

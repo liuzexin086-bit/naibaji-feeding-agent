@@ -24,6 +24,51 @@ npm run build
 npm run deploy:staging
 ```
 
+### Node 24.18 本地容器
+
+容器内 HTTP 服务固定监听 `8080`，宿主机默认只绑定
+`127.0.0.1:8080`。运行所需的密钥通过当前 PowerShell 会话传入；Dockerfile
+只复制依赖、编译产物和受保护模型，不复制 `.env` 或任何密钥文件：
+
+```powershell
+cd E:\plan\agent
+$env:CONFIG_ENCRYPTION_KEY = '<32 字节随机值的 Base64>'
+$env:AGENT_GATEWAY_SECRET = '<随机网关密钥>'
+$env:SUPABASE_URL = '<Supabase URL>'
+$env:SUPABASE_PUBLISHABLE_KEY = '<publishable key，不使用 service_role>'
+docker compose -f docker/compose.local.yaml up -d --build agent
+Invoke-RestMethod http://127.0.0.1:8080/health
+```
+
+运行配置支持 `provider`、`baseUrl`、`model`、`apiKey`、以毫秒计的
+`timeout` 和 `maxOutputTokens`。OpenAI-compatible HTTPS 地址可使用任意主机；
+HTTP 仅允许 `localhost`、`127.0.0.0/8` 或 `::1`，带 URL 用户名/密码、查询串
+或片段的地址会被拒绝。API Key 以 AES-256-GCM 加密保存在 `/data` volume，
+公共配置只返回掩码提示，日志和镜像均不包含明文密钥。
+
+Wrangler 本地网关使用新增的 `local` profile：
+
+```powershell
+npx wrangler dev --env local --local --enable-containers=false
+```
+
+需要 Caddy 反代时启用 `proxy` profile，入口只绑定环回地址，且
+`/internal/*` 不对外转发：
+
+```powershell
+docker compose -f docker/compose.local.yaml --profile proxy up -d
+Invoke-RestMethod http://127.0.0.1:8788/health
+```
+
+需要 Cloudflare Tunnel 时再设置 `CLOUDFLARED_TOKEN` 并启用 `tunnel`
+profile。Compose 不启动、映射或公开数据库端口；外部流量只到 Caddy/Agent HTTP
+边界：
+
+```powershell
+$env:CLOUDFLARED_TOKEN = '<tunnel token>'
+docker compose -f docker/compose.local.yaml --profile tunnel up -d
+```
+
 `deploy:staging` 当前是完整 dry-run：会同步静态资源、复制受保护生产模型、构建
 Container 镜像并校验所有 Worker 绑定，但不会发布。
 

@@ -1,0 +1,13 @@
+{
+	auto_https off
+	admin off
+}
+
+:8080 {
+	@internal path /internal/*
+	respond @internal 404
+
+	reverse_proxy agent:8080 {
+		header_up X-Agent-Gateway-Secret {$AGENT_GATEWAY_SECRET}
+	}
+}
