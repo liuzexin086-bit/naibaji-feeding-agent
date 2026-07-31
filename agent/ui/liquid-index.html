@@ -368,6 +368,43 @@
       .drawer-form button { min-width: 72px; min-height: 48px; }
       .toast { bottom: calc(82px + env(safe-area-inset-bottom)); }
     }
+    .batch-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 8px 10px 8px 16px; border-radius: 20px; }
+    .batch-current { min-width: 0; min-height: 44px; display: inline-flex; align-items: center; gap: 8px; padding: 0 4px; border: 0; color: var(--ink); background: transparent; cursor: pointer; font-weight: 680; }
+    .batch-current span { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .batch-current svg { width: 18px; height: 18px; color: var(--muted); }
+    .batch-actions { display: flex; gap: 8px; }
+    .batch-actions button { min-height: 44px; padding: 0 16px; }
+    .batch-surface { position: fixed; z-index: 60; left: 50%; bottom: 18px; width: min(520px, calc(100% - 32px)); max-height: min(680px, calc(100dvh - 32px)); overflow: auto; transform: translate(-50%, calc(100% + 32px)); transition: transform .28s var(--ease); border: 1px solid rgba(255,255,255,.94); border-radius: 26px; background: rgba(255,255,255,.94); box-shadow: 0 28px 80px rgba(31,35,43,.22); }
+    .batch-surface.open { transform: translate(-50%, 0); }
+    .batch-surface-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px 12px; border-bottom: 1px solid var(--line); background: rgba(255,255,255,.94); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+    .batch-surface-head h2 { margin: 0; font-size: 20px; }
+    .batch-view { padding: 16px; }
+    .batch-list { display: grid; gap: 8px; }
+    .batch-row { width: 100%; min-height: 58px; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 12px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 16px; color: var(--ink); background: #fbfbfc; text-align: left; cursor: pointer; }
+    .batch-row.current { border-color: rgba(0,122,255,.34); background: #edf5ff; }
+    .batch-row strong, .batch-row span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .batch-row span { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .batch-row-status { color: var(--blue); font-size: 12px; font-weight: 680; }
+    .batch-empty { padding: 24px 8px; color: var(--muted); text-align: center; }
+    .batch-new-inline { width: 100%; margin-top: 12px; min-height: 48px; }
+    .batch-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 13px; }
+    .batch-form-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; }
+    .batch-form-foot button { min-height: 48px; }
+    .batch-error { min-height: 20px; color: var(--red); font-size: 12px; }
+    .scrim { z-index: 55; }
+    .batch-open { overflow: hidden; }
+    .brand p, .hero-card > p, .section-title p, .card-head p, .metric-note, .field small, .risk-score p, .risk-list, .login-card p { display: none !important; }
+    @media (max-width: 680px) {
+      .batch-nav { align-items: stretch; flex-direction: column; gap: 4px; padding: 8px 10px 10px 14px; }
+      .batch-current { width: 100%; justify-content: space-between; }
+      .batch-actions { display: grid; grid-template-columns: 1fr 1fr; }
+      .batch-actions button { width: 100%; }
+      .batch-surface { left: 0; bottom: 0; width: 100%; max-height: 92dvh; border-radius: 24px 24px 0 0; transform: translateY(100%); }
+      .batch-surface.open { transform: translateY(0); }
+      .batch-form-grid { grid-template-columns: 1fr; gap: 12px; }
+      .batch-form-foot { align-items: stretch; flex-direction: column; }
+      .batch-form-foot button { width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -376,6 +413,8 @@
       <div class="brand"><div class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 4.2c3.8 0 6.8 3.1 6.8 6.9 0 4.6-3.5 7.5-6.8 8.7-3.3-1.2-6.8-4.1-6.8-8.7C5.2 7.3 8.2 4.2 12 4.2Z"/><path d="M8.8 11.2c1.2-1.2 2.5-1.8 3.9-1.8s2.7.6 3.9 1.8M9.3 14.5h5.4"/></svg></div><div><h1>奶爸机 · 现场执行台</h1><p>现场执行</p></div></div>
       <div class="top-actions"><span class="soft-pill" id="batchPill">正在读取批次</span><span class="live-pill"><i></i>本地链路在线</span><button class="icon-btn" id="refreshBtn" aria-label="刷新现场数据" title="刷新"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 11a8 8 0 0 0-14.8-3.9L4 9"/><path d="M4 5v4h4M4 13a8 8 0 0 0 14.8 3.9L20 15"/><path d="M20 19v-4h-4"/></svg></button></div>
     </header>
+
+    <nav class="batch-nav glass" aria-label="批次"><button class="batch-current" id="currentBatchBtn" type="button"><span id="currentBatchLabel">等待批次</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg></button><div class="batch-actions"><button class="secondary-btn" id="historyBtn" type="button">历史</button><button class="primary-btn" id="newBatchBtn" type="button">新建</button></div></nav>
 
     <main>
       <section class="hero">
@@ -401,13 +440,14 @@
   <button class="agent-launch" id="agentLauncher" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7a2.5 2.5 0 0 1-2.5 2.5H12l-4.3 4v-4H6.5A2.5 2.5 0 0 1 4 12.5v-7Z"/><path d="M8 8h8M8 11h5"/></svg>现场 Agent</button>
   <div class="scrim" id="scrim" hidden></div>
   <aside class="agent-drawer" id="agentDrawer" role="dialog" aria-modal="true" aria-label="奶爸机现场 Agent" aria-hidden="true"><div class="drawer-head"><div><h2>现场 Agent</h2><p id="agentStatus">读取依据中</p></div><button class="icon-btn" id="closeAgentBtn" type="button" aria-label="关闭现场 Agent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><div class="agent-log" id="agentLog"><div class="bubble assistant"><p>读取 SOP、奶量曲线和设备设定。</p></div></div><form class="drawer-form" id="agentForm"><textarea id="agentInput" aria-label="输入现场问题" placeholder="例如：有腹泻，剩余餐次？"></textarea><button class="primary-btn" type="submit" id="agentSendBtn">发送</button></form></aside>
+  <section class="batch-surface" id="batchSurface" role="dialog" aria-modal="true" aria-labelledby="batchSurfaceTitle" hidden><header class="batch-surface-head"><h2 id="batchSurfaceTitle">批次</h2><button class="icon-btn" id="closeBatchBtn" type="button" aria-label="关闭批次"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header><div class="batch-view" id="historyView"><div class="batch-list" id="batchList"></div><button class="primary-btn batch-new-inline" id="historyNewBtn" type="button">新建批次</button></div><form class="batch-view" id="newBatchView" hidden><div class="batch-form-grid"><div class="field"><label for="newBatchName">名称</label><input id="newBatchName" required maxlength="40"></div><div class="field"><label for="newBatchHeads">头数</label><input id="newBatchHeads" type="number" min="1" step="1" inputmode="numeric" value="20" required></div><div class="field"><label for="newBatchStartAge">断奶日龄</label><input id="newBatchStartAge" type="number" min="1" max="30" step="1" inputmode="numeric" value="3" required></div><div class="field"><label for="newBatchRoom">场区</label><input id="newBatchRoom" maxlength="30"></div></div><div class="batch-form-foot"><span class="batch-error" id="newBatchError" role="alert"></span><button class="primary-btn" type="submit" id="createBatchBtn">创建并切换</button></div></form></section>
   <div class="login-layer" id="loginLayer" hidden><form class="login-card glass" id="loginForm"><div class="eyebrow"><span></span>登录</div><h2>进入现场执行台</h2><p>使用奶爸机账号登录。</p><div class="field"><label for="loginEmail">邮箱</label><input id="loginEmail" type="email" autocomplete="username" required></div><div class="field"><label for="loginPassword">密码</label><input id="loginPassword" type="password" autocomplete="current-password" required></div><button class="primary-btn" type="submit" id="loginBtn">登录</button><div class="login-error" id="loginError" role="alert"></div></form></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script>
     (function () {
       'use strict'
-      var state = { session: null, user: null, batch: null, today: null, batches: [], assistantBusy: false, longPressTimer: null, longPressStart: null, agentLastFocus: null }
+      var state = { session: null, user: null, batch: null, today: null, batches: [], assistantBusy: false, longPressTimer: null, longPressStart: null, agentLastFocus: null, batchLastFocus: null }
       var $ = function (id) { return document.getElementById(id) }
       var toastTimer = null
       function toast(message) { var el = $('toast'); el.textContent = message; el.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(function () { el.classList.remove('show') }, 2800) }
@@ -425,6 +465,13 @@
       function age() { return number(batchConfig().startAge, 3) + number(state.batch && state.batch.current_day_index, 0) }
       function currentHeads() { return number(batchConfig().headCount, 20) }
       function recordRows() { return Array.isArray(state.batch && state.batch.records) ? state.batch.records : [] }
+      function batchLabel(batch) { return batch && batch.config && batch.config.name ? batch.config.name : (batch && batch.id ? batch.id : '等待批次') }
+      function batchStatus(batch) { return batch && batch.status === 'completed' ? '已完成' : '进行中' }
+      function renderBatchList() { var list = $('batchList'); if (!state.batches.length) { list.innerHTML = '<div class="batch-empty">暂无批次</div>'; return } list.innerHTML = state.batches.map(function (batch) { var active = state.batch && state.batch.id === batch.id ? ' current' : ''; var date = batch.updated_at ? new Date(batch.updated_at).toLocaleDateString('zh-CN') : ''; return '<button class="batch-row' + active + '" type="button" data-batch-id="' + escapeHtml(batch.id) + '"><span><strong>' + escapeHtml(batchLabel(batch)) + '</strong><span>' + escapeHtml(date) + ' · ' + escapeHtml(String(number(batch.config && batch.config.startAge, 3))) + '日龄 · ' + escapeHtml(String(number(batch.config && batch.config.headCount, 0))) + '头</span></span><span class="batch-row-status">' + batchStatus(batch) + '</span></button>' }).join(''); list.querySelectorAll('[data-batch-id]').forEach(function (button) { button.addEventListener('click', function () { selectBatch(button.getAttribute('data-batch-id')) }) }) }
+      function openBatchSurface(view) { if ($('agentDrawer').getAttribute('aria-hidden') !== 'true') closeAgent(); state.batchLastFocus = document.activeElement; $('scrim').hidden = false; document.body.classList.add('batch-open'); $('batchSurface').hidden = false; $('batchSurface').classList.add('open'); $('historyView').hidden = view !== 'history'; $('newBatchView').hidden = view !== 'new'; $('batchSurfaceTitle').textContent = view === 'new' ? '新建批次' : '历史批次'; if (view === 'history') { renderBatchList(); $('historyBtn').focus({ preventScroll: true }) } else { $('newBatchName').value = '批次_' + new Date().toLocaleDateString('zh-CN'); $('newBatchHeads').value = String(currentHeads()); $('newBatchStartAge').value = String(number(batchConfig().startAge, 3)); $('newBatchRoom').value = batchConfig().farmRoom || ''; $('newBatchError').textContent = ''; $('newBatchName').focus({ preventScroll: true }) } }
+      function closeBatchSurface() { $('scrim').hidden = true; document.body.classList.remove('batch-open'); $('batchSurface').classList.remove('open'); $('batchSurface').hidden = true; if (state.batchLastFocus && typeof state.batchLastFocus.focus === 'function') state.batchLastFocus.focus({ preventScroll: true }) }
+      async function selectBatch(batchId) { var selected = state.batches.find(function (batch) { return batch.id === batchId }); if (!selected) return; state.batch = selected; state.today = null; closeBatchSurface(); await loadToday(); render(); toast('已切换') }
+      async function createBatch(event) { event.preventDefault(); var errorEl = $('newBatchError'); var button = $('createBatchBtn'); errorEl.textContent = ''; var name = $('newBatchName').value.trim() || '未命名批次'; var heads = Number($('newBatchHeads').value); var startAge = Number($('newBatchStartAge').value); var room = $('newBatchRoom').value.trim(); if (!Number.isInteger(heads) || heads < 1) { errorEl.textContent = '头数'; return } if (!Number.isInteger(startAge) || startAge < 1 || startAge > 30) { errorEl.textContent = '断奶日龄'; return } if (!state.user || !authClient()) { errorEl.textContent = '请先登录'; return } button.disabled = true; button.textContent = '创建中…'; try { var id = 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); var config = { name: name, headCount: heads, startAge: startAge, endAge: Math.max(startAge + 1, 21), farmRoom: room || undefined, hasInitialWeightAnchor: false }; var result = await authClient().from('batches').insert({ user_id: state.user.id, id: id, config: config, records: [], current_day_index: 0, status: 'active', config_locked: false, control_start_day: -1, revision: 0 }).select('id,config,records,current_day_index,status,revision,updated_at').single(); if (result.error) throw result.error; state.batches = [result.data].concat(state.batches.filter(function (batch) { return batch.id !== id })); state.batch = result.data; state.today = null; closeBatchSurface(); render(); await loadToday(); toast('已创建') } catch (error) { errorEl.textContent = error.message || '创建失败' } finally { button.disabled = false; button.textContent = '创建并切换' } }
       function showLogin() { $('loginLayer').hidden = false; $('appShell').setAttribute('aria-busy', 'false') }
       function hideLogin() { $('loginLayer').hidden = true; $('appShell').setAttribute('aria-busy', 'false') }
       function authClient() { return window.supabaseClient || null }
@@ -433,8 +480,9 @@
         var client = authClient(); if (!client || !state.user) return
         var result = await client.from('batches').select('id,config,records,current_day_index,status,revision,updated_at').eq('user_id', state.user.id).order('updated_at', { ascending: false }).limit(20)
         if (result.error) throw result.error
-        state.batches = result.data || []; state.batch = state.batches[0] || null
-        if (state.batch) { $('batchPill').textContent = state.batch.config && state.batch.config.name ? state.batch.config.name : '当前批次'; await loadToday() }
+        state.batches = result.data || []; state.batch = state.batches[0] || null; state.today = null
+        $('batchPill').textContent = batchLabel(state.batch); $('currentBatchLabel').textContent = batchLabel(state.batch); renderBatchList()
+        if (state.batch) await loadToday()
       }
       async function loadToday() {
         if (!state.batch || !state.session) return
@@ -446,7 +494,7 @@
       }
       function render() {
         var config = batchConfig(); var currentAge = age(); var heads = currentHeads(); var rows = recordRows(); var today = state.today || {}; var run = today.run || {}; var selected = today.nextTask || {}
-        $('batchName').textContent = config.name || (state.batch && state.batch.id) || '等待批次'
+        $('batchName').textContent = config.name || (state.batch && state.batch.id) || '等待批次'; $('currentBatchLabel').textContent = batchLabel(state.batch); $('batchPill').textContent = batchLabel(state.batch)
         $('heroTitle').textContent = currentAge <= 4 ? '断奶第 ' + Math.max(1, currentAge - number(config.startAge, 3) + 1) + ' 天，先把设备设定好。' : '今天的设备设定已经准备好。'
         $('ageMetric').innerHTML = currentAge + '<small>日龄</small>'; $('headMetric').innerHTML = heads + '<small>头</small>'
         $('nextMeal').textContent = selected.scheduled_at ? '下一项 ' + new Date(selected.scheduled_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '下一次 12:00'
@@ -477,7 +525,7 @@
       function copySetting() { var text = '今日设备设定\n模式：' + $('modePill').textContent + '\n日总粉：' + $('dailyPowder').textContent + '\n单次：' + $('singlePowder').textContent + '\n餐次：' + $('mealCount').textContent + '\n依据：' + $('programBasis').textContent; navigator.clipboard && navigator.clipboard.writeText(text).then(function () { toast('设备设定已复制') }, function () { toast('复制失败，请长按选择') }) }
       function bindLongPress() { var target = $('dailyTableWrap'); target.addEventListener('pointerdown', function (event) { if (event.pointerType === 'mouse' && event.button !== 0) return; state.longPressStart = { x: event.clientX, y: event.clientY }; clearTimeout(state.longPressTimer); state.longPressTimer = setTimeout(function () { state.longPressStart = null; if (navigator.vibrate) navigator.vibrate(12); saveTable() }, 650) }); ['pointerup','pointercancel','pointerleave'].forEach(function (name) { target.addEventListener(name, function () { clearTimeout(state.longPressTimer); state.longPressStart = null }) }); target.addEventListener('pointermove', function (event) { if (state.longPressStart && Math.hypot(event.clientX-state.longPressStart.x, event.clientY-state.longPressStart.y) > 10) { clearTimeout(state.longPressTimer); state.longPressStart = null } }) }
       async function boot() { try { var session = await getSession(); if (!session) { showLogin(); render(); return } state.session = session; state.user = session.user; hideLogin(); await loadBatches(); if (!state.batch) toast('当前账号暂无批次，请先创建或启动批次') } catch (error) { showLogin(); $('loginError').textContent = error.message || '无法读取登录状态' } finally { $('appShell').setAttribute('aria-busy', 'false') } }
-      $('loginForm').addEventListener('submit', login); $('refreshBtn').addEventListener('click', refresh); $('openAgentBtn').addEventListener('click', function () { openAgent() }); $('agentLauncher').addEventListener('click', function () { openAgent() }); $('riskAgentBtn').addEventListener('click', function () { openAgent('读取风险，告诉我设备现在怎么设。') }); $('closeAgentBtn').addEventListener('click', closeAgent); $('scrim').addEventListener('click', closeAgent); $('agentForm').addEventListener('submit', sendAgent); $('saveTableBtn').addEventListener('click', saveTable); $('copySettingBtn').addEventListener('click', copySetting); $('quickForm').addEventListener('submit', saveDraft); $('nextDayBtn').addEventListener('click', function () { openAgent('给出明天的设备模式、单次下粉量和时间表。') }); document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && $('agentDrawer').getAttribute('aria-hidden') !== 'true') closeAgent() }); bindLongPress(); boot()
+      $('loginForm').addEventListener('submit', login); $('refreshBtn').addEventListener('click', refresh); $('currentBatchBtn').addEventListener('click', function () { openBatchSurface('history') }); $('historyBtn').addEventListener('click', function () { openBatchSurface('history') }); $('newBatchBtn').addEventListener('click', function () { openBatchSurface('new') }); $('historyNewBtn').addEventListener('click', function () { openBatchSurface('new') }); $('closeBatchBtn').addEventListener('click', closeBatchSurface); $('newBatchView').addEventListener('submit', createBatch); $('openAgentBtn').addEventListener('click', function () { openAgent() }); $('agentLauncher').addEventListener('click', function () { openAgent() }); $('riskAgentBtn').addEventListener('click', function () { openAgent('读取风险，告诉我设备现在怎么设。') }); $('closeAgentBtn').addEventListener('click', closeAgent); $('scrim').addEventListener('click', function () { if (!$('batchSurface').hidden) closeBatchSurface(); else closeAgent() }); $('agentForm').addEventListener('submit', sendAgent); $('saveTableBtn').addEventListener('click', saveTable); $('copySettingBtn').addEventListener('click', copySetting); $('quickForm').addEventListener('submit', saveDraft); $('nextDayBtn').addEventListener('click', function () { openAgent('给出明天的设备模式、单次下粉量和时间表。') }); document.addEventListener('keydown', function (event) { if (event.key !== 'Escape') return; if (!$('batchSurface').hidden) closeBatchSurface(); else if ($('agentDrawer').getAttribute('aria-hidden') !== 'true') closeAgent() }); bindLongPress(); boot()
     }())
   </script>
 </body>
