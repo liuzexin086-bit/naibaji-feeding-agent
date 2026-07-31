@@ -6,9 +6,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const agentRoot = resolve(here, "..");
 const sourceRoot = resolve(agentRoot, "..");
 const targetRoot = resolve(agentRoot, "public");
+const uiRoot = resolve(agentRoot, "ui");
 
 const files = [
-  "index.html",
   "admin.html",
   "admin.js",
   "chart.umd.min.js",
@@ -21,3 +21,4 @@ await mkdir(targetRoot, { recursive: true });
 for (const file of files) {
   await cp(resolve(sourceRoot, file), resolve(targetRoot, file));
 }
+await cp(resolve(uiRoot, "liquid-index.html"), resolve(targetRoot, "index.html"));
