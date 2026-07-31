@@ -1,0 +1,78 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "bold-night-870f-feeding-agent-staging",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-31",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*", "/", "/index.html", "/admin", "/admin.html", "/admin.js"],
+    "not_found_handling": "single-page-application"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "FEEDING_AGENT_CONTAINER",
+        "class_name": "FeedingAgentContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["FeedingAgentContainer"]
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "FeedingAgentContainer",
+      "image": "./Dockerfile",
+      "max_instances": 2
+    }
+  ],
+  "vars": {
+    "AGENT_ENABLED": "false",
+    "SOP_ENABLED": "true",
+    "LLM_PROVIDER": "anthropic",
+    "LLM_MODEL": "claude-sonnet-4-6",
+    "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+  },
+  "env": {
+    "staging": {
+      "name": "bold-night-870f-feeding-agent-staging",
+      "workers_dev": true,
+      "preview_urls": true,
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "FEEDING_AGENT_CONTAINER",
+            "class_name": "FeedingAgentContainer"
+          }
+        ]
+      },
+      "vars": {
+        "AGENT_ENABLED": "false",
+        "SOP_ENABLED": "true",
+        "LLM_PROVIDER": "anthropic",
+        "LLM_MODEL": "claude-sonnet-4-6",
+        "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
+        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+      },
+      "containers": [
+        {
+          "class_name": "FeedingAgentContainer",
+          "image": "./Dockerfile",
+          "max_instances": 2
+        }
+      ]
+    }
+  }
+}

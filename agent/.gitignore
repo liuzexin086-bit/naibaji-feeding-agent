@@ -1,0 +1,8 @@
+dist/
+node_modules/
+public/
+container-models/
+.wrangler/
+.dev.vars*
+.cloudflared-token
+.agent-config-key

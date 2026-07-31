@@ -1,0 +1,35 @@
+{
+  "name": "naibaji-feeding-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "24.18.0"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cf:types": "wrangler types",
+    "dev": "wrangler dev",
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "prepare:container": "node scripts/prepare-container.mjs",
+    "deploy:staging": "npm run prepare:assets && npm run prepare:container && wrangler deploy --env staging --dry-run",
+    "start:container": "node dist/container/server.js"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7",
+    "@earendil-works/pi-agent-core": "0.83.0",
+    "@earendil-works/pi-ai": "0.83.0",
+    "@supabase/supabase-js": "2.111.0",
+    "jose": "6.2.5",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "typescript": "5.9.3",
+    "vitest": "3.2.4",
+    "wrangler": "4.116.0"
+  }
+}
