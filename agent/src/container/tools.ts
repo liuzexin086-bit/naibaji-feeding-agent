@@ -1,14 +1,18 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import {
-  computeProductionPlan,
-  getModelDerivedMealAmount,
-} from "../model/production-model.js";
+  computeDayDecision,
+  previewDiarrheaAdjustment,
+  type CreepGrade,
+  type DayDecisionInput,
+  type DiarrheaGrade,
+  type FeedingDecision,
+} from "../decision/index.js";
 import {
   checkDataQuality,
   checkExecutionGap,
-  computeSopMeal,
   DEFAULT_SOP_TEMPLATE,
+  PRODUCTION_MODEL_VERSION,
   teachingProgramTimes,
 } from "../sop/engine.js";
 import { searchKnowledge } from "../knowledge/sop-knowledge.js";
@@ -27,6 +31,26 @@ export interface AgentRequestContext {
   evidence: Map<string, unknown>;
 }
 
+export const APPROVED_FEEDING_TOOL_NAMES = [
+  "get_batch_context",
+  "get_today_timeline",
+  "compute_production_plan",
+  "compute_sop_meal",
+  "check_execution_gap",
+  "check_data_quality",
+  "manage_laggard_case",
+  "search_feeding_knowledge",
+  "draft_daily_decision",
+  "preview_diarrhea_adjustment",
+] as const;
+
+const TOOL_CONTRACT_VERSION = "agent-v2@2026-07-31";
+const QUANTITY_AUTHORITY = [
+  "sop_direct",
+  "sop_indirect",
+  "production_model",
+] as const;
+
 function result<T>(details: T) {
   return {
     content: [{ type: "text" as const, text: JSON.stringify(details) }],
@@ -38,9 +62,30 @@ function record<T>(
   context: AgentRequestContext,
   toolName: string,
   details: T,
-): ReturnType<typeof result<T>> {
-  context.evidence.set(toolName, details);
-  return result(details);
+  metadata: Partial<{
+    sopVersion: string;
+    modelVersion: string;
+    calculationDate: string;
+    basis: string;
+    evidence: unknown;
+  }> = {},
+) {
+  const calculationDate = metadata.calculationDate ?? new Date().toISOString().slice(0, 10);
+  const wrapped = {
+    toolVersion: TOOL_CONTRACT_VERSION,
+    sopVersion: metadata.sopVersion ?? DEFAULT_SOP_TEMPLATE.version,
+    modelVersion: metadata.modelVersion ?? PRODUCTION_MODEL_VERSION,
+    calculationDate,
+    basis: metadata.basis ?? "仅依据已注册的确定性工具与版本化现场数据。",
+    evidence: metadata.evidence ?? {
+      toolName,
+      calculationDate,
+      reason: "输出由契约工具生成，LLM 未参与数值计算。",
+    },
+    data: details,
+  };
+  context.evidence.set(toolName, wrapped);
+  return result(wrapped);
 }
 
 async function currentRun(context: AgentRequestContext) {
@@ -92,7 +137,45 @@ function finiteNumber(value: unknown, fallback: number): number {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
-async function productionPlanForBatch(
+interface BatchDecisionState {
+  batchId: string;
+  batch: {
+    config?: Record<string, unknown>;
+    records?: Array<Record<string, unknown>>;
+    current_day_index?: number;
+    control_start_day?: number;
+    revision?: number;
+  };
+  run: Record<string, unknown> | null;
+  template: typeof DEFAULT_SOP_TEMPLATE;
+  modelInput: DayDecisionInput["modelInput"];
+  revision: number;
+  currentDayAge: number;
+  dateLocal: string;
+  sopVersion: string;
+}
+
+function localDateAt(instant: Date, utcOffsetMinutes: number): string {
+  return new Date(instant.getTime() + utcOffsetMinutes * 60_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function addLocalDays(dateLocal: string, days: number): string {
+  const instant = new Date(`${dateLocal}T00:00:00.000Z`);
+  instant.setUTCDate(instant.getUTCDate() + days);
+  return instant.toISOString().slice(0, 10);
+}
+
+function localTimeAt(iso: string, utcOffsetMinutes: number): string {
+  const instant = new Date(iso);
+  if (!Number.isFinite(instant.getTime())) throw new Error("NBJ_SOP_INVALID_LOCAL_TIME");
+  return new Date(instant.getTime() + utcOffsetMinutes * 60_000)
+    .toISOString()
+    .slice(11, 16);
+}
+
+async function batchDecisionState(
   context: AgentRequestContext,
   overrides: Partial<{
     startAge: number;
@@ -108,10 +191,11 @@ async function productionPlanForBatch(
     records?: Array<Record<string, unknown>>;
     current_day_index?: number;
     control_start_day?: number;
+    revision?: number;
   }>>(
     context.env,
     context.token,
-    `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=config,records,current_day_index,control_start_day&limit=1`,
+    `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=config,records,current_day_index,control_start_day,revision&limit=1`,
   );
   const batch = batches[0];
   if (!batch) throw new Error("NBJ_BATCH_NOT_FOUND");
@@ -121,7 +205,7 @@ async function productionPlanForBatch(
   const startAge = overrides.startAge ?? finiteNumber(config.startAge, 3);
   const endAge = overrides.endAge ?? finiteNumber(config.endAge, 21);
   const currentDayIndex = finiteNumber(batch.current_day_index, 0);
-  return computeProductionPlan({
+  const modelInput = {
     startAge,
     endAge,
     startWeight: overrides.startWeight ?? finiteNumber(config.startWeight, 2.3),
@@ -137,7 +221,73 @@ async function productionPlanForBatch(
       1,
     ),
     programStartLocal: template.productionProgramStartLocal ?? "00:00",
-  });
+  };
+  return {
+    batchId: context.batchId,
+    batch,
+    run,
+    template,
+    modelInput,
+    revision: finiteNumber(run?.revision ?? batch.revision, 0),
+    currentDayAge: modelInput.dayAge,
+    dateLocal: localDateAt(new Date(), finiteNumber(template.utcOffsetMinutes, 480)),
+    sopVersion: String(run?.template_version ?? template.version),
+  } satisfies BatchDecisionState;
+}
+
+function decisionInput(
+  state: BatchDecisionState,
+  dayAge: number,
+  requestedMode: "timed_quantity" | "free_feeding",
+): DayDecisionInput {
+  const creepGrades = state.batch.config?.creepFeedGradesLast3Days;
+  return {
+    revision: state.revision,
+    batchId: state.batchId,
+    dateLocal: addLocalDays(state.dateLocal, dayAge - state.currentDayAge),
+    calculationDate: state.dateLocal,
+    sopVersion: state.sopVersion,
+    modelInput: { ...state.modelInput, dayAge },
+    requestedMode,
+    requestedStatus: "draft",
+    precisionGrams: finiteNumber(state.template.devicePowderPrecisionGrams, 1),
+    freeWindows: [{ startLocal: "00:00", endLocal: "23:59" }],
+    creepFeedGradesLast3Days: Array.isArray(creepGrades)
+      ? creepGrades.filter((grade): grade is CreepGrade =>
+          ["none", "low", "medium", "high"].includes(String(grade)))
+      : undefined,
+  };
+}
+
+async function productionDecisionsForBatch(
+  context: AgentRequestContext,
+  overrides: Parameters<typeof batchDecisionState>[1] = {},
+) {
+  const state = await batchDecisionState(context, overrides);
+  const ages = Array.from(
+    { length: state.modelInput.endAge - state.modelInput.startAge + 1 },
+    (_, index) => state.modelInput.startAge + index,
+  );
+  const timedQuantity = ages.map((age) =>
+    computeDayDecision(decisionInput(state, age, "timed_quantity")));
+  const freeFeeding = ages.map((age) =>
+    computeDayDecision(decisionInput(state, age, "free_feeding")));
+  const selectedIndex = Math.max(0, Math.min(
+    ages.length - 1,
+    state.currentDayAge - state.modelInput.startAge,
+  ));
+  return {
+    state,
+    fullFeedingCurve: timedQuantity,
+    deviceModes: {
+      timed_quantity: timedQuantity,
+      free_feeding: freeFeeding,
+    },
+    selectedDecision: timedQuantity[selectedIndex],
+    singlePowderGrams: timedQuantity[selectedIndex]?.setting.singlePowderGrams ?? 0,
+    quantityAuthorityPriority: QUANTITY_AUTHORITY,
+    evidence: timedQuantity[selectedIndex]?.evidence,
+  };
 }
 
 export function createFeedingTools(
@@ -163,13 +313,20 @@ export function createFeedingTools(
           )
         : [];
       const productionPlan = batches[0]
-        ? await productionPlanForBatch(context)
+        ? await productionDecisionsForBatch(context)
         : null;
       return record(context, "get_batch_context", {
         batch: batches[0] ?? null,
         run,
         openTasks: tasks,
-        fullFeedingCurve: productionPlan,
+        fullFeedingCurve: productionPlan?.fullFeedingCurve ?? null,
+        deviceModes: productionPlan?.deviceModes ?? null,
+        selectedDecision: productionPlan?.selectedDecision ?? null,
+      }, {
+        sopVersion: String(run?.template_version ?? DEFAULT_SOP_TEMPLATE.version),
+        modelVersion: productionPlan?.selectedDecision?.evidence.modelVersion,
+        evidence: productionPlan?.evidence,
+        basis: "批次、冻结 SOP 和 computeDayDecision 的完整曲线快照。",
       });
     },
   };
@@ -217,8 +374,20 @@ export function createFeedingTools(
         controlStartDay?: number;
         dayAge?: number;
       };
-      const details = await productionPlanForBatch(context, params);
-      return record(context, "compute_production_plan", details);
+      const details = await productionDecisionsForBatch(context, params);
+      return record(context, "compute_production_plan", {
+        fullFeedingCurve: details.fullFeedingCurve,
+        deviceModes: details.deviceModes,
+        selectedDecision: details.selectedDecision,
+        singlePowderGrams: details.singlePowderGrams,
+        quantityAuthorityPriority: details.quantityAuthorityPriority,
+      }, {
+        sopVersion: details.state.sopVersion,
+        modelVersion: details.selectedDecision.evidence.modelVersion,
+        calculationDate: details.selectedDecision.evidence.calculationDate,
+        basis: "computeDayDecision 逐日计算；模型曲线是设备设置标准上限。",
+        evidence: details.evidence,
+      });
     },
   };
 
@@ -231,12 +400,11 @@ export function createFeedingTools(
     }),
     execute: async (_id, rawParams) => {
       const params = rawParams as { activeHeadCount: number };
-      const run = await currentRun(context);
-      const template = (run?.template_snapshot ?? DEFAULT_SOP_TEMPLATE) as typeof DEFAULT_SOP_TEMPLATE;
-      const production = await productionPlanForBatch(context, {
+      const production = await productionDecisionsForBatch(context, {
         headCount: params.activeHeadCount,
       });
-      const modelMeal = getModelDerivedMealAmount(production);
+      const { state } = production;
+      const { run, template } = state;
       const scheduledMealCount = run
         ? teachingProgramTimes({
             firstTeachingAt: String(run.first_teaching_at),
@@ -244,18 +412,40 @@ export function createFeedingTools(
             template,
           }).length
         : 1;
-      const details = {
-        ...computeSopMeal(
-          params.activeHeadCount,
-          modelMeal,
-          template,
-          scheduledMealCount,
-          0,
-        ),
-        basis:
-          "数量权威顺序为 SOP 直接总量、SOP 参数可推导总量、feeding-model + V5-Lite 兜底；时间由冻结 SOP 排定。",
-      };
-      return record(context, "compute_sop_meal", details);
+      const firstTeachingLocal = run
+        ? localTimeAt(String(run.first_teaching_at), finiteNumber(template.utcOffsetMinutes, 480))
+        : template.preferredFirstTeachingLocal;
+      const directTotal = finiteNumber(template.teachingDirectTotalPowderGrams, 0);
+      const sop = directTotal > 0
+        ? { directTotalPowderGrams: directTotal, mealCount: scheduledMealCount }
+        : {
+            powderGramsPerTwentyHeadsPerMeal: template.teachingPowderGramsPerTwenty,
+            mealCount: scheduledMealCount,
+          };
+      const teachingDecision = computeDayDecision({
+        ...decisionInput(state, state.currentDayAge, "timed_quantity"),
+        sop,
+        teachingProgram: {
+          enabled: template.teachingProgramEnabled !== false,
+          firstTeachingLocal,
+          intervalHours: finiteNumber(template.teachingIntervalHours, 3),
+          endLocal: template.teachingProgramEndLocal ?? "08:00",
+        },
+      });
+      return record(context, "compute_sop_meal", {
+        teachingDecision,
+        fullFeedingCurve: production.fullFeedingCurve,
+        deviceModes: production.deviceModes,
+        singlePowderGrams: teachingDecision.setting.singlePowderGrams,
+        quantityAuthorityPriority: QUANTITY_AUTHORITY,
+        programEndsAt: "次日 08:00（含 08:00 餐与随后人工巡栏）",
+      }, {
+        sopVersion: teachingDecision.evidence.sopVersion,
+        modelVersion: teachingDecision.evidence.modelVersion,
+        calculationDate: teachingDecision.evidence.calculationDate,
+        basis: "computeDayDecision 按 SOP 直接总量、SOP 参数推导、模型兜底的固定优先级计算教奶程序。",
+        evidence: teachingDecision.evidence,
+      });
     },
   };
 
@@ -396,9 +586,10 @@ export function createFeedingTools(
       const params = rawParams as { decisionType: string; title: string };
       const run = await currentRun(context);
       if (!run) throw new Error("NBJ_SOP_RUN_NOT_FOUND");
-      const quality = context.evidence.get("check_data_quality") as
-        | { mayDraftStandardDecision?: boolean; exceptionMode?: boolean }
+      const qualityEnvelope = context.evidence.get("check_data_quality") as
+        | { data?: { mayDraftStandardDecision?: boolean; exceptionMode?: boolean } }
         | undefined;
+      const quality = qualityEnvelope?.data;
       if (!quality) throw new Error("NBJ_AGENT_DETERMINISTIC_EVIDENCE_REQUIRED");
       const evidence = Object.fromEntries(context.evidence);
       const exceptionMode = quality.exceptionMode === true;
@@ -434,6 +625,64 @@ export function createFeedingTools(
     },
   };
 
+  const previewDiarrhea: AgentTool = {
+    name: "preview_diarrhea_adjustment",
+    label: "预览腹泻调整",
+    description: "先调用确定性决策核心，按腹泻档位、设备累计实际下粉量和剩余餐次生成未生效的设备调整草案；严重异常转人工处置。",
+    parameters: Type.Object({
+      grades: Type.Array(Type.Union([
+        Type.Literal("none"),
+        Type.Literal("mild"),
+        Type.Literal("moderate"),
+        Type.Literal("severe"),
+      ]), { minItems: 1, maxItems: 10000 }),
+      cumulativePowderGrams: Type.Number({ minimum: 0 }),
+      observedAt: Type.String({ minLength: 1, maxLength: 80 }),
+      remainingMealTimes: Type.Optional(Type.Array(
+        Type.String({ pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" }),
+        { maxItems: 32 },
+      )),
+    }),
+    execute: async (_id, rawParams) => {
+      const params = rawParams as {
+        grades: DiarrheaGrade[];
+        cumulativePowderGrams: number;
+        observedAt: string;
+        remainingMealTimes?: string[];
+      };
+      const production = await productionDecisionsForBatch(context);
+      const preview = previewDiarrheaAdjustment({
+        decision: production.selectedDecision,
+        grades: params.grades,
+        cumulativePowderGrams: params.cumulativePowderGrams,
+        observedAt: params.observedAt,
+        remainingMealTimes: params.remainingMealTimes,
+      });
+      const severe = params.grades.includes("severe");
+      return record(context, "preview_diarrhea_adjustment", {
+        decision: preview,
+        deviceOperation: {
+          mode: preview.setting.mode,
+          remainingDailyPowderGrams: preview.setting.dailyPowderGrams,
+          singlePowderGrams: preview.setting.singlePowderGrams,
+          timedMeals: preview.setting.timedMeals,
+          clearFreeFeedingWindows: true,
+          requiresHumanApproval: true,
+          manualDispositionRequired: severe,
+        },
+        severeException: severe
+          ? "严重异常：暂停常规增量，执行现场检查并进入人工处置。"
+          : null,
+      }, {
+        sopVersion: preview.evidence.sopVersion,
+        modelVersion: preview.evidence.modelVersion,
+        calculationDate: preview.evidence.calculationDate,
+        basis: "previewDiarrheaAdjustment 使用设备累计实际下粉量，只重排剩余定时餐；预览不自动生效。",
+        evidence: preview.evidence,
+      });
+    },
+  };
+
   return [
     getBatchContext,
     getTodayTimeline,
@@ -444,5 +693,6 @@ export function createFeedingTools(
     laggard,
     knowledge,
     draftDecision,
+    previewDiarrhea,
   ];
 }
