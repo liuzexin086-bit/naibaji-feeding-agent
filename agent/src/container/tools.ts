@@ -21,14 +21,73 @@ import {
   supabaseRest,
   type SupabaseRuntime,
 } from "../shared/supabase-rest.js";
+import type { SqliteLocalStore } from "../local-db/index.js";
+
+export type AgentToolStorage =
+  | { backend: "local"; store: SqliteLocalStore }
+  | { backend: "supabase"; env: SupabaseRuntime; token: string };
 
 export interface AgentRequestContext {
-  env: SupabaseRuntime;
-  token: string;
+  storage: AgentToolStorage;
   userId: string;
   batchId: string;
   sessionId: string;
   evidence: Map<string, unknown>;
+}
+
+interface BatchRecord {
+  id?: string;
+  config?: Record<string, unknown>;
+  records?: Array<Record<string, unknown>>;
+  current_day_index?: number;
+  control_start_day?: number;
+  status?: string;
+  revision?: number;
+  updated_at?: string;
+}
+
+function localStorageUnavailable(): never {
+  throw new Error("NBJ_LOCAL_STORAGE_UNAVAILABLE");
+}
+
+async function loadBatch(context: AgentRequestContext): Promise<BatchRecord | null> {
+  if (context.storage.backend === "supabase") {
+    const rows = await supabaseRest<BatchRecord[]>(
+      context.storage.env,
+      context.storage.token,
+      `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=id,config,records,current_day_index,control_start_day,status,revision,updated_at&limit=1`,
+    );
+    return rows[0] ?? null;
+  }
+  try {
+    const batch = context.storage.store.getBatch(context.userId, context.batchId);
+    if (!batch) return null;
+    const data = batch.data as BatchRecord;
+    return {
+      ...data,
+      id: batch.batchId,
+      current_day_index: data.current_day_index ?? batch.currentDay,
+      status: batch.status,
+      revision: batch.revision,
+      updated_at: batch.updatedAt,
+    };
+  } catch {
+    return localStorageUnavailable();
+  }
+}
+
+async function loadSopTasks(
+  context: AgentRequestContext,
+  run: Record<string, unknown> | null,
+  openOnly: boolean,
+): Promise<Array<Record<string, unknown>>> {
+  if (!run || context.storage.backend === "local") return [];
+  const status = openOnly ? "&status=in.(pending,scheduled,overdue,exception)" : "";
+  return supabaseRest<Array<Record<string, unknown>>>(
+    context.storage.env,
+    context.storage.token,
+    `/rest/v1/feeding_sop_events?run_id=eq.${encodeURIComponent(String(run.id))}${status}&select=*&order=scheduled_at.asc,sequence.asc`,
+  );
 }
 
 export const APPROVED_FEEDING_TOOL_NAMES = [
@@ -89,9 +148,10 @@ function record<T>(
 }
 
 async function currentRun(context: AgentRequestContext) {
+  if (context.storage.backend === "local") return null;
   const rows = await supabaseRest<Array<Record<string, unknown>>>(
-    context.env,
-    context.token,
+    context.storage.env,
+    context.storage.token,
     `/rest/v1/feeding_sop_runs?batch_id=eq.${encodeURIComponent(context.batchId)}&status=in.(active,paused)&select=*&order=started_at.desc&limit=1`,
   );
   const run = rows[0] ?? null;
@@ -186,18 +246,7 @@ async function batchDecisionState(
     dayAge: number;
   }> = {},
 ) {
-  const batches = await supabaseRest<Array<{
-    config?: Record<string, unknown>;
-    records?: Array<Record<string, unknown>>;
-    current_day_index?: number;
-    control_start_day?: number;
-    revision?: number;
-  }>>(
-    context.env,
-    context.token,
-    `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=config,records,current_day_index,control_start_day,revision&limit=1`,
-  );
-  const batch = batches[0];
+  const batch = await loadBatch(context);
   if (!batch) throw new Error("NBJ_BATCH_NOT_FOUND");
   const config = batch.config ?? {};
   const run = await currentRun(context);
@@ -299,24 +348,14 @@ export function createFeedingTools(
     description: "读取当前用户的批次、SOP run、revision、阶段和未完成任务。",
     parameters: Type.Object({}),
     execute: async () => {
-      const batches = await supabaseRest<Array<Record<string, unknown>>>(
-        context.env,
-        context.token,
-        `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=id,config,records,current_day_index,status,revision,updated_at&limit=1`,
-      );
+      const batch = await loadBatch(context);
       const run = await currentRun(context);
-      const tasks = run
-        ? await supabaseRest<Array<Record<string, unknown>>>(
-            context.env,
-            context.token,
-            `/rest/v1/feeding_sop_events?run_id=eq.${encodeURIComponent(String(run.id))}&status=in.(pending,scheduled,overdue,exception)&select=*&order=scheduled_at.asc,sequence.asc`,
-          )
-        : [];
-      const productionPlan = batches[0]
+      const tasks = await loadSopTasks(context, run, true);
+      const productionPlan = batch
         ? await productionDecisionsForBatch(context)
         : null;
       return record(context, "get_batch_context", {
-        batch: batches[0] ?? null,
+        batch,
         run,
         openTasks: tasks,
         fullFeedingCurve: productionPlan?.fullFeedingCurve ?? null,
@@ -338,13 +377,7 @@ export function createFeedingTools(
     parameters: Type.Object({}),
     execute: async () => {
       const run = await currentRun(context);
-      const tasks = run
-        ? await supabaseRest<Array<Record<string, unknown>>>(
-            context.env,
-            context.token,
-            `/rest/v1/feeding_sop_events?run_id=eq.${encodeURIComponent(String(run.id))}&select=*&order=scheduled_at.asc,sequence.asc`,
-          )
-        : [];
+      const tasks = await loadSopTasks(context, run, false);
       return record(context, "get_today_timeline", {
         calculationDate: new Date().toISOString().slice(0, 10),
         sopVersion: run?.template_version ?? DEFAULT_SOP_TEMPLATE.version,
@@ -601,9 +634,12 @@ export function createFeedingTools(
         requiresHumanApproval: true,
         controlsEquipment: false,
       };
+      if (context.storage.backend !== "supabase") {
+        throw new Error("NBJ_LOCAL_DECISION_DRAFT_UNAVAILABLE");
+      }
       const inserted = await supabaseInsert<Array<Record<string, unknown>>>(
-        context.env,
-        context.token,
+        context.storage.env,
+        context.storage.token,
         "feeding_agent_decisions",
         {
           id: crypto.randomUUID(),

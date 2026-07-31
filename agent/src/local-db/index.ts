@@ -449,6 +449,24 @@ export class SqliteLocalStore implements LocalStore {
     return sessionFromRow(row);
   }
 
+  getSession(
+    userId: string,
+    batchId: string,
+    sessionId: string,
+  ): AgentSession | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(`
+      SELECT * FROM agent_sessions
+      WHERE user_id = ? AND batch_id = ? AND id = ?
+      LIMIT 1
+    `).get(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      requiredText(sessionId, "sessionId"),
+    ) as Row | undefined;
+    return row ? sessionFromRow(row) : null;
+  }
+
   appendMessage(input: AppendMessageInput): AgentMessage {
     this.#ensureOpen();
     const userId = requiredText(input.userId, "userId");
@@ -509,7 +527,7 @@ export class SqliteLocalStore implements LocalStore {
     const rows = this.#database.prepare(`
       SELECT * FROM agent_messages
       WHERE user_id = ? AND batch_id = ? AND session_id = ?
-      ORDER BY created_at ASC, id ASC
+      ORDER BY created_at ASC, rowid ASC
       LIMIT ?
     `).all(normalizedUserId, normalizedBatchId, normalizedSessionId, limit) as Row[];
     return rows.map(messageFromRow);

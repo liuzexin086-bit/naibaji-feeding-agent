@@ -13,6 +13,14 @@ import {
   createSupabaseAgentMessageStore,
   type StoredAgentMessage,
 } from "../agent/message-store.js";
+import {
+  createLocalAgentMessageStore,
+  openLocalAgentStore,
+  requireLocalAgentSession,
+  resolveAgentStorageConfig,
+  type AgentStorageConfig,
+} from "../agent/local-message-store.js";
+import type { SqliteLocalStore } from "../local-db/index.js";
 import { writeChatSse } from "../agent/sse.js";
 import {
   APPROVED_FEEDING_TOOL_NAMES,
@@ -97,7 +105,11 @@ function restoredMessages(
   });
 }
 
-interface ContainerEnv extends SupabaseRuntime {
+interface ContainerEnv {
+  AGENT_STORAGE_BACKEND?: string;
+  LOCAL_DB_PATH?: string;
+  SUPABASE_URL?: string;
+  SUPABASE_PUBLISHABLE_KEY?: string;
   AGENT_GATEWAY_SECRET: string;
   LLM_PROVIDER: string;
   LLM_MODEL: string;
@@ -106,6 +118,10 @@ interface ContainerEnv extends SupabaseRuntime {
   CONFIG_ENCRYPTION_KEY?: string;
   AGENT_CONFIG_PATH?: string;
 }
+
+type ContainerStorage =
+  | { backend: "local"; store: SqliteLocalStore }
+  | { backend: "supabase"; runtime: SupabaseRuntime };
 
 function defaultBaseUrl(provider: "anthropic" | "openai"): string {
   return provider === "openai"
@@ -228,10 +244,8 @@ async function validateProviderConnection(
   }
 }
 
-function runtimeEnv(): ContainerEnv {
+function runtimeEnv(): { env: ContainerEnv; storageConfig: AgentStorageConfig } {
   const required = [
-    "SUPABASE_URL",
-    "SUPABASE_PUBLISHABLE_KEY",
     "AGENT_GATEWAY_SECRET",
     "LLM_PROVIDER",
     "LLM_MODEL",
@@ -239,7 +253,16 @@ function runtimeEnv(): ContainerEnv {
   for (const name of required) {
     if (!process.env[name]) throw new Error(`Missing environment variable ${name}`);
   }
-  return process.env as unknown as ContainerEnv;
+  return {
+    env: process.env as unknown as ContainerEnv,
+    storageConfig: resolveAgentStorageConfig(process.env),
+  };
+}
+
+function initializeStorage(config: AgentStorageConfig): ContainerStorage {
+  return config.backend === "local"
+    ? { backend: "local", store: openLocalAgentStore(config.localDbPath) }
+    : { backend: "supabase", runtime: config.supabase };
 }
 
 async function readBody(request: import("node:http").IncomingMessage): Promise<string> {
@@ -252,6 +275,7 @@ async function handleChat(
   request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
   env: ContainerEnv,
+  storage: ContainerStorage,
 ): Promise<void> {
   if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
     response.writeHead(403).end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
@@ -335,23 +359,34 @@ async function handleChat(
       (provider === "openai" ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY);
     if (!apiKey) throw new Error("NBJ_AGENT_PROVIDER_UNAVAILABLE");
 
-    const sessions = await supabaseRest<Array<{
-      id: string;
-      batch_id: string;
-      status: string;
-    }>>(
-      env,
-      token,
-      `/rest/v1/feeding_agent_sessions?id=eq.${encodeURIComponent(body.sessionId)}&select=id,batch_id,status&limit=1`,
-    );
-    const session = sessions[0];
-    if (!session || session.status !== "active") {
-      throw new Error("NBJ_AGENT_SESSION_NOT_FOUND");
+    if (storage.backend === "local") {
+      requireLocalAgentSession({
+        store: storage.store,
+        userId,
+        batchId: body.batchId,
+        sessionId: body.sessionId,
+      });
+    } else {
+      const sessions = await supabaseRest<Array<{
+        id: string;
+        batch_id: string;
+        status: string;
+      }>>(
+        storage.runtime,
+        token,
+        `/rest/v1/feeding_agent_sessions?id=eq.${encodeURIComponent(body.sessionId)}&select=id,batch_id,status&limit=1`,
+      );
+      const session = sessions[0];
+      if (!session || session.status !== "active") {
+        throw new Error("NBJ_AGENT_SESSION_NOT_FOUND");
+      }
+      if (session.batch_id !== body.batchId) {
+        throw new Error("NBJ_AGENT_SESSION_BATCH_MISMATCH");
+      }
     }
-    if (session.batch_id !== body.batchId) {
-      throw new Error("NBJ_AGENT_SESSION_BATCH_MISMATCH");
-    }
-    const store = createSupabaseAgentMessageStore({ env, token });
+    const store = storage.backend === "local"
+      ? createLocalAgentMessageStore({ store: storage.store, userId, batchId: body.batchId })
+      : createSupabaseAgentMessageStore({ env: storage.runtime, token });
     const lastEventHeader = request.headers["last-event-id"];
     const lastEventId = (Array.isArray(lastEventHeader)
       ? lastEventHeader[0]
@@ -425,7 +460,12 @@ async function handleChat(
         systemPrompt: SYSTEM_PROMPT,
         model,
         thinkingLevel: "low",
-        tools: createFeedingTools(context),
+        tools: createFeedingTools({
+          ...context,
+          storage: storage.backend === "local"
+            ? { backend: "local", store: storage.store }
+            : { backend: "supabase", env: storage.runtime, token },
+        }),
         messages: history,
       },
       streamFn: (streamModel, streamContext, options) =>
@@ -605,9 +645,11 @@ async function handleAdminConfig(
   }
 }
 
-const env = runtimeEnv();
+const runtime = runtimeEnv();
+const env = runtime.env;
+const storage = initializeStorage(runtime.storageConfig);
 const port = Number(process.env.PORT ?? 8080);
-createServer(async (request, response) => {
+const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://container");
   if (url.pathname === "/health" || url.pathname === "/ping") {
     response.writeHead(200, { "content-type": "application/json" });
@@ -615,7 +657,7 @@ createServer(async (request, response) => {
     return;
   }
   if (request.method === "POST" && url.pathname === "/api/feeding-agent/chat") {
-    await handleChat(request, response, env);
+    await handleChat(request, response, env, storage);
     return;
   }
   if (
@@ -627,4 +669,16 @@ createServer(async (request, response) => {
   }
   response.writeHead(404, { "content-type": "application/json" });
   response.end(JSON.stringify({ code: "NBJ_AGENT_ROUTE_NOT_FOUND" }));
-}).listen(port, "0.0.0.0");
+});
+
+server.once("close", () => {
+  if (storage.backend === "local") storage.store.close();
+});
+
+function shutdown(): void {
+  server.close();
+}
+
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);
+server.listen(port, "0.0.0.0");
