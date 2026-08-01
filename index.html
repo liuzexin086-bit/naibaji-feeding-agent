@@ -1,0 +1,3881 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>奶爸机 — 超早期断奶数据采集</title>
+<script src="chart.umd.min.js"></script>
+<script src="feeding-model.min.js"></script>
+<script src="v5lite-model.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase-client.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #f5f6fa; color: #1a1d2e; padding: 20px;
+  }
+  .container { max-width: 1400px; margin: 0 auto; }
+
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 2px; }
+  .subtitle { color: #6b7280; font-size: 12px; margin-bottom: 16px; }
+
+  .panel {
+    background: #fff; border-radius: 12px; padding: 16px 20px;
+    margin-bottom: 14px; border: 1px solid #e0e3eb;
+  }
+  .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 12px; }
+
+  .grid-4 { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+  .grid-5 { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+
+  .field { display: flex; flex-direction: column; gap: 2px; }
+  .field label { font-size: 11px; color: #6b7280; font-weight: 500; }
+  .field input, .field select {
+    padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 13px; outline: none; transition: 0.15s;
+  }
+  .field input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.15); }
+  .field .hint { font-size: 10px; color: #9ca3af; }
+  .field input:disabled { background: #f3f4f6; color: #6b7280; cursor: not-allowed; }
+
+  .btn {
+    padding: 8px 18px; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.12s;
+  }
+  .btn-primary { background: #3b82f6; color: #fff; }
+  .btn-primary:hover { background: #2563eb; }
+  .btn-success { background: #22c55e; color: #fff; }
+  .btn-success:hover { background: #16a34a; }
+  .btn-danger { background: #ef4444; color: #fff; }
+  .btn-danger:hover { background: #dc2626; }
+  .btn-outline { background: #fff; color: #6b7280; border: 1px solid #d1d5db; padding: 7px 16px; }
+  .btn-outline:hover { background: #f9fafb; }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  .shadow-card {
+    background: #f0f7ff; border: 1px solid #bfdbfe; border-radius: 8px;
+    padding: 10px; margin-top: 6px; font-size: 12px;
+  }
+  .shadow-card .label { color: #6b7280; font-size: 10px; }
+  .shadow-card .val { font-weight: 700; font-size: 14px; }
+  .shadow-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+  .shadow-risk-high { color: #dc2626; }
+  .shadow-risk-mid { color: #d97706; }
+  .shadow-risk-low { color: #15803d; }
+
+  .summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
+  .summary-card {
+    background: #fff; border-radius: 8px; padding: 12px;
+    border: 1px solid #e0e3eb;
+  }
+  .summary-card .num { font-size: 20px; font-weight: 700; }
+  .summary-card .lbl { font-size: 11px; color: #6b7280; margin-top: 1px; }
+  .summary-card.green .num { color: #22c55e; }
+  .summary-card.orange .num { color: #f97316; }
+  .summary-card.purple .num { color: #8b5cf6; }
+
+  .weight-standard-panel { padding: 10px 16px; }
+  .weight-standard-title { font-size: 12px; font-weight: 600; margin-bottom: 8px; }
+  .weight-standard-grid {
+    display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 6px;
+  }
+  .weight-standard-item {
+    background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 6px;
+    min-width: 0; padding: 6px 4px; text-align: center;
+  }
+  .weight-standard-day { display: block; color: #4b5563; font-size: 11px; font-weight: 600; }
+  .weight-standard-value { display: block; color: #1f2937; font-size: 11px; margin-top: 2px; }
+  @media (max-width: 1200px) {
+    .weight-standard-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
+  @media (max-width: 700px) {
+    .weight-standard-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 420px) {
+    .weight-standard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  .header-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+  .header-bar select {
+    padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px;
+    font-size: 13px; min-width: 180px;
+  }
+  .status-badge {
+    display: inline-block; padding: 2px 10px; border-radius: 10px;
+    font-size: 11px; font-weight: 600;
+  }
+  .status-badge.active { background: #dbeafe; color: #1e40af; }
+  .status-badge.completed { background: #dcfce7; color: #166534; }
+
+  .day-progress {
+    display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+    padding: 10px 0; border-bottom: 1px solid #e5e7eb; margin-bottom: 12px;
+  }
+  .day-dot {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%;
+    font-size: 11px; font-weight: 600; cursor: default;
+    border: 2px solid #d1d5db; color: #9ca3af; background: #fff;
+  }
+  .day-dot.past { background: #22c55e; border-color: #22c55e; color: #fff; }
+  .day-dot.current { background: #3b82f6; border-color: #3b82f6; color: #fff; transform: scale(1.1); }
+  .day-conn { width: 10px; height: 2px; background: #d1d5db; }
+  .day-conn.pass { background: #22c55e; }
+
+  .today-card {
+    background: #eff6ff; border: 2px solid #3b82f6; border-radius: 10px;
+    padding: 14px; margin-bottom: 12px;
+  }
+  .today-card .day-title { font-size: 15px; font-weight: 700; margin-bottom: 6px; }
+  .today-card .plan-info { font-size: 12px; color: #4b5563; margin-bottom: 10px; }
+  .today-card .section-label { font-size: 12px; font-weight: 600; color: #374151; margin: 8px 0 4px; }
+  .today-card.readonly { background: #f9fafb; border-color: #d1d5db; }
+
+  .chart-wrap { position: relative; height: 260px; min-width: 0; }
+  .chart-wrap canvas { max-width: 100%; }
+  .chart-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+  .chart-grid-2 > div { min-width: 0; }
+  @media (max-width: 900px) { .chart-grid-2 { grid-template-columns: 1fr; } }
+  .chart-fallback {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; color: #9ca3af; font-size: 13px; text-align: center; padding: 20px;
+  }
+
+  .table-wrap { overflow-x: auto; margin-top: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th {
+    background: #f0f2f8; text-align: left; padding: 6px 8px;
+    font-weight: 600; font-size: 11px; color: #6b7280;
+    border-bottom: 2px solid #e0e3eb; white-space: nowrap;
+  }
+  td { padding: 5px 8px; border-bottom: 1px solid #f0f0f5; white-space: nowrap; }
+  tr.past td { background: #f0fdf4; }
+
+  .err-msg {
+    background: #fee2e2; border: 1px solid #fecaca; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: #991b1b; margin-bottom: 12px;
+  }
+  .success-msg {
+    background: #dcfce7; border: 1px solid #bbf7d0; border-radius: 8px;
+    padding: 10px 14px; font-size: 13px; color: #166534; margin-bottom: 12px;
+  }
+
+  /* 新批次弹窗 */
+  .modal-overlay {
+    display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4);
+    z-index: 1000; align-items: center; justify-content: center;
+  }
+  .modal-overlay.show { display: flex; }
+  .modal-box {
+    background: #fff; border-radius: 16px; padding: 28px 32px;
+    width: min(520px, calc(100vw - 24px)); max-height: calc(100dvh - 24px);
+    overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+  }
+  .modal-box > * { min-width: 0; }
+  .modal-box h2 { font-size: 18px; font-weight: 700; margin-bottom: 20px; }
+  .modal-box .field { margin-bottom: 14px; }
+  .modal-box .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+  .modal-box input, .modal-box select { width: 100%; min-width: 0; }
+  .modal-form-grid { display: grid; gap: 12px; }
+  .modal-form-grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .modal-form-grid .field { margin-bottom: 0; }
+  #newBatchModal .modal-form-grid + .modal-form-grid { margin-top: 12px; }
+
+  .panel-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+  .panel-title-row .panel-title { margin-bottom: 0; }
+  .table-screenshot-hint { color: #9ca3af; font-size: 11px; white-space: nowrap; }
+  .table-wrap.long-press-active { outline: 2px solid rgba(59, 130, 246, 0.35); outline-offset: 3px; border-radius: 6px; }
+  .screenshot-preview-box { width: min(920px, calc(100vw - 24px)); }
+  .screenshot-preview-body { max-height: 65vh; overflow: auto; text-align: center; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; }
+  .screenshot-preview-body img { display: block; max-width: 100%; max-height: 65vh; margin: 0 auto; object-fit: contain; }
+
+  @media (max-width: 520px) {
+    .modal-overlay { align-items: flex-start; padding: 12px; overflow-y: auto; }
+    .modal-box { width: 100%; max-height: calc(100dvh - 24px); padding: 20px 16px; border-radius: 12px; }
+    .modal-form-grid-2 { grid-template-columns: 1fr; }
+    #newBatchModal .modal-actions {
+      position: sticky; bottom: -20px; background: #fff; padding: 12px 0 2px;
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); z-index: 1;
+    }
+    #newBatchModal .modal-actions .btn { width: 100%; min-height: 42px; }
+    .table-screenshot-hint { font-size: 10px; }
+  }
+  @media (hover: none) and (pointer: coarse) {
+    #planTable {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+  }
+
+  .auth-screen {
+    min-height: calc(100vh - 40px); display: flex; align-items: center;
+    justify-content: center; padding: 20px;
+  }
+  [hidden] { display: none !important; }
+  .auth-card {
+    width: min(420px, 100%); background: #fff; border: 1px solid #e0e3eb;
+    border-radius: 16px; padding: 32px; box-shadow: 0 16px 45px rgba(31, 41, 55, 0.08);
+  }
+  .auth-card h1 { font-size: 23px; margin-bottom: 6px; }
+  .auth-card .subtitle { font-size: 13px; margin-bottom: 24px; }
+  .auth-card .field { margin-bottom: 15px; }
+  .auth-card .field input { width: 100%; padding: 10px 12px; }
+  .auth-card .btn { width: 100%; padding: 10px 18px; }
+  .auth-message { min-height: 20px; margin-top: 12px; font-size: 12px; line-height: 1.5; }
+  .auth-message.error { color: #b91c1c; }
+  .auth-message.info { color: #2563eb; }
+  .user-bar {
+    display: inline-flex; align-items: center; gap: 8px; margin-left: auto;
+    font-size: 12px; color: #4b5563; white-space: nowrap;
+  }
+  .user-email { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+  .sync-status { font-size: 12px; color: #b45309; }
+  @media (max-width: 640px) {
+    body { padding: 10px; }
+    .auth-screen { min-height: calc(100vh - 20px); padding: 10px; }
+    .auth-card { padding: 24px 20px; }
+    .user-bar { margin-left: 0; width: 100%; justify-content: space-between; }
+  }
+
+  .sop-toolbar { display:flex; gap:8px; align-items:end; flex-wrap:wrap; }
+  .sop-toolbar .field { min-width:180px; }
+  .sop-summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:8px; margin-top:12px; }
+  .sop-stat { background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; }
+  .sop-stat strong { display:block; font-size:15px; margin-top:3px; }
+  .sop-stat span { color:#64748b; font-size:10px; }
+  .sop-task-list { display:grid; gap:7px; margin-top:12px; }
+  .sop-task { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; align-items:center; border:1px solid #e5e7eb; border-radius:8px; padding:9px 10px; }
+  .sop-task.overdue { border-color:#fca5a5; background:#fff7f7; }
+  .sop-task.completed { opacity:.65; }
+  .sop-task.scheduled { border-color:#bfdbfe; background:#eff6ff; }
+  .sop-task-title { font-size:12px; font-weight:600; }
+  .sop-task-meta { font-size:10px; color:#64748b; margin-top:3px; line-height:1.45; }
+  .sop-task-actions { display:flex; gap:5px; }
+  .sop-task-actions .btn { padding:5px 8px; font-size:11px; }
+  .sop-quick-actions { display:flex; gap:6px; flex-wrap:wrap; margin-top:10px; }
+  .sop-current-step { border:2px solid #93c5fd; background:#eff6ff; padding:14px; }
+  .sop-step-label { color:#1d4ed8; font-size:11px; font-weight:700; letter-spacing:.04em; }
+  .sop-waiting { color:#92400e; background:#fef3c7; border-radius:6px; padding:5px 8px; font-size:11px; }
+  .sop-history { margin-top:10px; border-top:1px solid #e5e7eb; padding-top:9px; }
+  .sop-history summary { cursor:pointer; color:#64748b; font-size:12px; font-weight:600; }
+  .actual-confirm { display:flex; align-items:flex-start; gap:8px; margin-top:7px; color:#475569; font-size:11px; line-height:1.4; cursor:pointer; }
+  .actual-confirm input { width:16px; height:16px; flex:0 0 auto; margin-top:1px; }
+  .agent-launcher { position:fixed; right:20px; bottom:20px; z-index:800; box-shadow:0 8px 25px rgba(37,99,235,.3); }
+  .agent-drawer { position:fixed; z-index:1200; top:0; right:0; width:min(430px,100vw); height:100dvh; background:#fff; border-left:1px solid #dbe2ea; box-shadow:-14px 0 35px rgba(15,23,42,.15); transform:translateX(105%); transition:transform .2s ease; display:flex; flex-direction:column; }
+  .agent-drawer.open { transform:translateX(0); }
+  .agent-head { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid #e5e7eb; }
+  .agent-log { flex:1; overflow:auto; padding:14px; background:#f8fafc; }
+  .agent-message { margin-bottom:9px; padding:9px 11px; border-radius:9px; font-size:12px; line-height:1.6; white-space:pre-wrap; }
+  .agent-message.user { background:#dbeafe; margin-left:35px; }
+  .agent-message.assistant { background:#fff; border:1px solid #e5e7eb; margin-right:20px; white-space:normal; }
+  .agent-message.assistant p + p, .agent-message.assistant ul + p, .agent-message.assistant ol + p { margin-top:7px; }
+  .agent-message.assistant ul, .agent-message.assistant ol { padding-left:20px; margin:5px 0; }
+  .agent-message.assistant h1, .agent-message.assistant h2, .agent-message.assistant h3 { font-size:13px; margin:7px 0 4px; }
+  .agent-message.assistant code { background:#f1f5f9; border-radius:4px; padding:1px 4px; font-family:ui-monospace,SFMono-Regular,Consolas,monospace; }
+  .agent-message.assistant pre { overflow:auto; background:#0f172a; color:#e2e8f0; border-radius:7px; padding:9px; margin:6px 0; }
+  .agent-message.assistant pre code { background:transparent; padding:0; }
+  .agent-message.assistant a { color:#2563eb; overflow-wrap:anywhere; }
+  .agent-thinking { display:inline-flex; align-items:center; gap:4px; color:#64748b; min-height:20px; }
+  .agent-thinking i { width:6px; height:6px; border-radius:50%; background:#3b82f6; animation:agentThinking 1.2s infinite ease-in-out; }
+  .agent-thinking i:nth-child(2) { animation-delay:.15s; }
+  .agent-thinking i:nth-child(3) { animation-delay:.3s; }
+  @keyframes agentThinking { 0%,60%,100% { transform:translateY(0); opacity:.35; } 30% { transform:translateY(-4px); opacity:1; } }
+  .agent-message.system { background:#fef3c7; color:#92400e; }
+  .agent-compose { padding:12px; border-top:1px solid #e5e7eb; display:grid; gap:8px; }
+  .agent-compose textarea { width:100%; min-height:72px; resize:vertical; border:1px solid #cbd5e1; border-radius:8px; padding:9px; font:inherit; font-size:12px; }
+  @media (max-width:640px) {
+    .sop-task { grid-template-columns:1fr; }
+    .sop-task-actions { justify-content:flex-end; }
+    .agent-launcher { right:12px; bottom:12px; }
+  }
+</style>
+</head>
+<body>
+<div id="loadingScreen" class="auth-screen">
+  <div class="auth-card" style="text-align:center;">
+    <h1>奶爸机数据系统</h1>
+    <p class="subtitle">正在加载奶爸机数据系统……</p>
+    <p id="loadingMessage" class="auth-message info">正在验证身份……</p>
+  </div>
+</div>
+
+<div id="loginScreen" class="auth-screen" hidden>
+  <form class="auth-card" id="loginForm">
+    <h1>奶爸机数据系统</h1>
+    <p class="subtitle">超早期断奶数据采集与智能饲喂分析</p>
+    <div class="field">
+      <label for="loginEmail">邮箱</label>
+      <input id="loginEmail" type="email" autocomplete="email" required>
+    </div>
+    <div class="field">
+      <label for="loginPassword">密码</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required>
+    </div>
+    <button id="loginButton" class="btn btn-primary" type="submit">登录</button>
+    <p id="loginMessage" class="auth-message" aria-live="polite"></p>
+  </form>
+</div>
+
+<div class="modal-overlay" id="legacyMigrationModal" role="dialog" aria-modal="true" aria-labelledby="legacyMigrationTitle">
+  <div class="modal-box">
+    <h2 id="legacyMigrationTitle">发现本机旧批次数据</h2>
+    <p id="legacyMigrationText" style="font-size:13px;line-height:1.7;color:#4b5563;">
+      是否迁移到当前账号？
+    </p>
+    <p style="font-size:11px;line-height:1.6;color:#9ca3af;margin-top:8px;">
+      确认后，这批旧数据只会归属当前账号；其他账号无法查看或迁移。
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" type="button" onclick="respondLegacyMigration(false)">暂不迁移</button>
+      <button class="btn btn-primary" type="button" onclick="respondLegacyMigration(true)">确认迁移</button>
+    </div>
+  </div>
+</div>
+
+<div id="appRoot" hidden>
+<div class="container">
+
+<h1>奶爸机 — 超早期断奶数据采集</h1>
+<p class="subtitle">录入真实数据，用于深度学习训练，优化饲喂模型</p>
+
+<!-- 顶部：批次选择 + 状态 -->
+<div class="header-bar">
+  <select id="batchSelector" onchange="switchBatch(this.value)" style="font-weight:600;">
+    <option value="">— 选择批次 —</option>
+  </select>
+  <button class="btn btn-primary" onclick="showNewBatchModal()">+ 新建批次</button>
+  <span id="batchStatusBadge"></span>
+  <span id="progressLabel" style="font-size:13px;color:#6b7280;margin-left:auto;"></span>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;cursor:pointer;">
+    <input type="checkbox" id="controlMode" onchange="toggleControl()" style="width:16px;height:16px;">
+    控奶模式
+  </label>
+  <label style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;cursor:pointer;">
+    <input type="checkbox" id="shadowMode" onchange="toggleShadow()" style="width:16px;height:16px;">
+    影子模式
+  </label>
+  <div class="user-bar">
+    <span id="syncStatus" class="sync-status"></span>
+    <span id="userEmail" class="user-email"></span>
+    <button class="btn btn-outline" type="button" onclick="signOut()" style="padding:5px 10px;">退出登录</button>
+  </div>
+</div>
+
+<!-- 消息区 -->
+<div id="msgArea"></div>
+
+<!-- 超早期断奶 SOP 今日流程 -->
+<div class="panel" id="sopTodayPanel">
+  <div class="panel-title-row">
+    <div class="panel-title">今日流程 · 超早期断奶 SOP</div>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.refresh()">刷新</button>
+  </div>
+  <div class="sop-toolbar" id="sopStartToolbar">
+    <div class="field">
+      <label>SOP 模板版本</label>
+      <select id="sopTemplateSelect"><option value="">正在读取模板…</option></select>
+    </div>
+    <div class="field">
+      <label>实际入栏时间</label>
+      <input id="sopAdmissionAt" type="datetime-local">
+    </div>
+    <button class="btn btn-primary" type="button" onclick="FeedingAgentUI.start()">冻结版本并启动</button>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.createDefaultTemplate()">管理员：创建默认版本</button>
+  </div>
+  <div id="sopStatusText" style="font-size:12px;color:#64748b;margin-top:10px;">请选择批次后读取现场流程。</div>
+  <div id="sopSummary" class="sop-summary"></div>
+  <div class="sop-quick-actions" id="sopQuickActions" hidden>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.quickRecord('feeding_active')">记录：主动抢奶</button>
+    <button class="btn btn-success" type="button" onclick="FeedingAgentUI.quickRecord('majority_confirmed')">确认：多数主动到槽</button>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.quickRecord('abdomen_full')">记录：腹部饱满</button>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.createLaggard()">标记掉队猪/补奶</button>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.quickRecord('device_ok')">记录：设备正常</button>
+    <button class="btn btn-danger" type="button" onclick="FeedingAgentUI.quickException()">健康/设备异常</button>
+  </div>
+  <div id="sopTaskList" class="sop-task-list"></div>
+</div>
+
+<!-- 新建批次弹窗 -->
+<div class="modal-overlay" id="newBatchModal">
+  <div class="modal-box">
+    <h2>新建批次</h2>
+
+    <div class="field">
+      <label>批次名称</label>
+      <input id="modalName" value="批次" style="width:100%;">
+    </div>
+    <div class="modal-form-grid modal-form-grid-2">
+      <div class="field">
+        <label>超早期断奶日龄</label>
+        <input id="modalStartAge" type="number" value="3" min="1" max="30">
+      </div>
+      <div class="field">
+        <label>最终断奶日龄</label>
+        <input id="modalEndAge" type="number" value="21" min="2" max="30">
+      </div>
+    </div>
+    <div class="modal-form-grid modal-form-grid-2">
+      <div class="field">
+        <label>初重 (kg/头)（不填则自动推算）</label>
+        <input id="modalStartWeight" type="number" step="0.05" min="0.1" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>断奶头数</label>
+        <input id="modalHeadCount" type="number" value="20" min="1">
+      </div>
+    </div>
+    <div class="modal-form-grid modal-form-grid-2">
+      <div class="field">
+        <label>健康状况</label>
+        <select id="modalHealthStatus">
+          <option value="normal">正常</option>
+          <option value="enteric-outbreak">腹泻疫情</option>
+          <option value="respiratory-outbreak">呼吸道疫情</option>
+          <option value="mixed">混合疫情</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>栏位编号</label>
+        <input id="modalFarmRoom" value="A-1" placeholder="如 A-3">
+      </div>
+      <div class="field">
+        <label>母猪平均胎次</label>
+        <input id="modalSowParity" type="number" value="3" step="0.5" min="1" max="10">
+      </div>
+      <div class="field">
+        <label>产子数</label>
+        <input id="modalLitterSize" type="number" value="12" step="1" min="1" max="30">
+      </div>
+    </div>
+
+    <div id="modalError" class="err-msg" style="display:none;"></div>
+
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="hideNewBatchModal()">取消</button>
+      <button class="btn btn-primary" onclick="confirmNewBatch()">确认创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 批次参数 -->
+<div class="panel" id="configPanel">
+  <div class="panel-title">批次设定</div>
+  <div class="grid-4">
+    <div class="field">
+      <label>批次名称</label>
+      <input id="batchName" disabled>
+    </div>
+    <div class="field">
+      <label>超早期断奶日龄</label>
+      <input id="startAge" type="number" min="1" max="30" disabled>
+    </div>
+    <div class="field">
+      <label>最终断奶日龄</label>
+      <input id="endAge" type="number" min="2" max="30" disabled>
+      <span class="hint" id="feedingDaysHint"></span>
+    </div>
+    <div class="field">
+      <label>初重 (kg/头)</label>
+      <input id="startWeight" type="number" step="0.05" min="0.1" disabled>
+    </div>
+    <div class="field">
+      <label>断奶头数</label>
+      <input id="headCount" type="number" min="1" disabled>
+    </div>
+    <div class="field">
+      <label>母猪平均胎次</label>
+      <input id="sowParity" disabled style="background:#f3f4f6;">
+    </div>
+    <div class="field">
+      <label>产子数</label>
+      <input id="litterSize" disabled style="background:#f3f4f6;">
+    </div>
+    <div class="field">
+      <label>健康状况</label>
+      <input id="healthStatus" disabled style="background:#f3f4f6;">
+    </div>
+    <div class="field">
+      <label>栏位编号</label>
+      <input id="farmRoom" disabled style="background:#f3f4f6;">
+    </div>
+  </div>
+  <div class="summary-grid" id="summaryGrid" style="margin-top:10px;"></div>
+</div>
+
+<!-- 体重标准参考 -->
+<div class="panel weight-standard-panel">
+  <div class="weight-standard-title">断奶体重标准</div>
+  <div class="weight-standard-grid" aria-label="断奶体重标准">
+    <div class="weight-standard-item"><span class="weight-standard-day">3d</span><span class="weight-standard-value">≥ 2.3 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">4d</span><span class="weight-standard-value">≥ 2.4 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">5d</span><span class="weight-standard-value">≥ 2.6 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">6d</span><span class="weight-standard-value">≥ 2.8 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">7d</span><span class="weight-standard-value">≥ 3.0 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">8d</span><span class="weight-standard-value">≥ 3.2 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">9d</span><span class="weight-standard-value">≥ 3.4 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">10d</span><span class="weight-standard-value">≥ 3.6 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">11d</span><span class="weight-standard-value">≥ 3.8 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">12d</span><span class="weight-standard-value">≥ 4.0 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">13d</span><span class="weight-standard-value">≥ 4.2 kg</span></div>
+    <div class="weight-standard-item"><span class="weight-standard-day">14d</span><span class="weight-standard-value">≥ 4.4 kg</span></div>
+  </div>
+</div>
+
+<!-- 每日录入 -->
+<div class="panel" id="dayPanel">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+    <div class="panel-title" style="margin:0;">每日数据录入</div>
+  </div>
+  <div class="day-progress" id="dayDots"></div>
+
+  <div id="todayCard" class="today-card">
+    <div class="day-title" id="todayTitle">—</div>
+    <div class="plan-info" id="todayPlan"></div>
+
+    <div class="section-label">实际饲喂数据</div>
+    <div class="grid-5">
+      <div class="field">
+        <label>总配奶量 (g) <span style="color:#ef4444;">*</span></label>
+        <input type="number" id="inputTotalMilk" step="1" min="0">
+        <label class="actual-confirm"><input type="checkbox" id="inputMilkConfirmed">已核对设备记录，以上数值为实际总配奶量</label>
+      </div>
+      <div class="field">
+        <label>执行情况</label>
+        <select id="inputExecutionStatus">
+          <option value="normal" selected>正常执行</option>
+          <option value="manual-stop">人工停机</option>
+          <option value="device-fault">设备故障</option>
+          <option value="maintenance">清洗维护</option>
+          <option value="power-off">停电</option>
+          <option value="other">其他异常</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>总教槽量 (g)</label>
+        <input type="number" id="inputTotalCreep" step="1" min="0" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>当前头数 <span style="color:#ef4444;">*</span></label>
+        <input type="number" id="inputHeadCount" step="1" min="1">
+      </div>
+      <div class="field">
+        <label>用药</label>
+        <select id="inputMedication">
+          <option value="none">无</option>
+          <option value="antibiotic">抗生素</option>
+          <option value="zinc-oxide">氧化锌</option>
+          <option value="probiotic">益生菌</option>
+          <option value="other">其他</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label">三等级生长观察（必填）</div>
+    <div class="grid-5">
+      <div class="field">
+        <label>教槽采食</label>
+        <select id="inputCreepLevel">
+          <option value="1">差</option>
+          <option value="2" selected>一般</option>
+          <option value="3">好</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>均匀度</label>
+        <select id="inputUniformityLevel">
+          <option value="1">差</option>
+          <option value="2" selected>一般</option>
+          <option value="3">好</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>长势</label>
+        <select id="inputGrowthLevel">
+          <option value="1">差</option>
+          <option value="2" selected>一般</option>
+          <option value="3">好</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="section-label">称重抽样（选填，大中小各称 3-5 头）</div>
+    <div class="grid-5">
+      <div class="field"><label>大猪均重 (kg)</label><input type="number" id="inputWtLarge" step="0.05" min="0" placeholder="均重"></div>
+      <div class="field"><label>大猪头数</label><input type="number" id="inputWtLargeN" value="0" step="1" min="0" placeholder="头数"></div>
+      <div class="field"><label>中猪均重 (kg)</label><input type="number" id="inputWtMid" step="0.05" min="0" placeholder="均重"></div>
+      <div class="field"><label>中猪头数</label><input type="number" id="inputWtMidN" value="0" step="1" min="0" placeholder="头数"></div>
+      <div class="field"><label>小猪均重 (kg)</label><input type="number" id="inputWtSmall" step="0.05" min="0" placeholder="均重"></div>
+      <div class="field"><label>小猪头数</label><input type="number" id="inputWtSmallN" value="0" step="1" min="0" placeholder="头数"></div>
+    </div>
+
+    <div class="section-label">腹泻记录（头数）</div>
+    <div class="grid-5">
+      <div class="field"><label>轻度</label><input type="number" id="inputDiarMild" value="0" step="1" min="0"></div>
+      <div class="field"><label>中度</label><input type="number" id="inputDiarMod" value="0" step="1" min="0"></div>
+      <div class="field"><label>重度</label><input type="number" id="inputDiarSev" value="0" step="1" min="0"></div>
+      <div class="field"><label>&nbsp;</label><div style="padding:7px 0;font-size:12px;color:#6b7280;" id="diarTotalDisplay">腹泻率: —</div></div>
+    </div>
+
+    <div class="section-label">死亡淘汰（选填）</div>
+    <div class="grid-5">
+      <div class="field">
+        <label>死亡头数</label>
+        <input type="number" id="inputDeath" value="0" step="1" min="0">
+      </div>
+      <div class="field">
+        <label>淘汰头数</label>
+        <input type="number" id="inputCull" value="0" step="1" min="0">
+      </div>
+    </div>
+
+    <div class="section-label">环境（选填）</div>
+    <div class="grid-5">
+      <div class="field">
+        <label>最低温 (℃)</label>
+        <input type="number" id="inputMinTemp" step="0.5" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>最高温 (℃)</label>
+        <input type="number" id="inputMaxTemp" step="0.5" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>平均温 (℃)</label>
+        <input type="number" id="inputAvgTemp" step="0.5" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>最低湿度 (%)</label>
+        <input type="number" id="inputMinHum" step="1" min="0" max="100" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>最高湿度 (%)</label>
+        <input type="number" id="inputMaxHum" step="1" min="0" max="100" placeholder="选填">
+      </div>
+      <div class="field">
+        <label>平均湿度 (%)</label>
+        <input type="number" id="inputAvgHum" step="1" min="0" max="100" placeholder="选填">
+      </div>
+    </div>
+
+    <div class="section-label">饲喂参数</div>
+    <div class="grid-5">
+      <div class="field">
+        <label>料液比 (水:粉)</label>
+        <input type="number" id="inputDilution" value="6" step="0.5" min="3" max="10">
+      </div>
+      <div class="field">
+        <label>饮水</label>
+        <select id="inputWater">
+          <option value="none">未提供水盘</option>
+          <option value="fresh">提供清水</option>
+          <option value="vital">提供维康质</option>
+          <option value="sour">提供酸溜溜</option>
+        </select>
+      </div>
+    </div>
+    <div style="margin-top:8px;display:flex;gap:8px;align-items:center;">
+      <span id="dayFeedback" style="font-size:12px;color:#6b7280;"></span>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+      <button class="btn btn-success" id="btnAdvance" onclick="advanceDay()">→ 录入并推进</button>
+    </div>
+  </div>
+</div>
+
+<!-- 影子模式面板 -->
+<div class="panel" id="shadowPanel" style="display:none;">
+  <div class="panel-title">影子模式 — V5-Lite 并行仿真（不影响真实奶量）</div>
+  <div id="shadowPanelBody">
+    <div style="color:#6b7280;font-size:12px;">输入每日数据后显示影子计算结果</div>
+  </div>
+</div>
+
+<!-- 双图表 -->
+<div class="panel">
+  <div class="panel-title">奶粉量曲线</div>
+  <div class="chart-grid-2">
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">头均配奶量 (g/头)</div>
+      <div class="chart-wrap"><canvas id="chartPerPig"></canvas></div>
+    </div>
+    <div>
+      <div style="font-size:12px;font-weight:600;color:#374151;margin-bottom:4px;">总配奶量 (g)</div>
+      <div class="chart-wrap"><canvas id="chartTotal"></canvas></div>
+    </div>
+  </div>
+</div>
+
+<!-- 每日明细表 -->
+<div class="panel">
+  <div class="panel-title-row">
+    <div class="panel-title">每日明细</div>
+    <div class="table-screenshot-hint">长按表格生成图片</div>
+  </div>
+  <div class="table-wrap" id="planTableWrap"><div id="planTable"></div></div>
+</div>
+
+<!-- 每日明细截图预览 -->
+<div class="modal-overlay" id="screenshotPreviewModal" role="dialog" aria-modal="true" aria-labelledby="screenshotPreviewTitle">
+  <div class="modal-box screenshot-preview-box">
+    <h2 id="screenshotPreviewTitle">每日明细截图</h2>
+    <div class="screenshot-preview-body">
+      <img id="screenshotPreviewImage" alt="每日明细截图预览">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" type="button" id="btnShareScreenshot" onclick="shareTableScreenshot()" hidden>分享</button>
+      <button class="btn btn-primary" type="button" onclick="downloadTableScreenshot()">保存图片</button>
+      <button class="btn btn-outline" type="button" onclick="closeTableScreenshotPreview()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<!-- 完成批次按钮 -->
+<div class="panel" style="text-align:center;">
+  <button class="btn btn-danger" id="btnComplete" onclick="completeBatch()" disabled>
+    完成批次并导出训练数据
+  </button>
+  <p style="font-size:11px;color:#6b7280;margin-top:6px;" id="completeHint">
+    推进到最后一天后方可完成批次
+  </p>
+  <div id="exportInfo" style="display:none;margin-top:8px;" class="success-msg"></div>
+</div>
+
+</div>
+</div>
+
+<button class="btn btn-primary agent-launcher" id="agentLauncher" type="button" onclick="FeedingAgentUI.toggleAgent(true)" hidden>现场 Agent</button>
+<aside class="agent-drawer" id="feedingAgentDrawer" aria-label="奶爸机现场 Agent" hidden>
+  <div class="agent-head">
+    <div>
+      <strong>奶爸机现场 Agent</strong>
+      <div id="agentBatchLabel" style="font-size:10px;color:#64748b;margin-top:2px;">等待选择批次</div>
+    </div>
+    <button class="btn btn-outline" type="button" onclick="FeedingAgentUI.toggleAgent(false)">关闭</button>
+  </div>
+  <div class="agent-log" id="feedingAgentLog">
+    <div class="agent-message system">每个批次使用独立会话。设备建议来自完整配奶曲线；不会远程操作设备或进行兽医诊断。</div>
+  </div>
+  <div class="agent-compose">
+    <textarea id="feedingAgentInput" placeholder="例如：今天下一项任务是什么？依据哪个 SOP 版本？"></textarea>
+    <button class="btn btn-primary" id="feedingAgentSend" type="button" onclick="FeedingAgentUI.send()">发送</button>
+  </div>
+</aside>
+
+<script>
+// ══════════════════════════════════════════════
+// 状态
+// ══════════════════════════════════════════════
+
+function escapeHtml(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function parseNonNegativeInteger(raw, label, defaultValue) {
+  if (raw === '') return defaultValue != null ? defaultValue : 0
+  var n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) throw new Error(label + '必须是非负整数')
+  return n
+}
+
+function readWeighSampleFromInputs() {
+  var groups = [
+    { category: 'large', label: '大猪', weightId: 'inputWtLarge', countId: 'inputWtLargeN' },
+    { category: 'medium', label: '中猪', weightId: 'inputWtMid', countId: 'inputWtMidN' },
+    { category: 'small', label: '小猪', weightId: 'inputWtSmall', countId: 'inputWtSmallN' },
+  ]
+  var samples = []
+  for (var i = 0; i < groups.length; i++) {
+    var group = groups[i]
+    var weightRaw = document.getElementById(group.weightId).value.trim()
+    var countRaw = document.getElementById(group.countId).value.trim()
+    var weight = weightRaw === '' ? 0 : Number(weightRaw)
+    var count = countRaw === '' ? 0 : Number(countRaw)
+    var hasWeight = Number.isFinite(weight) && weight > 0
+    var hasCount = Number.isFinite(count) && count > 0
+    if (!hasWeight && !hasCount) continue
+    if (!hasWeight) return { samples: samples, error: '已填写' + group.label + '称重头数，请同时填写' + group.label + '均重' }
+    if (!Number.isInteger(count) || count <= 0) return { samples: samples, error: '已填写' + group.label + '均重，请同时填写' + group.label + '称重头数' }
+    samples.push({ category: group.category, avgKg: weight, headCount: count })
+  }
+  return { samples: samples, error: null }
+}
+
+const state = {
+  batchId: null,
+  config: { startAge: 3, endAge: 21, startWeight: 2.3, headCount: 20, sowParity: 3, litterSize: 12, healthStatus: 'normal', farmRoom: 'A-1', name: '默认批次', hasInitialWeightAnchor: false },
+  plan: null,
+  records: [],
+  currentDayIndex: 0,
+  status: 'active',
+  configLocked: false,
+  controlStartDay: -1,  // 控奶从哪天开始，-1=未启用
+}
+
+var activeStorageUserId = null
+
+// 影子场景状态管理（按 farmRoom 隔离，不同栏位独立学习）
+function getShadowKey() {
+  var farmRoom = state.config.farmRoom || 'default'
+  return activeStorageUserId
+    ? 'v5lite_shadow_state:' + activeStorageUserId + ':' + farmRoom
+    : 'v5lite_shadow_state:' + farmRoom
+}
+
+function getLegacyShadowKey() {
+  return 'v5lite_shadow_state:' + (state.config.farmRoom || 'default')
+}
+
+function loadShadowState() {
+  // TODO: 未来迁移到 Supabase shadow_states 表，以支持跨设备共享长期自适应学习状态。
+  try {
+    var saved = localStorage.getItem(getShadowKey())
+    if (saved) return JSON.parse(saved)
+    // 仅已认领旧数据的同一用户可读取旧影子状态，避免跨账号学习参数污染。
+    if (
+      activeStorageUserId &&
+      localStorage.getItem('nbj_legacy_migration_owner') === activeStorageUserId
+    ) {
+      var legacy = localStorage.getItem(getLegacyShadowKey())
+      if (legacy) {
+        localStorage.setItem(getShadowKey(), legacy)
+        return JSON.parse(legacy)
+      }
+    }
+  } catch (e) {}
+  return typeof defaultSceneState === 'function' ? defaultSceneState() : {}
+}
+
+function saveShadowState() {
+  // TODO: 未来迁移到 Supabase shadow_states 表，以支持跨设备共享长期自适应学习状态。
+  try { localStorage.setItem(getShadowKey(), JSON.stringify(shadowState)) } catch (e) {}
+}
+
+function reloadShadowStateForCurrentScenario() {
+  shadowState = loadShadowState()
+  if (shadowState && !shadowState.sceneId) {
+    shadowState.sceneId = state.config.farmRoom || 'default'
+  }
+}
+
+var shadowState = loadShadowState()
+
+function toggleShadow() {
+  var panel = document.getElementById('shadowPanel')
+  if (document.getElementById('shadowMode').checked) {
+    panel.style.display = 'block'
+    renderShadowPanel()
+  } else {
+    panel.style.display = 'none'
+  }
+}
+
+// ══════════════════════════════════════════════
+// Supabase 同步（Auth + PostgreSQL）
+// ══════════════════════════════════════════════
+
+const SupabaseSync = {
+  currentUser: null,
+  available: false,
+  queues: new Map(),
+
+  getCurrentUser() { return this.currentUser },
+  getQueueKey(userId, batchId) { return userId + ':' + batchId },
+  isCurrentUser(userId) { return !!this.currentUser && this.currentUser.id === userId },
+
+  mapLocalToRemote(snapshot, userId) {
+    return {
+      id: snapshot.id,
+      user_id: userId,
+      config: snapshot.config || {},
+      records: snapshot.records || [],
+      current_day_index: snapshot.currentDayIndex || 0,
+      status: snapshot.status || 'active',
+      config_locked: snapshot.configLocked === true,
+      control_start_day: snapshot.controlStartDay == null ? -1 : snapshot.controlStartDay,
+      created_at: snapshot.createdAt || new Date().toISOString(),
+      revision: Number.isInteger(snapshot.revision) ? snapshot.revision : null,
+    }
+  },
+
+  mapRemoteToLocal(row) {
+    return {
+      id: row.id,
+      config: row.config || {},
+      records: row.records || [],
+      currentDayIndex: row.current_day_index || 0,
+      status: row.status || 'active',
+      configLocked: row.config_locked === true,
+      controlStartDay: row.control_start_day == null ? -1 : row.control_start_day,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      revision: Number.isInteger(row.revision) ? row.revision : Number(row.revision || 0),
+      dirty: false,
+      syncConflict: false,
+    }
+  },
+
+  mergeBatches(localBatches, remoteRows) {
+    var remote = {}
+    var merged = {}
+    var uploads = []
+    for (var i = 0; i < remoteRows.length; i++) {
+      remote[remoteRows[i].id] = this.mapRemoteToLocal(remoteRows[i])
+    }
+    var ids = new Set(Object.keys(localBatches).concat(Object.keys(remote)))
+    ids.forEach(function(id) {
+      var local = localBatches[id]
+      var cloud = remote[id]
+      if (!cloud) {
+        merged[id] = local
+        uploads.push(local)
+      } else if (!local) {
+        merged[id] = cloud
+      } else if (local.dirty === true && Number.isInteger(local.revision)) {
+        if (local.revision === cloud.revision) {
+          merged[id] = local
+          uploads.push(local)
+        } else {
+          STORAGE.storeConflict(this.currentUser.id, id, local, cloud)
+          merged[id] = cloud
+        }
+      } else {
+        // 无本地未同步修改时，服务器 revision 是唯一权威来源；不用设备时间判定新旧。
+        if (local.dirty === true) STORAGE.storeConflict(this.currentUser.id, id, local, cloud)
+        merged[id] = cloud
+      }
+    }, this)
+    return { merged: merged, uploads: uploads }
+  },
+
+  async fetchBatches() {
+    if (!this.currentUser || !window.supabaseClient) throw new Error('未登录或 Supabase 未初始化')
+    var result = await window.supabaseClient
+      .from('batches')
+      .select('*')
+      .order('updated_at', { ascending: false })
+    if (result.error) throw result.error
+    return result.data || []
+  },
+
+  async fetchBatch(batchId, userId) {
+    if (!this.isCurrentUser(userId)) return null
+    var result = await window.supabaseClient
+      .from('batches')
+      .select('*')
+      .eq('id', batchId)
+      .maybeSingle()
+    if (result.error) throw result.error
+    return result.data ? this.mapRemoteToLocal(result.data) : null
+  },
+
+  async saveBatchSnapshot(task) {
+    if (!task || !task.snapshot || !task.userId || !this.isCurrentUser(task.userId)) {
+      throw new Error('SYNC_CANCELLED')
+    }
+    var remote = this.mapLocalToRemote(task.snapshot, task.userId)
+    var result = await window.supabaseClient.rpc('save_batch_snapshot', {
+      p_id: remote.id,
+      p_config: remote.config,
+      p_records: remote.records,
+      p_current_day_index: remote.current_day_index,
+      p_status: remote.status,
+      p_config_locked: remote.config_locked,
+      p_control_start_day: remote.control_start_day,
+      p_created_at: remote.created_at,
+      p_expected_revision: task.expectedRevision,
+    })
+    if (result.error) throw result.error
+    if (!result.data) throw new Error('保存后未收到批次数据')
+    var row = Array.isArray(result.data) ? result.data[0] : result.data
+    if (!row || row.user_id !== task.userId) throw new Error('SYNC_USER_MISMATCH')
+    return this.mapRemoteToLocal(row)
+  },
+
+  isConflict(error) {
+    return !!error && (error.code === 'P0001' || String(error.message || '').indexOf('NBJ_CONFLICT') >= 0)
+  },
+
+  enqueueSave(snapshot, immediate) {
+    if (!snapshot || !snapshot.id || !this.currentUser) return false
+    var userId = this.currentUser.id
+    var key = this.getQueueKey(userId, snapshot.id)
+    var queue = this.queues.get(key)
+    if (!queue) {
+      queue = { key: key, userId: userId, batchId: snapshot.id, sequence: 0, latest: null, timer: null, running: null }
+      this.queues.set(key, queue)
+    }
+    queue.sequence += 1
+    queue.latest = {
+      userId: userId,
+      batchId: snapshot.id,
+      sequence: queue.sequence,
+      snapshot: JSON.parse(JSON.stringify(snapshot)),
+      expectedRevision: Number.isInteger(snapshot.revision) ? snapshot.revision : null,
+    }
+    if (queue.timer) clearTimeout(queue.timer)
+    var self = this
+    queue.timer = setTimeout(function() {
+      queue.timer = null
+      self.runQueue(queue)
+    }, immediate ? 0 : 500)
+    return true
+  },
+
+  runQueue(queue) {
+    if (!queue || queue.running) return queue && queue.running ? queue.running : Promise.resolve(false)
+    if (!this.isCurrentUser(queue.userId) || !queue.latest) return Promise.resolve(false)
+    if (queue.timer) {
+      clearTimeout(queue.timer)
+      queue.timer = null
+    }
+    var self = this
+    queue.running = (async function() {
+      var savedAny = false
+      while (queue.latest && self.isCurrentUser(queue.userId)) {
+        var task = queue.latest
+        queue.latest = null
+        try {
+          var saved = await self.saveBatchSnapshot(task)
+          savedAny = true
+          self.available = true
+          STORAGE.markSynced(task.userId, task.batchId, saved.revision, saved.updatedAt, task.snapshot.updatedAt)
+          if (queue.latest) queue.latest.expectedRevision = saved.revision
+        } catch (error) {
+          if (String(error && error.message) === 'SYNC_CANCELLED') break
+          if (self.isConflict(error)) {
+            var cloud = null
+            try { cloud = await self.fetchBatch(task.batchId, task.userId) } catch (fetchError) {}
+            STORAGE.storeConflict(task.userId, task.batchId, task.snapshot, cloud)
+            console.warn('[supabase] 检测到跨设备批次冲突，已阻止覆盖', error)
+            setSyncStatus('检测到其他设备更新，本机版本已保留')
+            showMsg('error', '检测到其他设备更新，已阻止自动覆盖；本机版本已保留，请刷新后核对。')
+            break
+          }
+          self.available = false
+          console.warn('[supabase] 保存批次失败，本地缓存仍保留', error)
+          setSyncStatus('数据已保存到本机，但云端同步暂时失败')
+          // 已有较新的本地修改时，直接尝试新任务；绝不把失败的旧快照重新放回队首。
+          if (queue.latest && queue.latest.sequence > task.sequence) continue
+          queue.latest = task
+          break
+        }
+      }
+      return savedAny
+    })().finally(function() {
+      queue.running = null
+    })
+    return queue.running
+  },
+
+  async flushAllSaves(userId) {
+    var targetUserId = userId || (this.currentUser && this.currentUser.id)
+    var queues = Array.from(this.queues.values()).filter(function(queue) {
+      return queue.userId === targetUserId
+    })
+    var work = []
+    for (var i = 0; i < queues.length; i++) {
+      if (queues[i].timer) {
+        clearTimeout(queues[i].timer)
+        queues[i].timer = null
+      }
+      work.push(this.runQueue(queues[i]))
+    }
+    await Promise.all(work)
+  },
+
+  clearUserQueues(userId) {
+    var self = this
+    Array.from(this.queues.entries()).forEach(function(entry) {
+      var key = entry[0]
+      var queue = entry[1]
+      if (queue.userId !== userId) return
+      if (queue.timer) clearTimeout(queue.timer)
+      queue.timer = null
+      queue.latest = null
+      self.queues.delete(key)
+    })
+  },
+
+  async completeBatch(batchId) {
+    var snapshot = STORAGE._batches()[batchId]
+    if (!snapshot) return false
+    snapshot.status = 'completed'
+    this.enqueueSave(snapshot, true)
+    var queue = this.queues.get(this.getQueueKey(this.currentUser.id, batchId))
+    return this.runQueue(queue)
+  },
+
+  async migrateLocalBatches(remoteRows) {
+    var local = STORAGE._batches()
+    var legacy = STORAGE.legacyBatches()
+    var hasLegacyData = Object.keys(legacy).length > 0
+    var legacyOwner = STORAGE.legacyOwner()
+    var shouldMigrateLegacy =
+      legacyOwner === this.currentUser.id &&
+      hasLegacyData &&
+      !STORAGE.hasLegacyMigrated()
+    if (shouldMigrateLegacy) {
+      // 用户可能先选择“暂不迁移”并已创建新批次；合并而非覆盖其专属缓存。
+      local = Object.assign({}, STORAGE.prepareLegacyBatches(legacy), local)
+      STORAGE._saveBatches(local)
+      var legacyCurrent = localStorage.getItem('nbj_current')
+      if (legacyCurrent && local[legacyCurrent] && !localStorage.getItem(STORAGE.currentKey())) {
+        STORAGE.saveCurrentId(legacyCurrent)
+      }
+    }
+    var firstMerge = this.mergeBatches(local, remoteRows)
+    STORAGE._saveBatches(firstMerge.merged)
+    for (var i = 0; i < firstMerge.uploads.length; i++) {
+      var snapshot = firstMerge.uploads[i]
+      var saved = await this.saveBatchSnapshot({
+        userId: this.currentUser.id,
+        batchId: snapshot.id,
+        snapshot: snapshot,
+        expectedRevision: Number.isInteger(snapshot.revision) ? snapshot.revision : null,
+      })
+      STORAGE.markSynced(this.currentUser.id, snapshot.id, saved.revision, saved.updatedAt, snapshot.updatedAt)
+    }
+    var finalRows = await this.fetchBatches()
+    var finalMerge = this.mergeBatches(STORAGE._batches(), finalRows)
+    STORAGE._saveBatches(finalMerge.merged)
+    if (shouldMigrateLegacy) STORAGE.markLegacyMigrated()
+    return true
+  },
+
+  async bootstrap() {
+    if (!this.currentUser || !window.supabaseClient) return false
+    try {
+      var remoteRows = await this.fetchBatches()
+      await this.migrateLocalBatches(remoteRows)
+      this.available = true
+      setSyncStatus('')
+      return true
+    } catch (error) {
+      this.available = false
+      console.warn('[supabase] 云端不可用，使用本地缓存', error)
+      return false
+    }
+  },
+
+  async handleOnline() {
+    if (!window.supabaseClient) return
+    try {
+      var sessionResult = await window.supabaseClient.auth.getSession()
+      var user = sessionResult.data && sessionResult.data.session && sessionResult.data.session.user
+      if (!user || !this.currentUser || user.id !== this.currentUser.id) return
+      await this.bootstrap()
+      await this.flushAllSaves(user.id)
+    } catch (error) {
+      console.warn('[supabase] 网络恢复后同步失败', error)
+    }
+  },
+}
+
+// ══════════════════════════════════════════════
+// localStorage 持久化
+// ══════════════════════════════════════════════
+
+const STORAGE = {
+  userId: null,
+  setUser(userId) {
+    this.userId = userId || null
+    activeStorageUserId = this.userId
+  },
+  batchKey() { return this.batchKeyFor(this.userId) },
+  batchKeyFor(userId) { return userId ? 'nbj_batches:' + userId : 'nbj_batches' },
+  currentKey() { return this.currentKeyFor(this.userId) },
+  currentKeyFor(userId) { return userId ? 'nbj_current:' + userId : 'nbj_current' },
+  conflictKeyFor(userId) { return 'nbj_sync_conflicts:' + userId },
+  legacyOwnerKey() { return 'nbj_legacy_migration_owner' },
+  legacyPendingKey(userId) { return 'nbj_legacy_migration_pending:' + userId },
+  legacyMigratedKey(userId) { return 'nbj_legacy_migrated:' + userId },
+  legacyOwner() { return localStorage.getItem(this.legacyOwnerKey()) || '' },
+  claimLegacyOwner(userId) {
+    var owner = this.legacyOwner()
+    if (owner) return owner
+    try {
+      localStorage.setItem(this.legacyOwnerKey(), userId)
+      return userId
+    } catch (error) {
+      console.error('[storage] 无法记录旧数据所有者', error)
+      return ''
+    }
+  },
+  shouldOfferLegacyMigration() {
+    var owner = this.legacyOwner()
+    if (owner || Object.keys(this.legacyBatches()).length === 0) return false
+    return Object.keys(this._batches()).length === 0 ||
+      localStorage.getItem(this.legacyPendingKey(this.userId)) === '1'
+  },
+  recordLegacyMigrationDecision(accepted) {
+    try {
+      if (accepted) localStorage.removeItem(this.legacyPendingKey(this.userId))
+      else localStorage.setItem(this.legacyPendingKey(this.userId), '1')
+    } catch (error) {
+      console.warn('[storage] 无法保存旧数据迁移决定', error)
+    }
+  },
+  hasLegacyMigrated() {
+    return localStorage.getItem(this.legacyMigratedKey(this.userId)) === '1'
+  },
+  markLegacyMigrated() {
+    try { localStorage.setItem(this.legacyMigratedKey(this.userId), '1') }
+    catch (error) { console.warn('[storage] 无法记录旧数据迁移完成状态', error) }
+  },
+  legacyBatches() {
+    try { return JSON.parse(localStorage.getItem('nbj_batches') || '{}') }
+    catch (error) { console.warn('[storage] 无法读取旧批次缓存', error); return {} }
+  },
+  prepareLegacyBatches(batches) {
+    var prepared = {}
+    Object.keys(batches).forEach(function(id) {
+      prepared[id] = Object.assign({}, batches[id], { revision: null, dirty: true, syncConflict: false })
+    })
+    return prepared
+  },
+  _readBatchesByKey(key) {
+    try { return JSON.parse(localStorage.getItem(key) || '{}') }
+    catch (error) { console.warn('[storage] 无法读取批次缓存', error); return {} }
+  },
+  _batches() { return this._readBatchesByKey(this.batchKey()) },
+  _batchesFor(userId) { return this._readBatchesByKey(this.batchKeyFor(userId)) },
+  _saveBatches(batches, userId) {
+    try {
+      localStorage.setItem(this.batchKeyFor(userId || this.userId), JSON.stringify(batches))
+      return true
+    } catch (error) {
+      console.error('[storage] 保存批次缓存失败', error)
+      setSyncStatus('本机存储失败，请立即检查存储空间')
+      if (typeof showMsg === 'function') showMsg('error', '本机存储失败，请立即检查浏览器存储空间。')
+      return false
+    }
+  },
+  saveCurrentId(batchId) {
+    try {
+      localStorage.setItem(this.currentKey(), batchId)
+      return true
+    } catch (error) {
+      console.error('[storage] 保存当前批次标记失败', error)
+      return false
+    }
+  },
+  markSynced(userId, batchId, revision, serverUpdatedAt, savedUpdatedAt) {
+    var all = this._batchesFor(userId)
+    var current = all[batchId]
+    if (!current) return
+    current.revision = revision
+    if (current.updatedAt === savedUpdatedAt) {
+      current.dirty = false
+      current.syncConflict = false
+      current.updatedAt = serverUpdatedAt
+    } else {
+      current.dirty = true
+    }
+    this._saveBatches(all, userId)
+  },
+  storeConflict(userId, batchId, local, cloud) {
+    try {
+      var conflicts = JSON.parse(localStorage.getItem(this.conflictKeyFor(userId)) || '{}')
+      conflicts[batchId] = {
+        local: local,
+        cloud: cloud || null,
+        detectedAt: new Date().toISOString(),
+      }
+      localStorage.setItem(this.conflictKeyFor(userId), JSON.stringify(conflicts))
+      var all = this._batchesFor(userId)
+      if (all[batchId]) {
+        all[batchId].syncConflict = true
+        this._saveBatches(all, userId)
+      }
+    } catch (error) {
+      console.error('[storage] 保存同步冲突副本失败', error)
+    }
+  },
+
+  saveCurrent() {
+    if (!state.batchId) return false
+    const all = this._batches()
+    const existing = all[state.batchId] || {}
+    const snapshot = {
+      id: state.batchId,
+      config: { ...state.config },
+      records: state.records,
+      currentDayIndex: state.currentDayIndex,
+      status: state.status,
+      configLocked: state.configLocked,
+      controlStartDay: state.controlStartDay,
+      createdAt: existing.createdAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      revision: Number.isInteger(existing.revision) ? existing.revision : null,
+      dirty: true,
+      syncConflict: existing.syncConflict === true,
+    }
+    all[state.batchId] = snapshot
+    var localSaved = this._saveBatches(all)
+    this.saveCurrentId(state.batchId)
+    SupabaseSync.enqueueSave(snapshot)
+    return localSaved
+  },
+
+  loadBatch(id) {
+    const all = this._batches()
+    const data = all[id]
+    if (!data) return false
+    state.batchId = data.id
+    state.config = { ...data.config }
+    state.records = data.records || []
+    state.currentDayIndex = data.currentDayIndex || 0
+    state.status = data.status || 'active'
+    state.configLocked = data.configLocked || false
+    state.controlStartDay = data.controlStartDay != null ? data.controlStartDay : -1
+    return true
+  },
+
+  createBatch(config) {
+    const id = 'batch_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    state.batchId = id
+    state.config = { ...config }
+    state.records = []
+    state.currentDayIndex = 0
+    state.status = 'active'
+    state.configLocked = false
+    state.controlStartDay = -1
+    const all = this._batches()
+    all[id] = {
+      id, config: { ...config }, records: [],
+      currentDayIndex: 0, status: 'active',
+      configLocked: false, controlStartDay: -1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      revision: null, dirty: true, syncConflict: false,
+    }
+    this._saveBatches(all)
+    this.saveCurrentId(id)
+    SupabaseSync.enqueueSave(all[id], true)
+  },
+
+  listBatches() {
+    const all = this._batches()
+    return Object.values(all).sort(function(a, b) {
+      return (b.updatedAt || '').localeCompare(a.updatedAt || '')
+    })
+  },
+
+  findLastActive() {
+    return this.listBatches().filter(function(b) { return b.status === 'active' })[0] || null
+  },
+}
+
+// ══════════════════════════════════════════════
+// 新建批次弹窗
+// ══════════════════════════════════════════════
+
+function showNewBatchModal() {
+  document.getElementById('modalName').value = '批次_' + new Date().toLocaleDateString('zh-CN')
+  document.getElementById('modalStartAge').value = state.config.startAge || 3
+  document.getElementById('modalEndAge').value = state.config.endAge || 21
+  document.getElementById('modalStartWeight').value = state.config.hasInitialWeightAnchor ? (state.config.startWeight || '') : ''
+  document.getElementById('modalHeadCount').value = state.config.headCount || 20
+  document.getElementById('modalError').style.display = 'none'
+  document.getElementById('newBatchModal').classList.add('show')
+}
+
+function hideNewBatchModal() {
+  document.getElementById('newBatchModal').classList.remove('show')
+}
+
+async function confirmNewBatch() {
+  const name = document.getElementById('modalName').value.trim() || '未命名批次'
+  const startAge = +document.getElementById('modalStartAge').value
+  const endAge = +document.getElementById('modalEndAge').value
+  const startWeightRaw = document.getElementById('modalStartWeight').value
+  const startWeight = startWeightRaw !== '' ? +startWeightRaw : null
+  const headCount = +document.getElementById('modalHeadCount').value
+  const sowParity = +document.getElementById('modalSowParity').value
+  const litterSize = +document.getElementById('modalLitterSize').value
+  const healthStatus = document.getElementById('modalHealthStatus').value
+  const farmRoom = document.getElementById('modalFarmRoom').value.trim() || 'A-1'
+  const errEl = document.getElementById('modalError')
+
+  // 验证
+  const errs = []
+  if (!(startAge >= 1 && startAge <= 30)) errs.push('超早期断奶日龄须在 1-30 之间')
+  if (!(endAge >= 2 && endAge <= 30)) errs.push('最终断奶日龄须在 2-30 之间')
+  if (startAge >= endAge) errs.push('超早期断奶日龄必须小于最终断奶日龄')
+  if (!(headCount >= 1)) errs.push('断奶头数须大于 0')
+
+  if (errs.length > 0) {
+    errEl.style.display = 'block'
+    errEl.textContent = errs.join('\n')
+    return
+  }
+
+  errEl.style.display = 'none'
+  hideNewBatchModal()
+
+  // 保存当前批次
+  STORAGE.saveCurrent()
+
+  // 创建新批次
+  state.controlStartDay = -1
+  state.config = { startAge: startAge, endAge: endAge, startWeight: startWeight > 0 ? startWeight : undefined, headCount: headCount, sowParity: sowParity, litterSize: litterSize, healthStatus: healthStatus, farmRoom: farmRoom, name: name, hasInitialWeightAnchor: startWeight > 0 }
+  if (!regeneratePlan()) {
+    showMsg('error', '计划生成失败，请检查参数')
+    return
+  }
+  STORAGE.createBatch(state.config)
+  FeedingAgentUI.changeBatch(state.batchId)
+  reloadShadowStateForCurrentScenario()
+  syncControlCheckbox()
+  refreshDailyInputDefaults(true)
+  // 保存自动推定后的体重
+  STORAGE.saveCurrent()
+  if (SupabaseSync.currentUser) {
+    await SupabaseSync.flushAllSaves(SupabaseSync.currentUser.id)
+  }
+
+  if (state.plan) {
+    renderAll()
+  } else {
+    showMsg('error', '计划生成失败，请检查参数')
+  }
+  updateDiarDisplay()
+}
+
+// ══════════════════════════════════════════════
+// 核心操作
+// ══════════════════════════════════════════════
+
+function init() {
+  // 尝试自动恢复
+  var savedId = localStorage.getItem(STORAGE.currentKey()) || ''
+  var loaded = savedId ? STORAGE.loadBatch(savedId) : false
+  if (!loaded) {
+    var lastActive = STORAGE.findLastActive()
+    if (lastActive) loaded = STORAGE.loadBatch(lastActive.id)
+  }
+  if (!loaded) {
+    STORAGE.createBatch(state.config)
+  }
+  syncControlCheckbox()
+  reloadShadowStateForCurrentScenario()
+  regeneratePlan()
+  refreshDailyInputDefaults(true)
+  renderAll()
+  updateDiarDisplay()
+}
+
+function regeneratePlan() {
+  try {
+    state.plan = generatePlan({
+      startAge: state.config.startAge,
+      endAge: state.config.endAge,
+      startWeight: state.config.startWeight,
+      headCount: state.config.headCount,
+    })
+    // 把 generatePlan 实际使用的体重写回 config（自动推定后保持一致性）
+    state.config.startWeight = state.plan.startWeight
+    refreshDailyInputDefaults(false)
+    return true
+  } catch (e) {
+    showMsg('error', e.message)
+    state.plan = null
+    return false
+  }
+}
+
+function syncControlCheckbox() {
+  document.getElementById('controlMode').checked = state.controlStartDay >= 0
+}
+
+function getTodayRecommendedMilkTotal() {
+  if (!state || !state.plan) return 0
+
+  var dayIndex = state.currentDayIndex || 0
+  var planDay = state.plan.days[dayIndex]
+  if (!planDay) return 0
+
+  var controlModeOn =
+    document.getElementById('controlMode') &&
+    document.getElementById('controlMode').checked
+
+  var perPigMilk = planDay.perPigMilkPlan || 0
+  if (
+    controlModeOn &&
+    state.controlStartDay >= 0 &&
+    typeof computeControlPlan === 'function'
+  ) {
+    try {
+      var ctrl = computeControlPlan(state.plan, state.records, state.controlStartDay)
+      if (
+        ctrl &&
+        ctrl.planMilkPPControl &&
+        ctrl.planMilkPPControl[dayIndex] != null
+      ) {
+        perPigMilk = ctrl.planMilkPPControl[dayIndex]
+      }
+    } catch (e) {}
+  }
+  return Math.round(perPigMilk * getCurrentHeadCountDefault())
+}
+
+function getCurrentHeadCountDefault() {
+  if (!state) return 1
+  var currentHeadCount = state.config.headCount || 1
+  if (state.records && state.records.length > 0) {
+    var latest = state.records[state.records.length - 1]
+    var derived = latest.headCount - ((latest.death || 0) + (latest.cull || 0))
+    if (derived > 0) currentHeadCount = derived
+  }
+  return Math.max(1, currentHeadCount)
+}
+
+function refreshDailyInputDefaults(force) {
+  var milkInput = document.getElementById('inputTotalMilk')
+  var headInput = document.getElementById('inputHeadCount')
+  var milkConfirmed = document.getElementById('inputMilkConfirmed')
+  if (!milkInput || !headInput || !state || !state.plan) return
+
+  var recommendedMilk = getTodayRecommendedMilkTotal()
+  var currentHeadCount = getCurrentHeadCountDefault()
+
+  if (force || milkInput.dataset.autoFilled === '1' || milkInput.value === '') {
+    milkInput.value = Math.round(recommendedMilk)
+    milkInput.dataset.autoFilled = '1'
+    if (milkConfirmed) milkConfirmed.checked = false
+  }
+
+  if (force || headInput.dataset.autoFilled === '1' || headInput.value === '') {
+    headInput.value = currentHeadCount
+    headInput.dataset.autoFilled = '1'
+  }
+
+  syncCreepLevelFromAmount()
+}
+
+function switchBatch(id) {
+  if (!id) return
+  STORAGE.saveCurrent()
+  if (STORAGE.loadBatch(id)) {
+    FeedingAgentUI.changeBatch(id)
+    reloadShadowStateForCurrentScenario()
+    syncControlCheckbox()
+    regeneratePlan()
+    refreshDailyInputDefaults(true)
+    renderAll()
+    updateDiarDisplay()
+  }
+}
+
+function completeBatch() {
+  if (state.status === 'completed') return
+  if (!state.plan || state.currentDayIndex < state.plan.days.length - 1) return
+
+  // 校验最后一天必须有记录
+  var lastDayAge = state.plan.days[state.plan.days.length - 1].dayAge
+  var hasLastDay = false
+  for (var i = 0; i < state.records.length; i++) {
+    if (state.records[i].dayAge === lastDayAge) { hasLastDay = true; break }
+  }
+  if (!hasLastDay) {
+    showMsg('error', '最后一天（D' + lastDayAge + '）尚未录入数据，请先录入再完成。')
+    return
+  }
+
+  if (!confirm('确定完成该批次？完成后数据将变为只读，不可修改。')) return
+
+  try {
+    var exportData = exportTrainingData({
+      records: state.records,
+      startAge: state.config.startAge,
+      endAge: state.config.endAge,
+      startWeight: state.config.startWeight,
+      headCount: state.config.headCount,
+      sowParity: state.config.sowParity,
+      litterSize: state.config.litterSize,
+      healthStatus: state.config.healthStatus,
+      farmRoom: state.config.farmRoom,
+      totalMilkPlanG: state.plan.totalMilkPlanG,
+      standardWeight: state.plan.standardWeight,
+    })
+    var json = JSON.stringify(exportData, null, 2)
+    var blob = new Blob([json], { type: 'application/json' })
+    var url = URL.createObjectURL(blob)
+    var a = document.createElement('a')
+    a.href = url
+    a.download = 'naibaji-' + state.config.name + '-' + state.config.startAge + '-' + state.config.endAge + '.json'
+    setTimeout(function() { URL.revokeObjectURL(url) }, 5000)
+    a.click()
+    document.getElementById('exportInfo').style.display = 'block'
+
+    // Layer 3 是否可执行仅由已保存影子数据的完整性决定，不依赖完成瞬间的 UI 开关。
+    var shadowExportMsg = ''
+    var allShadowReady = state.records.length > 0 && state.records.every(function(r) { return r.shadowAdjustFactor != null })
+    if (allShadowReady && typeof computeBatchShadow === 'function') {
+        var shadowResult = computeBatchShadow(state.records, state.config, shadowState)
+        if (shadowResult) {
+          if (shadowResult.rejected) {
+            shadowExportMsg = '<br><span style="color:#dc2626;font-size:11px;">影子学习拒绝：数据质量分不足，未更新场景参数</span>'
+          } else {
+            shadowState = shadowResult.nextState
+            saveShadowState()
+
+            var shadowExport = {
+              batchMeta: {
+                startAge: state.config.startAge,
+                endAge: state.config.endAge,
+                feedingDays: state.plan.feedingDays,
+                startWeight: state.config.startWeight,
+                headCount: state.config.headCount,
+                farmRoom: state.config.farmRoom,
+              },
+              shadowRecords: state.records.map(function(r) {
+                return {
+                  dayAge: r.dayAge,
+                  creepLevel: r.creepLevel,
+                  shadowRiskScore: r.shadowRiskScore,
+                  shadowAdjustFactor: r.shadowAdjustFactor,
+                  shadowAdjustedPerPig: r.shadowAdjustedPerPig,
+                  shadowRiskHealth: r.shadowRiskHealth,
+                  shadowRiskExecution: r.shadowRiskExecution != null ? r.shadowRiskExecution : r.shadowRiskMachine,
+                  shadowRiskEnv: r.shadowRiskEnv,
+                  shadowPauseProbe: r.shadowPauseProbe,
+                  shadowExecutionDeficitRate: r.shadowExecutionDeficitRate != null ? r.shadowExecutionDeficitRate : r.shadowLeftoverRate,
+                  shadowExecutionRate: r.shadowExecutionRate != null
+                    ? r.shadowExecutionRate
+                    : ((r.shadowExecutionDeficitRate != null ? r.shadowExecutionDeficitRate : r.shadowLeftoverRate) != null
+                      ? 1 - (r.shadowExecutionDeficitRate != null ? r.shadowExecutionDeficitRate : r.shadowLeftoverRate)
+                      : null),
+                  shadowExecutionRiskExcluded: r.shadowExecutionRiskExcluded === true,
+                  executionStatus: r.executionStatus || 'normal',
+                }
+              }),
+              shadowBatchResult: {
+                drSmooth: shadowResult.drSmooth,
+                drMature: shadowResult.drMature,
+                thetaPassive: shadowResult.thetaPassive,
+                probeResult: shadowResult.probeResult,
+                optimizedParams: shadowResult.optimizedParams,
+              },
+              sceneState: {
+                completedBatchCount: shadowState.completedBatchCount,
+                cooldownBatches: shadowState.cooldownBatches,
+                probedFloor: shadowState.probedFloor,
+                currentParameters: shadowState.currentParameters,
+              },
+              batchGrowthSummary: typeof computeBatchGrowthSummary === 'function'
+                ? computeBatchGrowthSummary(state.records) : null,
+            }
+            var shadowJson = JSON.stringify(shadowExport, null, 2)
+            var shadowBlob = new Blob([shadowJson], { type: 'application/json' })
+            var shadowUrl = URL.createObjectURL(shadowBlob)
+            var shadowA = document.createElement('a')
+            shadowA.href = shadowUrl
+            shadowA.download = 'naibaji-' + state.config.name + '-shadow.json'
+            setTimeout(function() { URL.revokeObjectURL(shadowUrl) }, 5000)
+            shadowA.click()
+
+            if (shadowResult.watchdog && shadowResult.watchdog.alert) {
+              shadowExportMsg += '<br><span style="color:#991b1b;font-size:11px;">' + escapeHtml(shadowResult.watchdog.message) + '</span>'
+            }
+          }
+        }
+    } else if (state.records.length > 0 && !allShadowReady) {
+      shadowExportMsg = '<br><span style="color:#d97706;font-size:11px;">影子数据不完整，本批次未执行 Layer 3 学习</span>'
+    }
+
+    // 导出成功后锁定批次
+    state.status = 'completed'
+    STORAGE.saveCurrent()
+    SupabaseSync.completeBatch(state.batchId)
+
+    document.getElementById('exportInfo').innerHTML =
+      '训练数据已导出：' + exportData.dailyRecords.length + ' 天，' +
+      '最终腹泻率标签 ' + exportData.labels.finalDiarrheaRate + '%<br>' +
+      '<small>文件：' + escapeHtml(a.download) + '</small>' +
+      shadowExportMsg
+  } catch (e) {
+    showMsg('error', '导出失败：' + e.message)
+  }
+
+  renderAll()
+}
+
+function advanceDay() {
+  if (state.status === 'completed') { showMsg('error', '批次已完成，不可修改'); return }
+  var plan = state.plan
+  if (!plan) { showMsg('error', '请先创建批次并生成饲喂计划'); return }
+  var days = plan.days
+  var todayDay = days[state.currentDayIndex].dayAge
+
+  // 读取表单
+  var milkInput = document.getElementById('inputTotalMilk')
+  var milkRaw = milkInput.value
+  if (milkRaw === '') { showMsg('error', '总配奶量为必填项'); return }
+  var milkConfirmed = document.getElementById('inputMilkConfirmed')
+  if (!milkConfirmed || !milkConfirmed.checked) {
+    showMsg('error', '请先核对设备记录，并勾选“以上数值为实际总配奶量”。')
+    return
+  }
+  var totalMilk = parseFloat(milkRaw)
+  if (isNaN(totalMilk) || totalMilk < 0) { showMsg('error', '总配奶量必须是大于或等于 0 的数字'); return }
+  totalMilk = Math.round(totalMilk)
+
+  var creepRaw = document.getElementById('inputTotalCreep').value
+  var totalCreep = creepRaw !== '' ? parseFloat(creepRaw) : 0
+  if (isNaN(totalCreep) || totalCreep < 0) { showMsg('error', '总教槽量不能为负数'); return }
+  totalCreep = Math.round(totalCreep)
+
+  var hcRaw = document.getElementById('inputHeadCount').value
+  var hcFloat = parseFloat(hcRaw)
+  if (hcRaw === '' || isNaN(hcFloat) || hcFloat < 1 || hcFloat !== Math.round(hcFloat)) {
+    showMsg('error', '当前头数必须为正整数'); return
+  }
+  var headCount = Math.round(hcFloat)
+  syncCreepLevelFromAmount()
+
+  // 非负整数校验（腹泻、死亡、淘汰、抽样头数）
+  var mild, mod, sev, death, cull, wtLargeN, wtMidN, wtSmallN
+  try {
+    mild = parseNonNegativeInteger(document.getElementById('inputDiarMild').value, '腹泻轻度头数')
+    mod = parseNonNegativeInteger(document.getElementById('inputDiarMod').value, '腹泻中度头数')
+    sev = parseNonNegativeInteger(document.getElementById('inputDiarSev').value, '腹泻重度头数')
+  } catch (e) { showMsg('error', e.message); return }
+
+  // 读取称重抽样：均重与头数必须成对填写，避免静默丢弃观测数据。
+  var weighRead = readWeighSampleFromInputs()
+  if (weighRead.error) { showMsg('error', weighRead.error); return }
+  var weighSample = weighRead.samples
+
+  var medication = document.getElementById('inputMedication').value
+  var executionStatus = document.getElementById('inputExecutionStatus').value
+
+  try {
+    death = parseNonNegativeInteger(document.getElementById('inputDeath').value, '死亡头数')
+    cull = parseNonNegativeInteger(document.getElementById('inputCull').value, '淘汰头数')
+  } catch (e) { showMsg('error', e.message); return }
+
+  // 腹泻总数不能超过 headCount
+  const diarTotal = mild + mod + sev
+  if (diarTotal > headCount) {
+    showMsg('error', '腹泻总头数（' + diarTotal + '）不能超过当前头数（' + headCount + '）')
+    return
+  }
+  if (death + cull > headCount) {
+    showMsg('error', '死亡淘汰总数（' + (death + cull) + '）不能超过当前头数（' + headCount + '）')
+    return
+  }
+  var minTemp = parseFloat(document.getElementById('inputMinTemp').value)
+  var maxTemp = parseFloat(document.getElementById('inputMaxTemp').value)
+  var avgTemp = parseFloat(document.getElementById('inputAvgTemp').value)
+  var minHum = parseFloat(document.getElementById('inputMinHum').value)
+  var maxHum = parseFloat(document.getElementById('inputMaxHum').value)
+  var avgHum = parseFloat(document.getElementById('inputAvgHum').value)
+  var dilution = parseFloat(document.getElementById('inputDilution').value) || 6
+  var waterType = document.getElementById('inputWater').value
+
+  if (!isNaN(minTemp) && !isNaN(maxTemp) && minTemp > maxTemp) { showMsg('error', '最低温不能高于最高温'); return }
+  if (!isNaN(minTemp) && !isNaN(avgTemp) && !isNaN(maxTemp) && (avgTemp < minTemp || avgTemp > maxTemp)) { showMsg('error', '平均温必须介于最低温和最高温之间'); return }
+  var humidities = [minHum, maxHum, avgHum]
+  for (var humIndex = 0; humIndex < humidities.length; humIndex++) {
+    if (!isNaN(humidities[humIndex]) && (humidities[humIndex] < 0 || humidities[humIndex] > 100)) { showMsg('error', '湿度必须在 0 到 100 之间'); return }
+  }
+  if (!isNaN(minHum) && !isNaN(maxHum) && minHum > maxHum) { showMsg('error', '最低湿度不能高于最高湿度'); return }
+  if (!isNaN(minHum) && !isNaN(avgHum) && !isNaN(maxHum) && (avgHum < minHum || avgHum > maxHum)) { showMsg('error', '平均湿度必须介于最低湿度和最高湿度之间'); return }
+
+  var record = {
+    dayAge: todayDay,
+    totalMilkG: totalMilk,
+    actualMilkRecorded: true,
+    actualMilkConfirmedAt: new Date().toISOString(),
+    totalCreepG: totalCreep,
+    headCount: headCount,
+    diarrheaMild: Math.max(0, mild),
+    diarrheaModerate: Math.max(0, mod),
+    diarrheaSevere: Math.max(0, sev),
+    death: Math.max(0, death),
+    cull: Math.max(0, cull),
+    dilution: dilution,
+    waterType: waterType,
+    medication: medication,
+    executionStatus: executionStatus,
+    creepLevel: parseInt(document.getElementById('inputCreepLevel').value),
+    uniformityLevel: parseInt(document.getElementById('inputUniformityLevel').value),
+    growthLevel: parseInt(document.getElementById('inputGrowthLevel').value),
+    startAge: state.config.startAge,
+    batchStartWeight: state.config.startWeight,
+    hasInitialWeightAnchor: state.config.hasInitialWeightAnchor === true,
+  }
+  if (weighSample.length > 0) record.weighSample = weighSample
+  if (!isNaN(minTemp)) record.minTemp = minTemp
+  if (!isNaN(maxTemp)) record.maxTemp = maxTemp
+  if (!isNaN(avgTemp)) record.avgTemp = avgTemp
+  if (!isNaN(minHum)) record.minHum = minHum
+  if (!isNaN(maxHum)) record.maxHum = maxHum
+  if (!isNaN(avgHum)) record.avgHum = avgHum
+
+  // 保存提交时的计划值（控奶或不控奶）
+  var todayPlan = days[state.currentDayIndex]
+  var commitPig = todayPlan.perPigMilkPlan
+  var commitFeed = 12
+  if (document.getElementById('controlMode').checked) {
+    var ctrl = computeControlPlan(plan, state.records, state.controlStartDay)
+    if (ctrl && ctrl.planMilkPPControl[state.currentDayIndex] != null) {
+      commitPig = ctrl.planMilkPPControl[state.currentDayIndex]
+      commitFeed = ctrl.feedTimes[state.currentDayIndex] || 12
+    }
+  }
+  var commitTotal = Math.round(commitPig * headCount)
+  record.planPerPigAtCommit = commitPig
+  record.planTotalAtCommit = commitTotal
+  record.feedTimesAtCommit = commitFeed
+  // 影子模式：计算 V5-Lite 并保存（计划量跟随控奶）
+  if (document.getElementById('shadowMode').checked && typeof computeShadowAdjustment === 'function') {
+    var shadowPlanDay = { ...todayPlan, perPigMilkPlan: commitPig, totalMilkPlan: commitTotal }
+    var shadowResult = computeShadowAdjustment(shadowPlanDay, record, state.config)
+    record.creepLevel = shadowResult.creepLevel
+    record.shadowRiskScore = shadowResult.riskScore
+    record.shadowAdjustFactor = shadowResult.adjustFactor
+    record.shadowAdjustedPerPig = shadowResult.shadowPerPig
+    record.shadowRiskHealth = shadowResult.riskHealth
+    record.shadowRiskExecution = shadowResult.riskExecution
+    record.shadowRiskEnv = shadowResult.riskEnv
+    record.shadowPauseProbe = shadowResult.pauseProbe
+    record.shadowExecutionDeficitRate = shadowResult.executionDeficitRate
+    record.shadowExecutionRate = shadowResult.executionRate
+    record.shadowExecutionRiskExcluded = shadowResult.executionRiskExcluded
+  }
+  // 替换或追加
+  var idx = -1
+  for (var i = 0; i < state.records.length; i++) {
+    if (state.records[i].dayAge === todayDay) { idx = i; break }
+  }
+  if (idx >= 0) { state.records[idx] = record }
+  else { state.records.push(record) }
+
+  if (!state.configLocked) {
+    state.configLocked = true
+    document.querySelectorAll('#configPanel input').forEach(function(el) { el.disabled = true })
+  }
+
+  // 判断是否是最后一天
+  var isLastDay = (state.currentDayIndex >= days.length - 1)
+
+  if (!isLastDay) {
+    state.currentDayIndex++
+  } else {
+    // 最后一天：不推进索引，启用完成按钮
+    document.getElementById('btnComplete').disabled = false
+    document.getElementById('completeHint').textContent = '点击按钮完成批次并导出数据'
+  }
+
+  STORAGE.saveCurrent()
+
+  renderAll()
+  updateDiarDisplay()
+  showMsg('success', isLastDay
+    ? 'D' + todayDay + ' 数据已保存，可以完成批次。'
+    : 'D' + todayDay + ' 数据已保存，已推进到 D' + days[state.currentDayIndex].dayAge + '。')
+
+  // 预填下一天（如果不是最后一天）
+  if (!isLastDay) {
+    refreshDailyInputDefaults(true)
+    document.getElementById('inputTotalCreep').value = 0
+    document.getElementById('inputDiarMild').value = 0
+    document.getElementById('inputDiarMod').value = 0
+    document.getElementById('inputDiarSev').value = 0
+    document.getElementById('inputWtLarge').value = ''
+    document.getElementById('inputWtLargeN').value = '0'
+    document.getElementById('inputWtMid').value = ''
+    document.getElementById('inputWtMidN').value = '0'
+    document.getElementById('inputWtSmall').value = ''
+    document.getElementById('inputWtSmallN').value = '0'
+    document.getElementById('inputMedication').value = 'none'
+    document.getElementById('inputExecutionStatus').value = 'normal'
+    syncCreepLevelFromAmount()
+    document.getElementById('inputUniformityLevel').value = '2'
+    document.getElementById('inputGrowthLevel').value = '2'
+    document.getElementById('inputDeath').value = 0
+    document.getElementById('inputCull').value = 0
+    document.getElementById('inputMinTemp').value = ''
+    document.getElementById('inputMaxTemp').value = ''
+    document.getElementById('inputAvgTemp').value = ''
+    document.getElementById('inputMinHum').value = ''
+    document.getElementById('inputMaxHum').value = ''
+    document.getElementById('inputAvgHum').value = ''
+    document.getElementById('inputDilution').value = 6
+    document.getElementById('inputWater').value = 'none'
+    document.getElementById('inputMilkConfirmed').checked = false
+    updateDiarDisplay()
+    if (document.getElementById('shadowMode').checked) renderShadowPanel()
+  }
+}
+
+// ══════════════════════════════════════════════
+// 渲染
+// ══════════════════════════════════════════════
+
+var chartPP = null
+var chartTot = null
+var chartJSAvailable = (typeof Chart !== 'undefined')
+
+function renderAll() {
+  renderSelector()
+  renderConfig()
+  renderSummary()
+  renderProgress()
+  renderTodayCard()
+  renderCharts()
+  renderTable()
+  renderCompleteButton()
+  if (document.getElementById('shadowMode').checked) renderShadowPanel()
+  FeedingAgentUI.refresh()
+}
+
+function renderSelector() {
+  var sel = document.getElementById('batchSelector')
+  var all = STORAGE.listBatches()
+  var html = '<option value="">— 选择批次 —</option>'
+  for (var i = 0; i < all.length; i++) {
+    var b = all[i]
+    var active = b.status === 'active' ? ' 活跃' : ' 已完成'
+    var selected = b.id === state.batchId ? 'selected' : ''
+    html += '<option value="' + b.id + '" ' + selected + '>' + escapeHtml(b.config.name) + active + '</option>'
+  }
+  sel.innerHTML = html
+  if (state.batchId) sel.value = state.batchId
+
+  var badge = document.getElementById('batchStatusBadge')
+  if (state.status === 'completed') {
+    badge.innerHTML = '<span class="status-badge completed">已完成</span>'
+  } else if (state.plan) {
+    badge.innerHTML = '<span class="status-badge active">活跃</span>'
+  } else {
+    badge.innerHTML = ''
+  }
+
+  var total = state.plan ? state.plan.days.length : 0
+  document.getElementById('progressLabel').textContent =
+    state.plan ? '第 ' + (state.currentDayIndex + 1) + ' 天 / 共 ' + total + ' 天' : '新建批次'
+}
+
+function renderConfig() {
+  document.getElementById('batchName').value = state.config.name || ''
+  document.getElementById('startAge').value = state.config.startAge || 3
+  document.getElementById('endAge').value = state.config.endAge || 21
+  document.getElementById('startWeight').value = state.config.startWeight || 2.3
+  document.getElementById('headCount').value = state.config.headCount || 20
+  document.getElementById('sowParity').value = state.config.sowParity || 3
+  document.getElementById('litterSize').value = state.config.litterSize || 12
+  document.getElementById('healthStatus').value = state.config.healthStatus || 'normal'
+  document.getElementById('farmRoom').value = state.config.farmRoom || 'A-1'
+
+  if (state.plan) {
+    document.getElementById('feedingDaysHint').textContent = '饲喂天数: ' + state.plan.feedingDays
+  } else {
+    document.getElementById('feedingDaysHint').textContent = ''
+  }
+}
+
+function renderSummary() {
+  var plan = state.plan
+  var grid = document.getElementById('summaryGrid')
+
+  if (!plan) {
+    grid.innerHTML = '<div style="color:#6b7280;font-size:13px;padding:8px 0;">设定参数后自动生成计划</div>'
+    return
+  }
+
+  var daysArr = plan.days
+  var last = daysArr[daysArr.length - 1]
+
+  var actualTotalMilk = 0
+  for (var i = 0; i < state.records.length; i++) {
+    actualTotalMilk += (state.records[i].totalMilkG || 0)
+  }
+  var actualDays = state.records.length
+  var avgDaily = actualDays > 0 ? Math.round(actualTotalMilk / actualDays / plan.headCount) : '—'
+
+  // 控奶时：用控奶调整后的全期奶粉和断奶重
+  var displayTotalMilk = plan.totalMilkPlanG
+  var displayFinalWeight = last.weightEnd
+  // 构建录入映射（用于不控奶的体重级联）
+  var inputMap = {}
+  for (var ri = 0; ri < state.records.length; ri++) {
+    var rec = state.records[ri]
+    inputMap[rec.dayAge] = rec
+  }
+  if (document.getElementById('controlMode').checked) {
+    var ctrl = computeControlPlan(plan, state.records, state.controlStartDay)
+    if (ctrl && ctrl.days) {
+      var lastCtrl = ctrl.days[ctrl.days.length - 1]
+      displayTotalMilk = Math.round(ctrl.days.reduce(function(s, d) { return s + d.totalMilkPlan }, 0))
+      displayFinalWeight = lastCtrl.weightEnd
+    }
+  } else {
+    // 不控奶时也计入教槽营养
+    var wt = plan.startWeight
+    for (var i = 0; i < plan.days.length; i++) {
+      var d = plan.days[i]
+      var r = inputMap[d.dayAge]
+      var milkPP = r ? (r.totalMilkG / (r.headCount || 1)) : d.perPigMilkPlan
+      var creepPP = r ? ((r.totalCreepG || 0) / (r.headCount || 1)) : 0
+      wt += (milkPP + creepPP * 0.7) / 900
+    }
+    displayFinalWeight = Math.round(wt * 1000) / 1000
+  }
+
+  var perPigTotal = Math.round(displayTotalMilk / plan.headCount)
+
+  grid.innerHTML =
+    '<div class="summary-card"><div class="num">' + plan.feedingDays + '</div><div class="lbl">饲喂天数</div></div>' +
+    '<div class="summary-card green"><div class="num">' + displayTotalMilk.toLocaleString() + '</div><div class="lbl">计划全期奶粉 (g)</div></div>' +
+    '<div class="summary-card green"><div class="num">' + perPigTotal.toLocaleString() + '</div><div class="lbl">头均全期奶粉 (g)</div></div>' +
+    '<div class="summary-card purple"><div class="num">' + displayFinalWeight.toFixed(2) + '</div><div class="lbl">预计断奶重 (kg)</div></div>' +
+    '<div class="summary-card"><div class="num">' + plan.headCount + '</div><div class="lbl">断奶头数</div></div>' +
+    '<div class="summary-card"><div class="num">' + actualTotalMilk.toLocaleString() + '</div><div class="lbl">已录总奶粉 (g)</div></div>' +
+    '<div class="summary-card"><div class="num">' + avgDaily + '</div><div class="lbl">已录头均日奶粉 (g)</div></div>'
+}
+
+function renderProgress() {
+  var plan = state.plan
+  var container = document.getElementById('dayDots')
+  if (!plan) { container.innerHTML = ''; return }
+
+  var daysArr = plan.days
+  var html = ''
+  for (var i = 0; i < daysArr.length; i++) {
+    if (i > 0) {
+      html += '<div class="day-conn ' + (i <= state.currentDayIndex ? 'pass' : '') + '"></div>'
+    }
+    var cls = 'future'
+    if (i < state.currentDayIndex) cls = 'past'
+    else if (i === state.currentDayIndex) cls = 'current'
+    html += '<div class="day-dot ' + cls + '">' + daysArr[i].dayAge + '</div>'
+  }
+  container.innerHTML = html
+}
+
+function renderTodayCard() {
+  var card = document.getElementById('todayCard')
+  var plan = state.plan
+
+  if (state.status === 'completed') {
+    card.className = 'today-card readonly'
+    document.getElementById('todayTitle').textContent = '批次已完成 — 数据只读'
+    document.getElementById('todayPlan').textContent = ''
+    document.getElementById('btnAdvance').disabled = true
+    document.getElementById('btnAdvance').textContent = '已完成'
+    disableTodayInputs(true)
+    return
+  }
+
+  card.className = 'today-card'
+  disableTodayInputs(false)
+  document.getElementById('btnAdvance').disabled = false
+  document.getElementById('btnAdvance').textContent = '→ 录入并推进'
+
+  if (!plan) {
+    document.getElementById('todayTitle').textContent = '新建批次'
+    document.getElementById('todayPlan').textContent = '请先通过"新建批次"创建一批仔猪。'
+    document.getElementById('btnAdvance').disabled = true
+    return
+  }
+
+  var day = plan.days[state.currentDayIndex]
+  var isLast = state.currentDayIndex >= plan.days.length - 1
+
+  // 控奶时计划数据取控奶调整值
+  var displayPerPig = day.perPigMilkPlan
+  var displayTotalMilk = Math.round(displayPerPig * getCurrentHeadCountDefault())
+  if (document.getElementById('controlMode').checked) {
+    var ctrl = computeControlPlan(plan, state.records, state.controlStartDay)
+    if (ctrl && ctrl.planMilkPPControl[state.currentDayIndex] != null) {
+      displayPerPig = ctrl.planMilkPPControl[state.currentDayIndex]
+      displayTotalMilk = Math.round(displayPerPig * getCurrentHeadCountDefault())
+    }
+  }
+
+  document.getElementById('todayTitle').textContent = isLast
+    ? 'D' + day.dayAge + ' — 最终断奶日'
+    : 'D' + day.dayAge + ' — 第 ' + (state.currentDayIndex + 1) + ' 天'
+
+  // 所有天都显示计划信息
+  document.getElementById('todayPlan').innerHTML =
+    '计划：头均 <strong>' + displayPerPig + ' g</strong> · ' +
+    '总配奶 <strong>' + displayTotalMilk.toLocaleString() + ' g</strong> · ' +
+    '日安全量 ' + day.dailyCapacity + ' g · 比例 ' + (day.rampFactor * 100).toFixed(0) + '%' +
+    (isLast ? ' <span style="color:#ef4444;font-weight:600;">← 最后一天</span>' : '')
+
+  // 是否当天已录入
+  var alreadyEntered = false
+  for (var i = 0; i < state.records.length; i++) {
+    if (state.records[i].dayAge === day.dayAge) { alreadyEntered = true; break }
+  }
+  if (!alreadyEntered) {
+    // 检查是否该提醒称重（距上次称重 >=7 天）
+    var lastWeighDay = 0
+    for (var ri = state.records.length - 1; ri >= 0; ri--) {
+      var r = state.records[ri]
+      if (r.weighSample && r.weighSample.length > 0) { lastWeighDay = r.dayAge; break }
+    }
+    var daysSinceWeigh = day.dayAge - (lastWeighDay || state.config.startAge)
+    var weighReminder = ''
+    if (daysSinceWeigh >= 7) {
+      weighReminder = '<div style="background:#fef9c3;border:1px solid #fde68a;border-radius:6px;padding:6px 10px;font-size:11px;color:#92400e;margin-top:6px;">距上次称重已 ' + daysSinceWeigh + ' 天，建议抽样称重大/中/小猪</div>'
+    }
+
+    refreshDailyInputDefaults(false)
+
+    // 插入提醒
+    var dayFeedback = document.getElementById('dayFeedback')
+    if (dayFeedback) dayFeedback.innerHTML = weighReminder
+  }
+}
+
+function disableTodayInputs(disabled) {
+  var ids = ['inputTotalMilk', 'inputTotalCreep', 'inputHeadCount',
+             'inputMilkConfirmed',
+             'inputWtLarge', 'inputWtLargeN', 'inputWtMid', 'inputWtMidN', 'inputWtSmall', 'inputWtSmallN',
+             'inputMedication', 'inputExecutionStatus',
+             'inputCreepLevel', 'inputUniformityLevel', 'inputGrowthLevel',
+             'inputDiarMild', 'inputDiarMod', 'inputDiarSev',
+             'inputDeath', 'inputCull', 'inputMinTemp', 'inputMaxTemp', 'inputAvgTemp',
+             'inputMinHum', 'inputMaxHum', 'inputAvgHum', 'inputDilution', 'inputWater']
+  for (var i = 0; i < ids.length; i++) {
+    document.getElementById(ids[i]).disabled = disabled
+  }
+}
+
+function renderCharts() {
+  var plan = state.plan
+  var ctx1 = document.getElementById('chartPerPig')
+  var ctx2 = document.getElementById('chartTotal')
+
+  if (!chartJSAvailable) {
+    // Chart.js CDN 未加载，保留 canvas 仅显示提示
+    var fb = '<div class="chart-fallback">Chart.js 库未加载<br><small>请检查网络连接或刷新页面</small></div>'
+    ctx1.style.display = 'none'; ctx2.style.display = 'none'
+    ctx1.parentNode.querySelector('.chart-fallback') || ctx1.insertAdjacentHTML('afterend', fb)
+    ctx2.parentNode.querySelector('.chart-fallback') || ctx2.insertAdjacentHTML('afterend', fb)
+    return
+  }
+  // 恢复 canvas 显示
+  ctx1.style.display = ''; ctx2.style.display = ''
+  var fbEls = document.querySelectorAll('.chart-wrap .chart-fallback')
+  for (var fi = 0; fi < fbEls.length; fi++) fbEls[fi].remove()
+
+  if (!plan || !plan.days || !plan.planMilkPP) {
+    if (chartPP) { chartPP.destroy(); chartPP = null }
+    if (chartTot) { chartTot.destroy(); chartTot = null }
+    ctx1.style.display = 'none'; ctx2.style.display = 'none'
+    var fb = '<div class="chart-fallback">等待批次数据生成...</div>'
+    ctx1.parentNode.querySelector('.chart-fallback') || ctx1.insertAdjacentHTML('afterend', fb)
+    ctx2.parentNode.querySelector('.chart-fallback') || ctx2.insertAdjacentHTML('afterend', fb)
+    return
+  }
+
+  // 确保 canvas 存在
+  ctx1 = document.getElementById('chartPerPig').getContext('2d')
+  ctx2 = document.getElementById('chartTotal').getContext('2d')
+  if (!ctx1 || !ctx2) return
+
+  // 实际数据
+  var inputMap = {}
+  for (var i = 0; i < state.records.length; i++) {
+    inputMap[state.records[i].dayAge] = state.records[i]
+  }
+
+  var labels = plan.days.map(function(d) { return 'D' + d.dayAge })
+
+  var actualPP = plan.days.map(function(d) {
+    var r = inputMap[d.dayAge]
+    if (!r || (r.headCount <= 0)) return null
+    return Math.round(r.totalMilkG / r.headCount * 10) / 10
+  })
+  var actualTotal = plan.days.map(function(d) {
+    var r = inputMap[d.dayAge]
+    if (!r) return null
+    return r.totalMilkG
+  })
+
+  var opts = function(yLabel) {
+    return {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top', labels: { usePointStyle: true, padding: 10, boxWidth: 8, font: { size: 11 } } },
+      },
+      scales: {
+        y: { beginAtZero: true, title: { display: true, text: yLabel, font: { size: 11 } } },
+        x: { title: { display: true, text: '日龄', font: { size: 11 } } },
+      },
+    }
+  }
+
+  // 控奶计划（如果开了控奶模式）
+  var controlData = null
+  if (document.getElementById('controlMode').checked) {
+    controlData = computeControlPlan(plan, state.records, state.controlStartDay)
+  }
+
+  var lineStyle = {
+    borderWidth: 2.5,
+    pointRadius: 4,
+    pointHoverRadius: 6,
+    tension: 0.3,
+    fill: false,
+  }
+
+  // 构建 dataset 数组
+  var ds1 = []
+  var ds2 = []
+
+  // 计划曲线：控奶开启时显示控奶调整后数据，否则显示原计划
+  var planDataPP = controlData ? controlData.planMilkPPControl : plan.planMilkPP
+  var planDataTotal = controlData ? controlData.planMilkTotalControl : plan.planMilkTotal
+  var planLabel = controlData ? '计划(控奶)' : '计划'
+
+  ds1.push(Object.assign({
+    label: planLabel, data: planDataPP,
+    borderColor: '#22c55e', backgroundColor: '#22c55e',
+    borderDash: [],
+  }, lineStyle))
+  ds2.push(Object.assign({
+    label: planLabel, data: planDataTotal,
+    borderColor: '#22c55e', backgroundColor: '#22c55e',
+    borderDash: [],
+  }, lineStyle))
+
+  // 不控奶时的参考线 - 灰色虚线（仅控奶开启时显示）
+  if (!controlData) {
+    // 无控奶：不显示额外曲线
+  } else {
+    ds1.push(Object.assign({
+      label: '参考(不控奶)', data: plan.planMilkPP,
+      borderColor: '#9ca3af', backgroundColor: '#9ca3af',
+      borderDash: [4, 4],
+    }, lineStyle))
+    ds2.push(Object.assign({
+      label: '参考(不控奶)', data: plan.planMilkTotal,
+      borderColor: '#9ca3af', backgroundColor: '#9ca3af',
+      borderDash: [4, 4],
+    }, lineStyle))
+  }
+
+  // 实际 — 蓝色线
+  ds1.push(Object.assign({
+    label: '实际', data: actualPP,
+    borderColor: '#3b82f6', backgroundColor: '#3b82f6',
+    borderDash: [],
+  }, lineStyle))
+  ds2.push(Object.assign({
+    label: '实际', data: actualTotal,
+    borderColor: '#3b82f6', backgroundColor: '#3b82f6',
+    borderDash: [],
+  }, lineStyle))
+
+  // 图1: 头均
+  if (chartPP) { chartPP.destroy(); chartPP = null }
+  try {
+    chartPP = new Chart(ctx1, {
+      type: 'line',
+      data: { labels: labels, datasets: ds1 },
+      options: opts('g/头'),
+    })
+  } catch (e) {
+    ctx1.style.display = 'none'; ctx2.style.display = 'none'
+    var fb = '<div class="chart-fallback">图表渲染失败<br><small>' + e.message + '</small></div>'
+    ctx1.parentNode.querySelector('.chart-fallback') || ctx1.insertAdjacentHTML('afterend', fb)
+    if (!ctx2.parentNode.querySelector('.chart-fallback')) {
+      ctx2.insertAdjacentHTML('afterend', '<div class="chart-fallback">图表渲染失败</div>')
+    }
+    return
+  }
+
+  // 图2: 总配奶
+  if (chartTot) { chartTot.destroy(); chartTot = null }
+  try {
+    chartTot = new Chart(ctx2, {
+      type: 'line',
+      data: { labels: labels, datasets: ds2 },
+      options: opts('g'),
+    })
+  } catch (e) {
+    ctx2.style.display = 'none'
+    ctx2.parentNode.querySelector('.chart-fallback') || ctx2.insertAdjacentHTML('afterend', '<div class="chart-fallback">图表渲染失败<br><small>' + e.message + '</small></div>')
+  }
+}
+
+function renderTable() {
+  var plan = state.plan
+  var wrap = document.getElementById('planTable')
+  if (!plan || !plan.days) { wrap.innerHTML = ''; return }
+
+  var inputMap = {}
+  for (var i = 0; i < state.records.length; i++) {
+    inputMap[state.records[i].dayAge] = state.records[i]
+  }
+
+  var html = '<table><tr>' +
+    '<th>日龄</th><th>状态</th><th>计划(g/头)</th><th>配奶次数</th><th>单次量(g)</th>' +
+    '<th>计划总(g)</th><th>实际总奶(g)</th><th>实头均(g)</th><th>教槽(g)</th>' +
+    '<th>头数</th><th>腹轻</th><th>腹中</th><th>腹重</th><th>腹泻率</th><th>估重(kg)</th>' +
+    '</tr>'
+
+  // 控奶信息（表格需要）
+  var controlInfo = null
+  if (document.getElementById('controlMode').checked) {
+    controlInfo = computeControlPlan(plan, state.records, state.controlStartDay)
+  }
+
+  // 体重级联：已录天用实际采食+教槽，未录天用计划（含控奶调整）
+  var estWeights = []
+  var ew = plan.startWeight
+  for (var ei = 0; ei < plan.days.length; ei++) {
+    estWeights.push(Math.round(ew * 1000) / 1000)
+    var ed = plan.days[ei]
+    var rec = inputMap[ed.dayAge]
+    var milk
+    if (rec) {
+      milk = rec.totalMilkG / (rec.headCount || 1)
+    } else if (controlInfo && controlInfo.planMilkPPControl[ei] != null) {
+      milk = controlInfo.planMilkPPControl[ei]
+    } else {
+      milk = ed.perPigMilkPlan
+    }
+    var creepPP = rec ? ((rec.totalCreepG || 0) / (rec.headCount || 1)) : 0
+    ew += (milk + creepPP * 0.7) / 900
+  }
+
+  for (var i = 0; i < plan.days.length; i++) {
+    var d = plan.days[i]
+    var r = inputMap[d.dayAge]
+    var cls = r ? 'past' : ''
+    var stats = r ? computeDailyStats(r) : null
+
+    // 配奶次数和单次量
+    var feedN = 12
+    if (controlInfo) feedN = controlInfo.feedTimes[i] || 12
+
+    var planPP = d.perPigMilkPlan
+    var planTotal = d.totalMilkPlan
+    if (controlInfo) {
+      if (controlInfo.planMilkPPControl[i] != null) planPP = controlInfo.planMilkPPControl[i]
+      if (controlInfo.planMilkTotalControl[i] != null) planTotal = controlInfo.planMilkTotalControl[i]
+    }
+    // 单次量 = 计划总 / 配奶次数
+    var feedPer = feedN > 0 ? Math.round(planTotal / feedN) : 0
+
+    html += '<tr class="' + cls + '">' +
+      '<td><strong>D' + d.dayAge + '</strong></td>' +
+      '<td>' + (r ? '是' : '待') + '</td>' +
+      '<td>' + planPP + '</td>' +
+      '<td>' + feedN + '</td>' +
+      '<td>' + feedPer + '</td>' +
+      '<td>' + planTotal.toLocaleString() + '</td>' +
+      '<td>' + (r ? r.totalMilkG.toLocaleString() : '—') + '</td>' +
+      '<td>' + (stats ? Math.round(stats.perPigMilkActual) : '—') + '</td>' +
+      '<td>' + (r ? r.totalCreepG.toLocaleString() : '—') + '</td>' +
+      '<td>' + (r ? r.headCount : '—') + '</td>' +
+      '<td>' + (r ? (r.diarrheaMild || 0) : '—') + '</td>' +
+      '<td>' + (r ? (r.diarrheaModerate || 0) : '—') + '</td>' +
+      '<td>' + (r ? (r.diarrheaSevere || 0) : '—') + '</td>' +
+      '<td>' + (stats ? (stats.diarrheaRate * 100).toFixed(1) + '%' : '—') + '</td>' +
+      '<td>' + estWeights[i].toFixed(2) + '</td>' +
+      '</tr>'
+  }
+  html += '</table>'
+  wrap.innerHTML = html
+}
+
+// ══════════════════════════════════════════════
+// 每日明细长按截图
+// ══════════════════════════════════════════════
+
+var tableScreenshotBusy = false
+var tableScreenshotBlob = null
+var tableScreenshotFile = null
+var tableScreenshotObjectUrl = null
+var tableLongPressTimer = null
+var tableLongPressContextMenuTimer = null
+var tableLongPressStart = null
+var tableLongPressTriggered = false
+
+function padScreenshotNumber(value) {
+  return String(value).padStart(2, '0')
+}
+
+function formatScreenshotTime(date) {
+  return date.getFullYear() + '-' +
+    padScreenshotNumber(date.getMonth() + 1) + '-' +
+    padScreenshotNumber(date.getDate()) + ' ' +
+    padScreenshotNumber(date.getHours()) + ':' +
+    padScreenshotNumber(date.getMinutes())
+}
+
+function getTableScreenshotFilename(date) {
+  var safeName = String((state.config && state.config.name) || '未命名批次')
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, '_')
+    .slice(0, 60)
+  return '每日明细-' + safeName + '-' +
+    date.getFullYear() +
+    padScreenshotNumber(date.getMonth() + 1) +
+    padScreenshotNumber(date.getDate()) + '-' +
+    padScreenshotNumber(date.getHours()) +
+    padScreenshotNumber(date.getMinutes()) + '.png'
+}
+
+function clearTableScreenshotPreview() {
+  if (tableScreenshotObjectUrl) URL.revokeObjectURL(tableScreenshotObjectUrl)
+  tableScreenshotObjectUrl = null
+  tableScreenshotBlob = null
+  tableScreenshotFile = null
+  var image = document.getElementById('screenshotPreviewImage')
+  if (image) image.removeAttribute('src')
+}
+
+function closeTableScreenshotPreview() {
+  document.getElementById('screenshotPreviewModal').classList.remove('show')
+  clearTableScreenshotPreview()
+}
+
+function showTableScreenshotPreview(blob, filename) {
+  clearTableScreenshotPreview()
+  tableScreenshotBlob = blob
+  tableScreenshotObjectUrl = URL.createObjectURL(blob)
+  document.getElementById('screenshotPreviewImage').src = tableScreenshotObjectUrl
+
+  var shareButton = document.getElementById('btnShareScreenshot')
+  shareButton.hidden = true
+  if (
+    typeof File === 'function' &&
+    typeof navigator !== 'undefined' &&
+    typeof navigator.share === 'function' &&
+    typeof navigator.canShare === 'function'
+  ) {
+    var file = new File([blob], filename, { type: 'image/png' })
+    if (navigator.canShare({ files: [file] })) {
+      tableScreenshotFile = file
+      shareButton.hidden = false
+    }
+  }
+  document.getElementById('screenshotPreviewModal').classList.add('show')
+}
+
+function downloadTableScreenshot() {
+  if (!tableScreenshotBlob) {
+    showMsg('error', '当前没有可保存的截图')
+    return
+  }
+  try {
+    var url = URL.createObjectURL(tableScreenshotBlob)
+    var link = document.createElement('a')
+    link.href = url
+    link.download = tableScreenshotFile
+      ? tableScreenshotFile.name
+      : getTableScreenshotFilename(new Date())
+    link.style.display = 'none'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(function() { URL.revokeObjectURL(url) }, 1000)
+  } catch (error) {
+    console.warn('[screenshot] 保存每日明细截图失败', error)
+    showMsg('error', '图片下载失败，可以长按上方图片保存')
+  }
+}
+
+async function shareTableScreenshot() {
+  if (!tableScreenshotFile || !navigator.share) return
+  try {
+    await navigator.share({
+      title: '奶爸机每日明细',
+      files: [tableScreenshotFile],
+    })
+  } catch (error) {
+    if (error && error.name === 'AbortError') return
+    console.warn('[screenshot] 分享每日明细截图失败', error)
+    showMsg('error', '分享失败，可以使用“保存图片”')
+  }
+}
+
+async function generateTableScreenshot() {
+  if (tableScreenshotBusy) return
+  var source = document.getElementById('planTable')
+  var sourceTable = source && source.querySelector('table')
+  if (!source || !sourceTable || sourceTable.querySelectorAll('tr').length < 2) {
+    showMsg('error', '当前没有可截图的每日明细')
+    return
+  }
+  if (typeof window.html2canvas !== 'function') {
+    showMsg('error', '截图组件未加载，请检查 html2canvas.min.js')
+    return
+  }
+
+  tableScreenshotBusy = true
+  var tableWrap = document.getElementById('planTableWrap')
+  if (tableWrap) tableWrap.classList.add('long-press-active')
+  showMsg('success', '正在生成每日明细截图……')
+
+  var captureRoot = null
+  try {
+    var now = new Date()
+    var filename = getTableScreenshotFilename(now)
+    captureRoot = document.createElement('div')
+    captureRoot.className = 'screenshot-capture-root'
+    captureRoot.style.position = 'fixed'
+    captureRoot.style.left = '-100000px'
+    captureRoot.style.top = '0'
+    captureRoot.style.zIndex = '-1'
+    captureRoot.style.width = 'max-content'
+    captureRoot.style.overflow = 'visible'
+    captureRoot.style.background = '#ffffff'
+    captureRoot.style.padding = '24px'
+    captureRoot.style.color = '#1f2937'
+    captureRoot.style.fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+
+    var title = document.createElement('div')
+    title.textContent = '奶爸机 — 每日明细'
+    title.style.fontSize = '20px'
+    title.style.fontWeight = '700'
+    title.style.marginBottom = '8px'
+    captureRoot.appendChild(title)
+
+    var meta = document.createElement('div')
+    meta.textContent =
+      '批次：' + ((state.config && state.config.name) || '未命名批次') + '\n' +
+      '日龄：' + ((state.config && state.config.startAge) || '—') + 'd → ' +
+      ((state.config && state.config.endAge) || '—') + 'd\n' +
+      '生成时间：' + formatScreenshotTime(now)
+    meta.style.whiteSpace = 'pre-line'
+    meta.style.color = '#4b5563'
+    meta.style.fontSize = '13px'
+    meta.style.lineHeight = '1.7'
+    meta.style.marginBottom = '16px'
+    captureRoot.appendChild(meta)
+
+    var clone = source.cloneNode(true)
+    clone.removeAttribute('id')
+    clone.style.width = 'max-content'
+    clone.style.overflow = 'visible'
+    var cloneTable = clone.querySelector('table')
+    cloneTable.style.width = 'max-content'
+    cloneTable.style.whiteSpace = 'nowrap'
+    captureRoot.appendChild(clone)
+    document.body.appendChild(captureRoot)
+
+    var canvas = await window.html2canvas(captureRoot, {
+      backgroundColor: '#ffffff',
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      logging: false,
+      scrollX: 0,
+      scrollY: 0,
+    })
+    if (typeof canvas.toBlob !== 'function') throw new Error('Canvas 不支持 Blob 导出')
+    var blob = await new Promise(function(resolve) {
+      canvas.toBlob(resolve, 'image/png')
+    })
+    if (!blob) throw new Error('PNG 导出失败')
+    showTableScreenshotPreview(blob, filename)
+  } catch (error) {
+    console.warn('[screenshot] 生成每日明细截图失败', error)
+    showMsg('error', '生成截图失败，请稍后重试')
+  } finally {
+    if (captureRoot) captureRoot.remove()
+    if (tableWrap) tableWrap.classList.remove('long-press-active')
+    tableScreenshotBusy = false
+  }
+}
+
+function cancelTableLongPress(preserveContextMenuBlock) {
+  if (tableLongPressTimer) clearTimeout(tableLongPressTimer)
+  tableLongPressTimer = null
+  tableLongPressStart = null
+  if (tableLongPressContextMenuTimer) clearTimeout(tableLongPressContextMenuTimer)
+  if (preserveContextMenuBlock && tableLongPressTriggered) {
+    // 长按成功后的系统菜单可能晚于 pointerup/leave 到达，短暂保留标记后再清理。
+    tableLongPressContextMenuTimer = setTimeout(function() {
+      tableLongPressTriggered = false
+      tableLongPressContextMenuTimer = null
+    }, 700)
+  } else {
+    tableLongPressTriggered = false
+  }
+}
+
+function bindTableScreenshotLongPress() {
+  var target = document.getElementById('planTable')
+  if (!target || target.dataset.longPressBound === '1') return
+  target.dataset.longPressBound = '1'
+
+  target.addEventListener('pointerdown', function(event) {
+    if ((event.pointerType === 'mouse' && event.button !== 0) || tableScreenshotBusy) return
+    cancelTableLongPress()
+    tableLongPressTriggered = false
+    tableLongPressStart = { x: event.clientX, y: event.clientY }
+    tableLongPressTimer = setTimeout(function() {
+      tableLongPressTimer = null
+      if (!tableLongPressStart || tableScreenshotBusy) return
+      tableLongPressTriggered = true
+      if (navigator.vibrate) navigator.vibrate(30)
+      generateTableScreenshot()
+    }, 650)
+  })
+
+  target.addEventListener('pointermove', function(event) {
+    if (!tableLongPressStart) return
+    var dx = event.clientX - tableLongPressStart.x
+    var dy = event.clientY - tableLongPressStart.y
+    if ((dx * dx) + (dy * dy) > 100) cancelTableLongPress()
+  })
+  target.addEventListener('pointerup', function() {
+    cancelTableLongPress(true)
+  })
+  target.addEventListener('pointercancel', function() {
+    cancelTableLongPress(true)
+  })
+  target.addEventListener('pointerleave', function() {
+    cancelTableLongPress(true)
+  })
+  target.addEventListener('contextmenu', function(event) {
+    if (tableLongPressStart || tableLongPressTriggered) {
+      event.preventDefault()
+      tableLongPressTriggered = false
+    }
+  })
+}
+
+function renderCompleteButton() {
+  var btn = document.getElementById('btnComplete')
+  var hint = document.getElementById('completeHint')
+
+  if (state.status === 'completed') {
+    btn.disabled = true
+    btn.textContent = '批次已完成'
+    hint.textContent = '数据只读，不可修改'
+    return
+  }
+
+  if (!state.plan) {
+    btn.disabled = true
+    btn.textContent = '完成批次并导出训练数据'
+    hint.textContent = '请先录入数据'
+    return
+  }
+
+  if (state.currentDayIndex >= state.plan.days.length - 1) {
+    // 最后一天还需确认已录入才可完成
+    var lastDayAge = state.plan.days[state.plan.days.length - 1].dayAge
+    var hasLastRecord = false
+    for (var ri = 0; ri < state.records.length; ri++) {
+      if (state.records[ri].dayAge === lastDayAge) { hasLastRecord = true; break }
+    }
+    if (hasLastRecord) {
+      btn.disabled = false
+      hint.textContent = '点击完成并导出训练数据（JSON）'
+    } else {
+      btn.disabled = true
+      hint.textContent = '请先录入最后一天数据'
+    }
+  } else {
+    btn.disabled = true
+    hint.textContent = '推进到最后一天方可完成（当前: 第' + (state.currentDayIndex + 1) + '/' + state.plan.days.length + '天）'
+  }
+}
+
+/** 渲染影子模式面板 */
+function renderShadowPanel() {
+  if (!document.getElementById('shadowMode').checked) return
+  syncCreepLevelFromAmount()
+  var plan = state.plan
+  if (!plan || !plan.days[state.currentDayIndex]) return
+  var body = document.getElementById('shadowPanelBody')
+  var day = plan.days[state.currentDayIndex]
+  var milkEl = document.getElementById('inputTotalMilk')
+  var creepEl = document.getElementById('inputTotalCreep')
+  var hcEl = document.getElementById('inputHeadCount')
+  var mildEl = document.getElementById('inputDiarMild')
+  var modEl = document.getElementById('inputDiarMod')
+  var sevEl = document.getElementById('inputDiarSev')
+  var milkValue = milkEl.value === '' ? '' : parseInt(milkEl.value)
+  var previewAvgTemp = parseFloat(document.getElementById('inputAvgTemp').value)
+  var previewWeighRead = readWeighSampleFromInputs()
+
+  // 构建一个虚拟 record 用于影子计算
+  var virtualRecord = {
+    headCount: parseInt(hcEl.value) || state.config.headCount,
+    totalMilkG: milkValue,
+    actualMilkRecorded: milkEl.dataset.autoFilled !== '1' && milkEl.value !== '',
+    executionStatus: document.getElementById('inputExecutionStatus').value,
+    totalCreepG: parseInt(creepEl.value) || 0,
+    diarrheaMild: parseInt(mildEl.value) || 0,
+    diarrheaModerate: parseInt(modEl.value) || 0,
+    diarrheaSevere: parseInt(sevEl.value) || 0,
+    death: parseInt(document.getElementById('inputDeath').value) || 0,
+    cull: parseInt(document.getElementById('inputCull').value) || 0,
+    avgTemp: isNaN(previewAvgTemp) ? null : previewAvgTemp,
+    creepLevel: parseInt(document.getElementById('inputCreepLevel').value),
+    uniformityLevel: parseInt(document.getElementById('inputUniformityLevel').value),
+    growthLevel: parseInt(document.getElementById('inputGrowthLevel').value),
+    startAge: state.config.startAge,
+    batchStartWeight: state.config.startWeight,
+    hasInitialWeightAnchor: state.config.hasInitialWeightAnchor === true,
+  }
+  if (previewWeighRead.samples.length > 0) virtualRecord.weighSample = previewWeighRead.samples
+
+  if (typeof computeShadowAdjustment !== 'function') {
+    body.innerHTML = '<div style="color:#888;font-size:11px;">V5-Lite 模型未加载</div>'
+    return
+  }
+
+  // 计划量跟随控奶
+  var shadowPlanDay = { ...day, perPigMilkPlan: day.perPigMilkPlan, totalMilkPlan: day.totalMilkPlan }
+  if (document.getElementById('controlMode').checked) {
+    try {
+      var ctrl = computeControlPlan(plan, state.records, state.controlStartDay)
+      if (ctrl && ctrl.planMilkPPControl[state.currentDayIndex] != null) {
+        shadowPlanDay.perPigMilkPlan = ctrl.planMilkPPControl[state.currentDayIndex]
+      }
+    } catch (e) {}
+  }
+  shadowPlanDay.totalMilkPlan = Math.round(shadowPlanDay.perPigMilkPlan * virtualRecord.headCount)
+
+  var shadow = computeShadowAdjustment(shadowPlanDay, virtualRecord, state.config)
+
+  var riskClass = shadow.riskScore >= 40 ? 'shadow-risk-high' : (shadow.riskScore > 15 ? 'shadow-risk-mid' : 'shadow-risk-low')
+  var showExecutionDeficit = shadow.executionDeficitRate == null
+    ? '未录入'
+    : (shadow.executionDeficitRate * 100).toFixed(1) + '%'
+  var showExecutionRate = shadow.executionRate == null
+    ? '未录入'
+    : (shadow.executionRate * 100).toFixed(1) + '%'
+  var showRiskExecution = shadow.executionDeficitRate == null
+    ? '暂无'
+    : (shadow.executionRiskExcluded ? '已排除' : shadow.riskExecution + '分')
+
+  body.innerHTML =
+    '<div class="shadow-grid">' +
+      '<div class="shadow-card"><div class="label">教槽等级</div><div class="val">' + shadow.creepLevel + '</div></div>' +
+      '<div class="shadow-card"><div class="label">健康风险</div><div class="val ' + riskClass + '">' + shadow.riskHealth + '分</div></div>' +
+      '<div class="shadow-card"><div class="label">执行异常风险</div><div class="val">' + showRiskExecution + '</div></div>' +
+      '<div class="shadow-card"><div class="label">环境风险</div><div class="val">' + shadow.riskEnv + '分</div></div>' +
+      '<div class="shadow-card"><div class="label">综合风险</div><div class="val ' + riskClass + '">' + shadow.riskScore + '分</div></div>' +
+      '<div class="shadow-card"><div class="label">控奶系数</div><div class="val">' + shadow.adjustFactor + 'x</div></div>' +
+      '<div class="shadow-card"><div class="label">原计划</div><div class="val">' + shadowPlanDay.perPigMilkPlan + 'g</div></div>' +
+      '<div class="shadow-card"><div class="label">影子调整</div><div class="val">' + shadow.shadowPerPig + 'g</div></div>' +
+      '<div class="shadow-card"><div class="label">执行率</div><div class="val">' + showExecutionRate + '</div></div>' +
+      '<div class="shadow-card"><div class="label">执行缺口率</div><div class="val">' + showExecutionDeficit + '</div></div>' +
+      '<div class="shadow-card"><div class="label">熔断</div><div class="val" style="color:' + (shadow.pauseProbe ? '#dc2626' : '#15803d') + '">' + (shadow.pauseProbe ? '是' : '否') + '</div></div>' +
+      '<div class="shadow-card"><div class="label">生长评分</div><div class="val">' + (shadow.growthProxyScore != null ? shadow.growthProxyScore.toFixed(1) : '—') + '</div></div>' +
+      '<div class="shadow-card"><div class="label">估重区间</div><div class="val">' + (shadow.weightEstimate ? shadow.weightEstimate.lowKg.toFixed(1) + '-' + shadow.weightEstimate.highKg.toFixed(1) : '—') + 'kg</div></div>' +
+      '<div class="shadow-card"><div class="label">置信度</div><div class="val">' + (shadow.weightEstimate ? Math.round(shadow.weightEstimate.confidence * 100) : '—') + '%</div></div>' +
+      '<div class="shadow-card"><div class="label">上调权限</div><div class="val" style="color:' + (shadow.allowGrowthUp && shadow.allowGrowthUp.allowed ? '#15803d' : '#dc2626') + '">' + (shadow.allowGrowthUp && shadow.allowGrowthUp.allowed ? '允许' : '禁止') + '</div></div>' +
+    '</div>'
+  if (shadow.allowGrowthUp && !shadow.allowGrowthUp.allowed && shadow.allowGrowthUp.reasons && shadow.allowGrowthUp.reasons.length > 0) {
+    body.innerHTML += '<div style="margin-top:4px;font-size:10px;color:#dc2626;">上调禁止原因：' + shadow.allowGrowthUp.reasons.join('，') + '</div>'
+  }
+}
+
+// ══════════════════════════════════════════════
+// 辅助
+// ══════════════════════════════════════════════
+
+var msgTimer = null
+
+function showMsg(type, text) {
+  if (msgTimer) clearTimeout(msgTimer)
+  var area = document.getElementById('msgArea')
+  var cls = type === 'error' ? 'err-msg' : 'success-msg'
+  area.innerHTML = '<div class="' + cls + '">' + text + '</div>'
+  msgTimer = setTimeout(function() { area.innerHTML = ''; msgTimer = null }, type === 'error' ? 5000 : 3000)
+}
+
+function setSyncStatus(text) {
+  var el = document.getElementById('syncStatus')
+  if (el) el.textContent = text || ''
+}
+
+var legacyMigrationResolver = null
+
+function requestLegacyMigration(user) {
+  var legacy = STORAGE.legacyBatches()
+  var count = Object.keys(legacy).length
+  if (!count) return Promise.resolve(false)
+  document.getElementById('legacyMigrationText').textContent =
+    '检测到本机存在 ' + count + ' 个旧批次。是否将这些数据迁移到当前账号 ' +
+    (user.email || '当前登录账号') + '？'
+  document.getElementById('legacyMigrationModal').classList.add('show')
+  return new Promise(function(resolve) {
+    legacyMigrationResolver = resolve
+  })
+}
+
+function respondLegacyMigration(accepted) {
+  var resolver = legacyMigrationResolver
+  legacyMigrationResolver = null
+  document.getElementById('legacyMigrationModal').classList.remove('show')
+  var approved = false
+  if (accepted && SupabaseSync.currentUser && STORAGE.userId === SupabaseSync.currentUser.id) {
+    approved = STORAGE.claimLegacyOwner(SupabaseSync.currentUser.id) === SupabaseSync.currentUser.id
+  }
+  STORAGE.recordLegacyMigrationDecision(approved)
+  if (resolver) resolver(approved)
+}
+
+function setLoginMessage(text, kind) {
+  var el = document.getElementById('loginMessage')
+  if (!el) return
+  el.textContent = text || ''
+  el.className = 'auth-message' + (kind ? ' ' + kind : '')
+}
+
+function showLoading(text) {
+  document.getElementById('loadingMessage').textContent = text || '正在验证身份……'
+  document.getElementById('loadingScreen').hidden = false
+  document.getElementById('loginScreen').hidden = true
+  document.getElementById('appRoot').hidden = true
+  document.getElementById('agentLauncher').hidden = true
+  document.getElementById('feedingAgentDrawer').hidden = true
+}
+
+function showLogin(message) {
+  document.getElementById('loadingScreen').hidden = true
+  document.getElementById('appRoot').hidden = true
+  document.getElementById('agentLauncher').hidden = true
+  document.getElementById('feedingAgentDrawer').hidden = true
+  document.getElementById('feedingAgentDrawer').classList.remove('open')
+  document.getElementById('loginScreen').hidden = false
+  setLoginMessage(message || '', message ? 'error' : '')
+}
+
+function showApplication(user) {
+  document.getElementById('loadingScreen').hidden = true
+  document.getElementById('loginScreen').hidden = true
+  document.getElementById('appRoot').hidden = false
+  document.getElementById('agentLauncher').hidden = false
+  document.getElementById('feedingAgentDrawer').hidden = false
+  document.getElementById('userEmail').textContent = user.email || '已登录用户'
+}
+
+function authErrorMessage(error) {
+  var text = (error && error.message) || ''
+  if (/invalid login credentials|invalid.*password|email not confirmed/i.test(text)) return '邮箱或密码错误'
+  if (/network|fetch|failed to fetch|timeout/i.test(text)) return '登录失败，请检查网络连接'
+  return '登录失败，请稍后重试'
+}
+
+function resetInMemoryState() {
+  state.batchId = null
+  state.config = {
+    startAge: 3, endAge: 21, startWeight: 2.3, headCount: 20, sowParity: 3,
+    litterSize: 12, healthStatus: 'normal', farmRoom: 'A-1', name: '默认批次',
+    hasInitialWeightAnchor: false,
+  }
+  state.plan = null
+  state.records = []
+  state.currentDayIndex = 0
+  state.status = 'active'
+  state.configLocked = false
+  state.controlStartDay = -1
+}
+
+var currentAppUserId = null
+var initializingUserId = null
+
+function clearAuthenticatedState() {
+  var outgoingUserId =
+    (SupabaseSync.currentUser && SupabaseSync.currentUser.id) ||
+    currentAppUserId
+  if (outgoingUserId) SupabaseSync.clearUserQueues(outgoingUserId)
+  if (legacyMigrationResolver) {
+    var resolver = legacyMigrationResolver
+    legacyMigrationResolver = null
+    document.getElementById('legacyMigrationModal').classList.remove('show')
+    resolver(false)
+  }
+  SupabaseSync.currentUser = null
+  SupabaseSync.available = false
+  STORAGE.setUser(null)
+  currentAppUserId = null
+  initializingUserId = null
+  if (typeof FeedingAgentUI !== 'undefined') FeedingAgentUI.changeBatch(null)
+  resetInMemoryState()
+  setSyncStatus('')
+}
+
+async function initializeForUser(user) {
+  if (!user || !user.id) return
+  if (currentAppUserId === user.id && !initializingUserId) return
+  if (initializingUserId === user.id) return
+
+  if (SupabaseSync.currentUser && SupabaseSync.currentUser.id !== user.id) {
+    clearAuthenticatedState()
+  }
+  initializingUserId = user.id
+  showLoading('正在同步您的批次数据……')
+  try {
+    SupabaseSync.currentUser = user
+    STORAGE.setUser(user.id)
+    resetInMemoryState()
+    if (STORAGE.shouldOfferLegacyMigration()) await requestLegacyMigration(user)
+    if (!SupabaseSync.currentUser || SupabaseSync.currentUser.id !== user.id) return
+    var synced = await SupabaseSync.bootstrap()
+    if (!SupabaseSync.currentUser || SupabaseSync.currentUser.id !== user.id) return
+
+    init()
+    currentAppUserId = user.id
+    showApplication(user)
+    if (!synced) {
+      setSyncStatus('当前处于离线模式，数据暂存在本机')
+      showMsg('error', '当前处于离线模式，数据暂存在本机；云端同步将在网络恢复后重试。')
+    }
+  } catch (error) {
+    console.warn('[supabase] 应用初始化失败，使用本地缓存', error)
+    init()
+    currentAppUserId = user.id
+    showApplication(user)
+    setSyncStatus('当前处于离线模式，数据暂存在本机')
+    showMsg('error', '云端同步异常，当前数据暂存在本机。')
+  } finally {
+    if (initializingUserId === user.id) initializingUserId = null
+  }
+}
+
+async function handleLogin(event) {
+  event.preventDefault()
+  if (!window.supabaseClient) {
+    setLoginMessage('登录服务未加载，请检查网络连接后刷新页面。', 'error')
+    return
+  }
+  var email = document.getElementById('loginEmail').value.trim()
+  var password = document.getElementById('loginPassword').value
+  var button = document.getElementById('loginButton')
+  button.disabled = true
+  button.textContent = '正在登录……'
+  setLoginMessage('正在验证身份……', 'info')
+  try {
+    var result = await window.supabaseClient.auth.signInWithPassword({ email: email, password: password })
+    if (result.error) throw result.error
+    setLoginMessage('', '')
+    await initializeForUser(result.data.user)
+  } catch (error) {
+    console.warn('[supabase] 登录失败', error)
+    setLoginMessage(authErrorMessage(error), 'error')
+  } finally {
+    button.disabled = false
+    button.textContent = '登录'
+  }
+}
+
+async function signOut() {
+  var userId = SupabaseSync.currentUser && SupabaseSync.currentUser.id
+  try {
+    if (userId) await SupabaseSync.flushAllSaves(userId)
+    if (window.supabaseClient) {
+      var result = await window.supabaseClient.auth.signOut()
+      if (result.error) throw result.error
+    }
+  } catch (error) {
+    console.warn('[supabase] 退出登录失败', error)
+  } finally {
+    clearAuthenticatedState()
+    showLogin()
+  }
+}
+
+function updateDiarDisplay() {
+  var mild = +document.getElementById('inputDiarMild').value || 0
+  var mod = +document.getElementById('inputDiarMod').value || 0
+  var sev = +document.getElementById('inputDiarSev').value || 0
+  var hcRaw = +document.getElementById('inputHeadCount').value
+  var hc = (!isNaN(hcRaw) && hcRaw > 0) ? hcRaw : 1
+  var total = mild + mod + sev
+  var rate = (total / hc * 100).toFixed(1)
+  document.getElementById('diarTotalDisplay').textContent = '腹泻率: ' + rate + '% (' + total + '/' + hc + ')'
+}
+
+function syncCreepLevelFromAmount() {
+  var creepEl = document.getElementById('inputTotalCreep')
+  var headEl = document.getElementById('inputHeadCount')
+  var levelEl = document.getElementById('inputCreepLevel')
+  if (!creepEl || !headEl || !levelEl) return
+
+  if (creepEl.value === '') {
+    levelEl.disabled = false
+    return
+  }
+
+  var totalCreep = parseFloat(creepEl.value)
+  var headCount = parseFloat(headEl.value)
+  if (!Number.isFinite(totalCreep) || totalCreep < 0 || !Number.isFinite(headCount) || headCount <= 0) {
+    levelEl.disabled = false
+    return
+  }
+
+  var avgCreep = totalCreep / headCount
+  var level = typeof creepGramsToLevel === 'function'
+    ? creepGramsToLevel(avgCreep)
+    : (avgCreep >= 70 ? 3 : (avgCreep >= 30 ? 2 : 1))
+  levelEl.value = String(level)
+  levelEl.disabled = true
+}
+
+/** 控奶模式切换 */
+function toggleControl() {
+  var checked = document.getElementById('controlMode').checked
+  if (checked) {
+    // 勾选：首次启用时记录当前天作为控奶起始日
+    if (state.controlStartDay < 0) {
+      state.controlStartDay = state.currentDayIndex
+      STORAGE.saveCurrent()
+    }
+  } else {
+    // 取消勾选：清除控奶记录并保存
+    state.controlStartDay = -1
+    STORAGE.saveCurrent()
+  }
+  refreshDailyInputDefaults(true)
+  renderCharts()
+  renderTable()
+  renderTodayCard()
+  if (document.getElementById('shadowMode').checked) renderShadowPanel()
+}
+
+// ══════════════════════════════════════════════
+// 超早期断奶 SOP + Pi Agent 现场界面
+// ══════════════════════════════════════════════
+
+var FeedingAgentUI = {
+  current: null,
+  templates: [],
+  sessionId: null,
+  sessionBatchId: null,
+  sessionLoading: null,
+  busyTaskId: null,
+
+  uuid: function() {
+    return window.crypto && window.crypto.randomUUID
+      ? window.crypto.randomUUID()
+      : 'nbj_' + Date.now() + '_' + Math.random().toString(36).slice(2)
+  },
+
+  token: async function() {
+    if (!window.supabaseClient) throw new Error('登录服务未加载')
+    var result = await window.supabaseClient.auth.getSession()
+    if (result.error) throw result.error
+    var session = result.data && result.data.session
+    if (!session || !session.access_token) throw new Error('登录已过期')
+    return session.access_token
+  },
+
+  api: async function(path, options) {
+    var token = await this.token()
+    var response = await fetch(path, Object.assign({}, options || {}, {
+      headers: Object.assign({}, options && options.headers, {
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json',
+      }),
+    }))
+    var body = null
+    try { body = await response.json() } catch (ignore) {}
+    if (!response.ok) {
+      var error = new Error(body && body.code || 'NBJ_AGENT_UNAVAILABLE')
+      error.status = response.status
+      throw error
+    }
+    return body
+  },
+
+  status: function(text, isError) {
+    var el = document.getElementById('sopStatusText')
+    if (!el) return
+    el.textContent = text
+    el.style.color = isError ? '#b91c1c' : '#64748b'
+  },
+
+  changeBatch: function(batchId) {
+    if (this.sessionBatchId === batchId && this.sessionId) return
+    this.sessionId = null
+    this.sessionBatchId = batchId || null
+    this.sessionLoading = null
+    var label = document.getElementById('agentBatchLabel')
+    if (label) {
+      label.textContent = batchId
+        ? '批次：' + (state.config.name || batchId) + ' · 正在读取独立会话'
+        : '等待选择批次'
+    }
+    var log = document.getElementById('feedingAgentLog')
+    if (log) {
+      log.innerHTML = ''
+      this.appendMessage(
+        'system',
+        '本对话仅属于当前批次。设备建议来自完整配奶曲线；不会远程操作设备或进行兽医诊断。'
+      )
+    }
+  },
+
+  loadBatchSession: async function(batchId) {
+    if (!batchId || !SupabaseSync.currentUser || !window.supabaseClient) return null
+    if (this.sessionId && this.sessionBatchId === batchId) return this.sessionId
+    if (this.sessionLoading && this.sessionBatchId === batchId) return this.sessionLoading
+    this.changeBatch(batchId)
+    var self = this
+    this.sessionLoading = (async function() {
+      var run = self.current && self.current.run
+      var result = await window.supabaseClient.rpc('ensure_feeding_agent_session', {
+        p_batch_id: batchId,
+        p_run_id: run && run.id || null,
+      })
+      if (result.error) throw result.error
+      var session = Array.isArray(result.data) ? result.data[0] : result.data
+      if (!session || state.batchId !== batchId) return null
+      self.sessionId = session.id
+      self.sessionBatchId = batchId
+      var messages = await window.supabaseClient.from('feeding_agent_messages')
+        .select('role,content,created_at')
+        .eq('session_id', session.id)
+        .in('role', ['user', 'assistant'])
+        .order('created_at', { ascending: true })
+        .limit(100)
+      if (messages.error) throw messages.error
+      if (state.batchId !== batchId) return null
+      var log = document.getElementById('feedingAgentLog')
+      log.innerHTML = ''
+      self.appendMessage(
+        'system',
+        '已载入“' + (state.config.name || batchId) + '”的独立会话' +
+        ((messages.data || []).length ? '和历史记录。' : '；这是该批次的新会话。')
+      )
+      ;(messages.data || []).forEach(function(message) {
+        self.appendMessage(message.role, message.content)
+      })
+      var label = document.getElementById('agentBatchLabel')
+      if (label) label.textContent = '批次：' + (state.config.name || batchId) + ' · 会话已同步'
+      return session.id
+    })().finally(function() {
+      if (self.sessionBatchId === batchId) self.sessionLoading = null
+    })
+    return this.sessionLoading
+  },
+
+  loadTemplates: async function() {
+    var select = document.getElementById('sopTemplateSelect')
+    if (!select || !window.supabaseClient || !SupabaseSync.currentUser) return
+    try {
+      var result = await window.supabaseClient.from('feeding_sop_templates')
+        .select('id,version,name,config,status,created_at')
+        .eq('status', 'published')
+        .order('created_at', { ascending: false })
+      if (result.error) throw result.error
+      this.templates = result.data || []
+      select.innerHTML = this.templates.length
+        ? this.templates.map(function(item) {
+            return '<option value="' + escapeHtml(item.id) + '">' +
+              escapeHtml(item.name + ' · ' + item.version) + '</option>'
+          }).join('')
+        : '<option value="">暂无模板，请由管理员创建</option>'
+    } catch (error) {
+      select.innerHTML = '<option value="">模板服务暂不可用</option>'
+    }
+  },
+
+  createDefaultTemplate: async function() {
+    if (!SupabaseSync.currentUser) return
+    var config = {
+      templateId: 'naibaji-early-weaning', version: '2026.07.31-v4-sop-priority',
+      timezone: 'Asia/Shanghai', utcOffsetMinutes: 480,
+      defaultAdmissionDeadlineLocal: '09:00', preferredFirstTeachingLocal: '17:00',
+      adaptationMinHours: 8, adaptationMaxHours: 10, teachingIntervalHours: 3,
+      teachingLiquidMlPerHead: 10, teachingPowderGramsPerTwenty: 35,
+      devicePowderPrecisionGrams: 1,
+      teachingProgramEndDayOffset: 1, teachingProgramEndLocal: '08:00',
+      teachingDirectTotalPowderGrams: 0,
+      quantityAuthorityOrder: ['sop_direct', 'sop_indirect', 'production_model'],
+      modelQuantityFallbackEnabled: true,
+      teachingQuantitySource: 'sop',
+      deviceConfigurationFields: ['powderGrams', 'timeLocal'],
+      teachingLatestDay: 3,
+      waterClosedBeforeAgeDays: 12, waterPolicyEnabled: true,
+      teachingProgramEnabled: true, gentleMovementEnabled: true,
+      laggardEvaluationEnabled: true, creepFeedEnabled: true,
+      soakedFeedEnabled: true, transitionEnabled: true, maintenanceEnabled: true,
+      productionProgramStartLocal: '00:00', customTasks: [],
+      standardCleanEveryDays: 2, deepCleanEveryDays: 7,
+      creepAgeStart: 8, creepAgeEnd: 11,
+      soakedFeedAgeStart: 12, soakedFeedAgeEnd: 14, soakedFeedRatio: '4:1',
+      transitionAgeStart: 20, transitionMealsMin: 2, transitionMealsMax: 3,
+    }
+    try {
+      var result = await window.supabaseClient.from('feeding_sop_templates').insert({
+        user_id: SupabaseSync.currentUser.id,
+        template_key: 'naibaji-early-weaning',
+        version: config.version,
+        name: '山川奶爸®超早期断奶 SOP',
+        config: config,
+        status: 'published',
+        created_by: SupabaseSync.currentUser.id,
+      })
+      if (result.error) throw result.error
+      await this.loadTemplates()
+      this.status('默认 SOP 已创建；修改时请复制为新版本。')
+    } catch (error) {
+      this.status('创建失败：仅管理员可创建，或该版本已存在。', true)
+    }
+  },
+
+  start: async function() {
+    if (!state.batchId) return this.status('请先选择批次。', true)
+    var templateId = document.getElementById('sopTemplateSelect').value
+    var admittedAt = document.getElementById('sopAdmissionAt').value
+    if (!templateId || !admittedAt) return this.status('请选择模板并填写实际入栏时间。', true)
+    if (!confirm('启动后将冻结 SOP、模型、时区、稀释比和关键参数。确定启动？')) return
+    try {
+      var dilutionEl = document.getElementById('inputDilution')
+      await this.api('/api/batches/' + encodeURIComponent(state.batchId) + '/sop/start', {
+        method: 'POST',
+        body: JSON.stringify({
+          templateId: templateId,
+          admittedAt: new Date(admittedAt).toISOString(),
+          activeHeadCount: getCurrentHeadCountDefault(),
+          dilutionRatio: '水:粉=' + (dilutionEl && dilutionEl.value || '6') + ':1',
+          startAge: state.config.startAge,
+          endAge: state.config.endAge,
+          idempotencyKey: this.uuid(),
+        }),
+      })
+      await this.refresh()
+    } catch (error) {
+      this.status('启动失败：' + error.message, true)
+    }
+  },
+
+  refresh: async function() {
+    var admission = document.getElementById('sopAdmissionAt')
+    if (admission && !admission.value) {
+      var now = new Date()
+      admission.value = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+        .toISOString().slice(0, 16)
+    }
+    if (!state.batchId || !SupabaseSync.currentUser) {
+      this.current = null
+      return this.render()
+    }
+    if (!this.templates.length) this.loadTemplates()
+    var batchId = state.batchId
+    try {
+      var data = await this.api('/api/batches/' + encodeURIComponent(batchId) + '/sop/today', { method: 'GET' })
+      if (state.batchId !== batchId) return
+      this.current = data
+      this.render()
+      try {
+        await this.loadBatchSession(batchId)
+      } catch (sessionError) {
+        this.status('现场流程已加载，但 Agent 独立会话暂时无法同步：' + sessionError.message, true)
+      }
+    } catch (error) {
+      if (state.batchId !== batchId) return
+      this.current = null
+      this.render()
+      this.status('SOP 云端服务暂不可用；原饲喂模型和本地记录仍可继续使用。', true)
+    }
+  },
+
+  render: function() {
+    var summary = document.getElementById('sopSummary')
+    var list = document.getElementById('sopTaskList')
+    var quick = document.getElementById('sopQuickActions')
+    var toolbar = document.getElementById('sopStartToolbar')
+    if (!summary || !list || !toolbar) return
+    var run = this.current && this.current.run
+    var tasks = this.current && this.current.tasks || []
+    toolbar.style.display = run ? 'none' : 'flex'
+    quick.hidden = !run
+    if (!run) {
+      summary.innerHTML = ''
+      list.innerHTML = ''
+      if (state.batchId) this.status('当前批次尚未启动 SOP。')
+      return
+    }
+    var pending = tasks.filter(function(task) {
+      return task.status === 'pending' || task.status === 'overdue'
+    })
+    var overdue = pending.filter(function(task) { return task.display_status === 'overdue' })
+    var next = pending[0]
+    var activeTasks = tasks.filter(function(task) { return task.status !== 'cancelled' })
+    var humanTasks = activeTasks.filter(function(task) { return task.status !== 'scheduled' })
+    var completedTasks = humanTasks.filter(function(task) { return task.status === 'completed' })
+    var currentStep = next ? completedTasks.length + 1 : humanTasks.length
+    var meals = tasks.filter(function(task) {
+      return task.task_kind === 'teaching_meal' && task.status !== 'cancelled'
+    })
+    var deviceMeals = meals.filter(function(task) { return task.status === 'scheduled' })
+    var powder = meals.reduce(function(sum, task) {
+      return sum + Number(task.planned_values && task.planned_values.powderGrams || 0)
+    }, 0)
+    var quantityAuthority = meals.reduce(function(authority, task) {
+      return authority || task.planned_values && task.planned_values.quantityAuthority || ''
+    }, '')
+    var quantitySourceLabel = quantityAuthority === 'production_model'
+      ? '生产模型兜底'
+      : quantityAuthority === 'sop_direct'
+        ? 'SOP 直接总量'
+        : 'SOP 参数推导'
+    summary.innerHTML =
+      '<div class="sop-stat"><span>当前阶段</span><strong>' + escapeHtml(run.phase) + '</strong></div>' +
+      '<div class="sop-stat"><span>人工步骤</span><strong>' + currentStep + ' / ' + humanTasks.length + '</strong></div>' +
+      '<div class="sop-stat"><span>本步任务</span><strong>' + escapeHtml(next ? next.title : '暂无') + '</strong></div>' +
+      '<div class="sop-stat"><span>后续 / 逾期</span><strong>' + Math.max(0, pending.length - (next ? 1 : 0)) + ' / ' + overdue.length + '</strong></div>' +
+      '<div class="sop-stat"><span>首夜教奶程序</span><strong>' + deviceMeals.length + '餐 · ' + powder + 'g粉</strong></div>' +
+      '<div class="sop-stat"><span>时间 / 数量来源</span><strong>SOP / ' + escapeHtml(quantitySourceLabel) + '</strong></div>' +
+      '<div class="sop-stat"><span>SOP / revision</span><strong>' +
+        escapeHtml(run.template_version) + ' / ' + run.revision + '</strong></div>'
+    var nowMs = Date.now()
+    var earlyWindowMs = 15 * 60 * 1000
+    var nextAt = next ? Date.parse(next.scheduled_at) : 0
+    var canComplete = !!next && nextAt <= nowMs + earlyWindowMs
+    var waitText = ''
+    if (next && !canComplete) {
+      var waitMinutes = Math.max(1, Math.ceil((nextAt - nowMs) / 60000))
+      waitText = waitMinutes >= 1440
+        ? '约 ' + Math.ceil(waitMinutes / 1440) + ' 天后'
+        : waitMinutes >= 60
+          ? '约 ' + Math.ceil(waitMinutes / 60) + ' 小时后'
+          : '约 ' + waitMinutes + ' 分钟后'
+    }
+    this.status(next
+      ? (canComplete ? '请只执行当前一步：' : '当前一步尚未到时间：') +
+        next.title + ' · ' + new Date(next.scheduled_at).toLocaleString()
+      : (deviceMeals.length
+          ? '教奶设备程序已排定，不需要逐餐人工确认。每日数据可独立录入和推进。'
+          : '当前没有未完成任务。每日数据仍可独立录入和推进。'))
+    quick.hidden = true
+
+    function taskValues(task) {
+      var plan = task.planned_values || {}
+      var values = []
+      if (plan.powderGrams != null) values.push(plan.powderGrams + 'g粉')
+      if (plan.feedRatio) values.push('奶料' + plan.feedRatio)
+      return values
+    }
+
+    var taskHtml = ''
+    if (next) {
+      var values = taskValues(next)
+      var actions = ''
+      if (canComplete) {
+        var isSaving = FeedingAgentUI.busyTaskId === next.id
+        actions =
+          '<div class="sop-task-actions">' +
+          '<button class="btn btn-success" type="button" data-sop-complete="' + escapeHtml(next.id) + '"' +
+          (isSaving ? ' disabled aria-busy="true"' : '') +
+          ' onclick="FeedingAgentUI.completeTask(\'' + next.id + '\')">' +
+          (isSaving ? '正在保存…' : '完成本步') + '</button>' +
+          '<button class="btn btn-outline" type="button" onclick="FeedingAgentUI.exceptionTask(\'' + next.id + '\')">登记异常</button></div>'
+      } else {
+        actions = '<div class="sop-waiting">等待执行时间 · ' + escapeHtml(waitText) + '</div>'
+      }
+      taskHtml =
+        '<div class="sop-task sop-current-step ' + escapeHtml(next.display_status || next.status) + '">' +
+        '<div><div class="sop-step-label">当前只需完成这一步</div>' +
+        '<div class="sop-task-title" style="font-size:15px;margin-top:4px">' + escapeHtml(next.title) + '</div>' +
+        '<div class="sop-task-meta">计划时间 ' + new Date(next.scheduled_at).toLocaleString() +
+        ' · ' + escapeHtml(next.plan_source) +
+        (values.length ? ' · ' + escapeHtml(values.join(' / ')) : '') +
+        '</div></div>' + actions + '</div>'
+    } else {
+      taskHtml = '<div class="empty">当前没有待执行 SOP 步骤；可继续每日数据录入。</div>'
+    }
+
+    var deviceProgramHtml = deviceMeals.length
+      ? '<details class="sop-history" open><summary>首夜教奶程序（至次日 08:00，已排定 ' +
+        deviceMeals.length + ' 餐，无需逐餐确认）</summary>' +
+        deviceMeals.map(function(task) {
+          var plan = task.planned_values || {}
+          return '<div class="sop-task scheduled"><div><div class="sop-task-title">' +
+            escapeHtml(new Date(task.scheduled_at).toLocaleString() + ' · ' + task.title) +
+            '</div><div class="sop-task-meta">' +
+            escapeHtml((plan.powderGrams == null ? '—' : plan.powderGrams + 'g粉') +
+              ' · 定时下奶 · 设备自动配奶') +
+            '</div></div><div class="sop-task-meta">设备程序</div></div>'
+        }).join('') + '</details>'
+      : ''
+
+    var recentCompleted = completedTasks.slice(-5).reverse()
+    var historyHtml = recentCompleted.length
+      ? '<details class="sop-history"><summary>查看最近完成记录（' + completedTasks.length + '）</summary>' +
+        recentCompleted.map(function(task) {
+          return '<div class="sop-task completed"><div><div class="sop-task-title">' +
+            escapeHtml(task.title) + '</div><div class="sop-task-meta">' +
+            escapeHtml(task.actual_completed_at
+              ? new Date(task.actual_completed_at).toLocaleString()
+              : new Date(task.scheduled_at).toLocaleString()) +
+            '</div></div><div class="sop-task-meta">已完成</div></div>'
+        }).join('') + '</details>'
+      : ''
+
+    var futureTasks = pending.slice(next ? 1 : 0, next ? 9 : 8)
+    var futureHtml = futureTasks.length
+      ? '<details class="sop-history"><summary>查看后续计划（共 ' +
+        Math.max(0, pending.length - (next ? 1 : 0)) + ' 项）</summary>' +
+        futureTasks.map(function(task) {
+          return '<div class="sop-task"><div><div class="sop-task-title">' +
+            escapeHtml(task.title) + '</div><div class="sop-task-meta">' +
+            new Date(task.scheduled_at).toLocaleString() +
+            '</div></div><div class="sop-task-meta">未到步骤</div></div>'
+        }).join('') + '</details>'
+      : ''
+    var laggards = this.current && this.current.laggards || []
+    var laggardHtml = laggards.length
+      ? '<div class="section-label" style="margin-top:14px">掉队猪处置</div>' +
+        laggards.map(function(item) {
+          var count = Number(item.supplement_count || 0)
+          var isOpen = item.status === 'open'
+          var observedAt = new Date(item.observed_at)
+          var day3Reached = Date.now() >= observedAt.getTime() + 48 * 60 * 60 * 1000
+          var actions = ''
+          if (isOpen && count < 3) {
+            actions += '<button class="btn btn-success" type="button" ' +
+              'onclick="FeedingAgentUI.recordLaggardSupplement(\'' + item.id + '\',' + count + ')">' +
+              '记录补奶</button>'
+          }
+          if (isOpen && day3Reached) {
+            actions += '<button class="btn btn-outline" type="button" ' +
+              'onclick="FeedingAgentUI.evaluateLaggard(\'' + item.id + '\',\'keep\')">继续留养</button>' +
+              '<button class="btn btn-outline" type="button" ' +
+              'onclick="FeedingAgentUI.evaluateLaggard(\'' + item.id + '\',\'return_to_sow\')">返回母猪</button>'
+          }
+          if (!actions) {
+            actions = '<div class="sop-task-meta">' +
+              (isOpen ? '等待第三天评估' : escapeHtml(item.day3_outcome || item.status)) +
+              '</div>'
+          } else {
+            actions = '<div class="sop-task-actions">' + actions + '</div>'
+          }
+          return '<div class="sop-task ' + (isOpen ? 'pending' : 'completed') + '">' +
+            '<div><div class="sop-task-title">' + escapeHtml(item.pig_tag) + '</div>' +
+            '<div class="sop-task-meta">人工补奶 ' + count + '/3 次 · 标记于 ' +
+            observedAt.toLocaleString() + ' · ' + escapeHtml(item.status) +
+            '</div></div>' + actions + '</div>'
+        }).join('')
+      : ''
+    list.innerHTML = taskHtml + deviceProgramHtml + historyHtml + futureHtml + laggardHtml
+  },
+
+  completeTask: async function(taskId, actualValues) {
+    var run = this.current && this.current.run
+    if (!run || this.busyTaskId || !confirm('确认已由现场人员完成此任务？')) return
+    this.busyTaskId = taskId
+    this.render()
+    this.status('正在保存本步记录…')
+    try {
+      var result = await this.api('/api/sop/tasks/' + encodeURIComponent(taskId) + '/complete', {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: run.revision,
+          actualCompletedAt: new Date().toISOString(),
+          actualValues: actualValues || {},
+          idempotencyKey: this.uuid(),
+        }),
+      })
+      if (this.current && this.current.run && this.current.run.id === run.id) {
+        if (result && result.run) this.current.run = result.run
+        else if (result && result.runRevision != null) this.current.run.revision = result.runRevision
+        var event = result && result.event
+        if (event) {
+          this.current.tasks = (this.current.tasks || []).map(function(task) {
+            return task.id === event.id ? Object.assign({}, task, event, { display_status: event.status }) : task
+          })
+        }
+      }
+      this.busyTaskId = null
+      this.render()
+      this.status('本步已保存。')
+      setTimeout(function() { FeedingAgentUI.refresh({ preserveStatus: true }) }, 0)
+      return
+    } catch (error) {
+      this.busyTaskId = null
+      this.render()
+      this.status(error.message === 'NBJ_AGENT_STALE'
+        ? '数据已变化，已刷新；请再次确认。'
+        : '记录失败：' + error.message, true)
+      await this.refresh()
+    }
+  },
+
+  exceptionTask: async function(taskId) {
+    var run = this.current && this.current.run
+    if (!run) return
+    var type = prompt('异常类型：health / device / water / veterinary_instruction', 'health')
+    var note = type && prompt('现场观察或兽医指令（必填）', '')
+    if (!type || !note) return
+    try {
+      await this.api('/api/sop/tasks/' + encodeURIComponent(taskId) + '/exception', {
+        method: 'POST',
+        body: JSON.stringify({
+          expectedRevision: run.revision,
+          exceptionType: type,
+          note: note,
+          actualValues: {},
+        }),
+      })
+    } catch (error) {
+      this.status('异常记录失败：' + error.message, true)
+    }
+    await this.refresh()
+  },
+
+  quickRecord: function(kind) {
+    var tasks = this.current && this.current.tasks || []
+    var next = tasks.find(function(task) {
+      return task.status === 'pending' && task.task_kind === 'teaching_meal'
+    })
+    if (!next) return this.status('没有可关联的待完成教奶任务。', true)
+    var values = {}
+    if (kind === 'feeding_active') values.feedingResponse = 'active'
+    if (kind === 'majority_confirmed') {
+      values.feedingResponse = 'active'
+      values.majorityFeedsConfirmed = true
+    }
+    if (kind === 'abdomen_full') values.abdomenState = 'full'
+    if (kind === 'device_ok') values.deviceStatus = 'ok'
+    this.completeTask(next.id, values)
+  },
+
+  quickException: function() {
+    var tasks = this.current && this.current.tasks || []
+    var next = tasks.find(function(task) { return task.status === 'pending' })
+    if (next) this.exceptionTask(next.id)
+  },
+
+  createLaggard: async function() {
+    var run = this.current && this.current.run
+    if (!run) return
+    var pigTag = prompt('仔猪个体标记', '')
+    if (!pigTag) return
+    var hollow = confirm('是否观察到腹部空瘪？')
+    var notFeeding = confirm('是否未主动到槽？')
+    if (!hollow && !notFeeding) return this.status('至少需要一项掉队猪观察。', true)
+    try {
+      await this.api('/api/laggard-cases', {
+        method: 'POST',
+        body: JSON.stringify({
+          run_id: run.id, batch_id: state.batchId, pig_tag: pigTag,
+          observed_at: new Date().toISOString(),
+          not_approaching_trough: notFeeding, hollow_abdomen: hollow,
+          supplement_count: 0, status: 'open',
+        }),
+      })
+      this.status('已建立掉队猪记录；人工补奶 2–3 次，第三天强制评估。')
+    } catch (error) {
+      this.status('掉队猪记录失败：' + error.message, true)
+    }
+    await this.refresh()
+  },
+
+  recordLaggardSupplement: async function(caseId, expectedCount) {
+    if (!confirm('确认已由现场人员完成本次人工补奶？')) return
+    try {
+      await this.api('/api/laggard-cases', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'supplement',
+          caseId: caseId,
+          expectedCount: expectedCount,
+        }),
+      })
+      this.status('本次人工补奶已记录。')
+    } catch (error) {
+      this.status(error.message === 'NBJ_AGENT_STALE'
+        ? '记录已被其他操作更新，正在刷新。'
+        : '补奶记录失败：' + error.message, true)
+    }
+    await this.refresh()
+  },
+
+  evaluateLaggard: async function(caseId, outcome) {
+    var label = outcome === 'keep' ? '继续留养' : '返回母猪'
+    if (!confirm('确认第三天评估结果为“' + label + '”？')) return
+    try {
+      await this.api('/api/laggard-cases', {
+        method: 'POST',
+        body: JSON.stringify({
+          action: 'evaluate',
+          caseId: caseId,
+          outcome: outcome,
+        }),
+      })
+      this.status('第三天评估已记录：' + label + '。')
+    } catch (error) {
+      this.status(error.message === 'NBJ_LAGGARD_DAY3_NOT_REACHED'
+        ? '尚未到第三天，不能提前完成去留评估。'
+        : '第三天评估失败：' + error.message, true)
+    }
+    await this.refresh()
+  },
+
+  toggleAgent: function(open) {
+    document.getElementById('feedingAgentDrawer').classList.toggle('open', open)
+    if (open) document.getElementById('feedingAgentInput').focus()
+  },
+
+  renderMarkdown: function(text) {
+    var escaped = escapeHtml(String(text || '')).replace(/\r\n?/g, '\n')
+    var lines = escaped.split('\n')
+    var html = []
+    var listType = ''
+    var inCode = false
+    var codeLines = []
+    function inline(value) {
+      return value
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+        .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
+    }
+    function closeList() {
+      if (listType) html.push('</' + listType + '>')
+      listType = ''
+    }
+    lines.forEach(function(line) {
+      if (/^```/.test(line)) {
+        if (inCode) {
+          html.push('<pre><code>' + codeLines.join('\n') + '</code></pre>')
+          codeLines = []
+          inCode = false
+        } else {
+          closeList()
+          inCode = true
+        }
+        return
+      }
+      if (inCode) { codeLines.push(line); return }
+      var list = line.match(/^\s*([-*])\s+(.+)$/)
+      var ordered = line.match(/^\s*\d+[.)]\s+(.+)$/)
+      if (list || ordered) {
+        var nextType = ordered ? 'ol' : 'ul'
+        if (listType !== nextType) { closeList(); listType = nextType; html.push('<' + listType + '>') }
+        html.push('<li>' + inline((ordered ? ordered[1] : list[2])) + '</li>')
+        return
+      }
+      closeList()
+      if (!line.trim()) return
+      var heading = line.match(/^(#{1,3})\s+(.+)$/)
+      if (heading) {
+        var level = heading[1].length
+        html.push('<h' + level + '>' + inline(heading[2]) + '</h' + level + '>')
+      } else if (/^&gt;\s?/.test(line)) {
+        html.push('<blockquote>' + inline(line.replace(/^&gt;\s?/, '')) + '</blockquote>')
+      } else {
+        html.push('<p>' + inline(line) + '</p>')
+      }
+    })
+    closeList()
+    if (inCode) html.push('<pre><code>' + codeLines.join('\n') + '</code></pre>')
+    return html.join('')
+  },
+
+  setAssistantContent: function(element, text) {
+    element.dataset.raw = String(text || '')
+    element.innerHTML = this.renderMarkdown(element.dataset.raw)
+  },
+
+  appendMessage: function(role, text, thinking) {
+    var log = document.getElementById('feedingAgentLog')
+    var div = document.createElement('div')
+    div.className = 'agent-message ' + role
+    if (thinking && role === 'assistant') {
+      div.setAttribute('aria-label', 'Agent 正在思考')
+      div.innerHTML = '<span class="agent-thinking"><span>正在思考</span><i></i><i></i><i></i></span>'
+      div.dataset.raw = ''
+    } else if (role === 'assistant') {
+      this.setAssistantContent(div, text)
+    } else {
+      div.textContent = text
+    }
+    log.appendChild(div)
+    log.scrollTop = log.scrollHeight
+    return div
+  },
+
+  ensureSession: async function() {
+    if (!state.batchId || !SupabaseSync.currentUser) throw new Error('请先选择批次')
+    if (this.sessionId && this.sessionBatchId === state.batchId) return this.sessionId
+    return this.loadBatchSession(state.batchId)
+  },
+
+  send: async function() {
+    var input = document.getElementById('feedingAgentInput')
+    var button = document.getElementById('feedingAgentSend')
+    var message = input.value.trim()
+    if (!message || !state.batchId) return
+    input.value = ''
+    button.disabled = true
+    this.appendMessage('user', message)
+    var assistant = this.appendMessage('assistant', '', true)
+    var assistantRaw = ''
+    var self = this
+    try {
+      var sessionId = await this.ensureSession()
+      var response = await fetch('/api/feeding-agent/chat', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + await this.token(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchId: state.batchId, sessionId: sessionId, message: message }),
+      })
+      if (!response.ok || !response.body) {
+        var errorBody = null
+        try { errorBody = await response.json() } catch (ignore) {}
+        throw new Error(errorBody && errorBody.code || 'NBJ_AGENT_UNAVAILABLE')
+      }
+      var reader = response.body.getReader()
+      var decoder = new TextDecoder()
+      var buffer = ''
+      var streamDone = false
+      var streamFailed = false
+      function consumeSseBlock(block) {
+        if (!block || block.charAt(0) === ':') return
+        var lines = block.split(/\r?\n/)
+        var eventName = ''
+        var dataParts = []
+        lines.forEach(function(line) {
+          if (line.indexOf('event:') === 0) eventName = line.slice(6).trim()
+          if (line.indexOf('data:') === 0) dataParts.push(line.slice(5).trimStart())
+        })
+        if (!eventName || !dataParts.length) return
+        var data = JSON.parse(dataParts.join('\n'))
+        if (eventName === 'delta') {
+          assistantRaw += data.text || ''
+          self.setAssistantContent(assistant, assistantRaw)
+        }
+        if (eventName === 'error') {
+          streamFailed = true
+          assistantRaw += '\n\n[' + data.code + ']'
+          self.setAssistantContent(assistant, assistantRaw)
+        }
+        if (eventName === 'done') streamDone = true
+        document.getElementById('feedingAgentLog').scrollTop =
+          document.getElementById('feedingAgentLog').scrollHeight
+      }
+      while (true) {
+        var chunk = await reader.read()
+        if (chunk.done) break
+        buffer += decoder.decode(chunk.value, { stream: true })
+        var blocks = buffer.split(/\r?\n\r?\n/)
+        buffer = blocks.pop()
+        blocks.forEach(consumeSseBlock)
+      }
+      buffer += decoder.decode()
+      if (buffer.trim()) consumeSseBlock(buffer)
+      if (!assistantRaw) self.setAssistantContent(assistant, 'Agent 未返回内容。')
+      else if (!streamDone && !streamFailed) {
+        assistantRaw += '\n\n[连接提前结束，请点击发送重试；已收到内容已保留。]'
+        self.setAssistantContent(assistant, assistantRaw)
+      }
+    } catch (error) {
+      this.setAssistantContent(assistant, 'Agent 暂不可用（' + error.message +
+        '）。原生产模型、Supabase 同步和现场记录仍可继续使用。')
+    } finally {
+      button.disabled = false
+    }
+  },
+}
+
+// ══════════════════════════════════════════════
+// 事件绑定
+// ══════════════════════════════════════════════
+
+document.addEventListener('DOMContentLoaded', async function() {
+  chartJSAvailable = (typeof Chart !== 'undefined')
+  document.getElementById('loginForm').addEventListener('submit', handleLogin)
+  bindTableScreenshotLongPress()
+
+  document.querySelectorAll('#inputDiarMild, #inputDiarMod, #inputDiarSev, #inputHeadCount')
+    .forEach(function(el) { el.addEventListener('input', updateDiarDisplay) })
+
+  var milkInput = document.getElementById('inputTotalMilk')
+  if (milkInput) {
+    milkInput.addEventListener('input', function() {
+      this.dataset.autoFilled = '0'
+      var confirmed = document.getElementById('inputMilkConfirmed')
+      if (confirmed) confirmed.checked = false
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+  }
+
+  var headInput = document.getElementById('inputHeadCount')
+  if (headInput) {
+    headInput.addEventListener('input', function() {
+      this.dataset.autoFilled = '0'
+      syncCreepLevelFromAmount()
+      updateDiarDisplay()
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+  }
+
+  var creepInput = document.getElementById('inputTotalCreep')
+  if (creepInput) {
+    creepInput.addEventListener('input', function() {
+      syncCreepLevelFromAmount()
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+    creepInput.addEventListener('change', function() {
+      syncCreepLevelFromAmount()
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+  }
+
+  document.querySelectorAll(
+    '#inputDiarMild, #inputDiarMod, #inputDiarSev, ' +
+    '#inputAvgTemp, #inputCreepLevel, #inputUniformityLevel, #inputGrowthLevel, #inputExecutionStatus, ' +
+    '#inputWtLarge, #inputWtLargeN, #inputWtMid, #inputWtMidN, #inputWtSmall, #inputWtSmallN, #inputDeath, #inputCull'
+  ).forEach(function(el) {
+    el.addEventListener('input', function() {
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+    el.addEventListener('change', function() {
+      if (document.getElementById('shadowMode').checked) renderShadowPanel()
+    })
+  })
+
+  window.addEventListener('online', function() {
+    SupabaseSync.handleOnline()
+  })
+
+  if (!window.supabaseClient) {
+    showLogin('登录服务未加载，请检查网络连接后刷新页面。')
+    return
+  }
+
+  try {
+    showLoading('正在验证身份……')
+    var sessionResult = await window.supabaseClient.auth.getSession()
+    if (sessionResult.error) throw sessionResult.error
+    var session = sessionResult.data && sessionResult.data.session
+    if (session && session.user) {
+      await initializeForUser(session.user)
+    } else {
+      showLogin()
+    }
+  } catch (error) {
+    console.warn('[supabase] 会话检查失败', error)
+    showLogin('无法检查登录状态，请检查网络后重试。')
+  }
+
+  window.supabaseClient.auth.onAuthStateChange(function(event, session) {
+    if (event === 'SIGNED_OUT' || !session || !session.user) {
+      clearAuthenticatedState()
+      showLogin()
+      return
+    }
+    if (session.user.id !== currentAppUserId) initializeForUser(session.user)
+  })
+})
+</script>
+</body>
+</html>

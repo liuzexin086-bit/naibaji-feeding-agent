@@ -1,0 +1,52 @@
+{
+  "name": "naibaji",
+  "version": "1.0.0",
+  "description": "奶爸机 — 超早期断奶数据采集",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win nsis",
+    "dev": "electron . --dev",
+    "test": "node tests/backend-smoke.test.js"
+  },
+  "build": {
+    "appId": "com.naibaji.app",
+    "productName": "奶爸机",
+    "files": [
+      "main.js",
+      "backend/**/*",
+      "build/icon.ico",
+      "build/icon.png",
+      "index.html",
+      "supabase-client.js",
+      "feeding-model.js",
+      "feeding-model.min.js",
+      "v5lite-model.js",
+      "chart.umd.min.js",
+      "package.json"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ]
+    },
+    "directories": {
+      "output": "release"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "chart.js": "^4.4.7"
+  }
+}

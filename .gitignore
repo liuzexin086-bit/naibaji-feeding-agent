@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Local runtime, build and release output
+.tmp/
+.planning/
+.claude/
+.codex/
+.agents/
+release/
+release_new/
+agent/dist/
+agent/public/
+agent/container-models/
+agent/.wrangler/
+web/
+**/.wrangler/
+**/dist/
+**/build/
+**/coverage/
+!/build/
+!/build/icon.ico
+!/build/icon.png
+
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+agent/.dev.vars*
+agent/.cloudflared-token
+agent/.agent-config-key
+**/*.pem
+**/*.key
+
+# Generated archives, backups and Python bytecode
+*.zip
+*.bak.*
+**/__pycache__/
+*.pyc
