@@ -16,6 +16,19 @@ const adminJs = readFileSync(
 );
 
 describe("local frontend contract", () => {
+  it("shows model-estimated weight and keeps every primary card on one width grid", () => {
+    expect(html).toContain("<th>估重</th>");
+    expect(html).toContain("estimatedAverageWeightKg");
+    expect(html).toContain("--content-max: 1180px");
+    expect(html).toContain(".topbar, .context-bar, .page");
+    expect(html).toContain("grid-template-columns: minmax(0, 1fr)");
+    expect(html).toContain(".page > * { width: 100%; min-width: 0; max-width: 100%; }");
+    expect(html).toContain("@keyframes surface-enter");
+    expect(html).toContain("replayContentTransition");
+    expect(html).toContain(".batch-menu.open");
+    expect(html).toContain("requestAnimationFrame(function ()");
+    expect(html).toContain("state.dialogCloseTimer");
+  });
   it("uses same-origin cookie APIs without hosted SDKs", () => {
     expect(html.toLowerCase()).not.toContain("supabase");
     expect(adminHtml.toLowerCase()).not.toContain("supabase");

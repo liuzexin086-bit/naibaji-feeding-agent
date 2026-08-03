@@ -56,6 +56,8 @@ export interface ProductionPlanOutput {
     perHeadPerMealGrams: number | undefined;
     v5Lite: Record<string, unknown> | null;
     deviceProgram: DeviceDayProgram | undefined;
+    estimatedAverageWeightKg: number | undefined;
+    estimatedEndWeightKg: number | undefined;
   };
   /** Index of the first day on which model control is active. */
   controlStartDay: number;
@@ -90,6 +92,7 @@ export function getModelDerivedMealAmount(
 }
 
 interface FeedingModel {
+  WEIGHT_STANDARD: Record<number, number>;
   generatePlan(input: ProductionPlanInput): {
     days: Array<Record<string, unknown> & { dayAge: number; totalMilkPlan: number }>;
     totalMilkPlanG: number;
@@ -104,6 +107,7 @@ interface FeedingModel {
     planMilkTotalControl: number[];
     feedTimes: number[];
     perFeed: number[];
+    days?: Array<Record<string, unknown> & { dayAge: number; weightStart?: number; weightEnd?: number }>;
     controlStartDay?: number;
   };
 }
@@ -118,6 +122,21 @@ interface V5Model {
 
 function floorToPrecision(value: number, precision: number): number {
   return Math.floor((value + Number.EPSILON) / precision) * precision;
+}
+
+export function modelStandardWeight(dayAge: number): number {
+  if (!Number.isInteger(dayAge) || dayAge < 1 || dayAge > 60) {
+    throw new Error("NBJ_PRODUCTION_INVALID_DAY_AGE");
+  }
+  const standards = loadModels().feeding.WEIGHT_STANDARD;
+  const exact = Number(standards[dayAge]);
+  if (Number.isFinite(exact) && exact > 0) return exact;
+  const ages = Object.keys(standards).map(Number).filter(Number.isFinite).sort((a, b) => a - b);
+  const firstAge = ages[0] ?? 3;
+  const lastAge = ages.at(-1) ?? 21;
+  if (dayAge < firstAge) return Number(standards[firstAge] ?? 2.3);
+  const lastWeight = Number(standards[lastAge] ?? 5.8);
+  return Number((lastWeight + (dayAge - lastAge) * 0.2).toFixed(3));
 }
 
 const INITIAL_DEVICE_TIMES = [
@@ -177,6 +196,7 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
     ? 0
     : Math.max(0, plan.days.findIndex((day) => day.dayAge === input.dayAge));
   const planDay = plan.days[dayIndex] ?? plan.days[0];
+  const controlDay = control.days?.[dayIndex];
   const record = records.find((item) => item.dayAge === planDay?.dayAge) ?? {};
   const shadow = planDay
     ? v5.computeShadowAdjustment(planDay, record, {
@@ -244,6 +264,8 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
       perHeadPerMealGrams: control.perFeed[dayIndex],
       v5Lite: shadow,
       deviceProgram: deviceCurve[dayIndex] ?? deviceCurve[0],
+      estimatedAverageWeightKg: Number(controlDay?.weightStart ?? planDay?.weightStart),
+      estimatedEndWeightKg: Number(controlDay?.weightEnd ?? planDay?.weightEnd),
     },
     controlStartDay: Number(control.controlStartDay ?? (effectiveControlStartDay ?? plan.days.length)),
   };

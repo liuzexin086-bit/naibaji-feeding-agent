@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { computeProductionPlan } from "../src/model/production-model.js";
+import { computeProductionPlan, modelStandardWeight } from "../src/model/production-model.js";
 
 const projectRoot = resolve(import.meta.dirname, "../..");
 
@@ -11,9 +11,15 @@ function sha256(path: string): string {
 }
 
 describe("protected production model parity", () => {
+  it("matches missing start weight to the model standard for the start age", () => {
+    expect(modelStandardWeight(3)).toBe(2.3);
+    expect(modelStandardWeight(7)).toBe(3);
+    expect(modelStandardWeight(21)).toBe(5.8);
+    expect(modelStandardWeight(22)).toBe(6);
+  });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "84A9B8A2AD0A5F5163A8070EBF2A7ED7271F4525FD986BD5A057EDCCC1F9C038",
+      "61001D8629C51B7B9F6CCC59CEC5ECE2BB21FE5A4AD76DB186D5DCDE6A640465",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -186,6 +192,22 @@ describe("protected production model parity", () => {
     });
     expect(output.controlStartDay).toBe(3);
     expect(output.control.feedTimes).toEqual([10, 10, 10, 9, 9]);
+  });
+
+  it("anchors the next reduction to the last committed meal count", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 7,
+      startWeight: 10,
+      headCount: 20,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        { dayAge: 5, creepGrade: "high", headCount: 20, planPerPigAtCommit: 300, planTotalAtCommit: 6000, feedTimesAtCommit: 10 },
+        { dayAge: 6, creepGrade: "high", headCount: 20, planPerPigAtCommit: 320, planTotalAtCommit: 6400, feedTimesAtCommit: 10 },
+      ],
+    });
+    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 9]);
   });
 
   it("keeps all days at ten meals when no non-none grade is recorded", () => {

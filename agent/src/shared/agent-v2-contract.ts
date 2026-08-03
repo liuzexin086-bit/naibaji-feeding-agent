@@ -48,6 +48,8 @@ export interface DeviceSetting {
   freeWindows: DeviceWindow[];
   precisionGrams: number;
   source: "sop_direct" | "sop_indirect" | "production_model";
+  estimatedAverageWeightKg?: number;
+  estimatedEndWeightKg?: number;
 }
 
 export interface DecisionEvidence {

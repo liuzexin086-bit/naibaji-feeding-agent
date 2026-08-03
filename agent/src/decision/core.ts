@@ -383,6 +383,8 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       freeWindows: mode === "free_feeding" ? [...(input.freeWindows ?? [])] : [],
       precisionGrams: precision,
       source: selected.source,
+      estimatedAverageWeightKg: model.selectedDay.estimatedAverageWeightKg,
+      estimatedEndWeightKg: model.selectedDay.estimatedEndWeightKg,
     },
     exceptionActions,
     evidence: {
@@ -438,6 +440,14 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
             freeWindows: mode === "free_feeding" ? input.freeWindows ?? [] : [],
           },
           explanation: "自由采食最多八时段；模型单餐量直接来自 per-head-per-meal × 有效头数并按精度取整，程序总量再乘实际餐次。",
+        },
+        {
+          name: "estimated_average_weight",
+          value: {
+            startKg: model.selectedDay.estimatedAverageWeightKg,
+            endKg: model.selectedDay.estimatedEndWeightKg,
+          },
+          explanation: "按批次初重与生产模型增重曲线估算的当日群体均重。",
         },
         {
           name: "control_start",

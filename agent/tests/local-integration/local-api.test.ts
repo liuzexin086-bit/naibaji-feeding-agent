@@ -58,22 +58,26 @@ describe("local execution API", () => {
     const created = await request(base, "/api/batches", {
       method: "POST",
       headers: { cookie },
-      body: JSON.stringify({ name: "一栏", room: "育婴室", startAge: 3, endAge: 12, headCount: 20 }),
+      body: JSON.stringify({ name: "一栏", room: "育婴室", startAge: 7, endAge: 16, headCount: 20 }),
     });
     expect(created.status).toBe(201);
     const createdBody = await created.json() as {
-      batch: { id: string; revision: number };
+      batch: { id: string; revision: number; startWeight: number; startWeightSource: string };
       today: {
         mealCount: number;
         singlePowderGrams: number;
         plannedTotalPowderGrams: number;
         setting: { source: string };
+        estimatedAverageWeightKg: number;
       };
     };
     expect(createdBody.today.mealCount).toBe(6);
     expect(createdBody.today.singlePowderGrams).toBe(35);
     expect(createdBody.today.plannedTotalPowderGrams).toBe(210);
     expect(createdBody.today.setting.source).toBe("sop_indirect");
+    expect(createdBody.batch.startWeight).toBe(3);
+    expect(createdBody.batch.startWeightSource).toBe("model_age_standard");
+    expect(createdBody.today.estimatedAverageWeightKg).toBe(3);
     const batchId = createdBody.batch.id;
     const payload = {
       expectedRevision: 0,
@@ -91,6 +95,7 @@ describe("local execution API", () => {
         mealTimes: string[];
         planWindow: { startLocal: string; endLocal: string; endDayOffset: number };
       };
+      records: Array<{ estimatedAverageWeightKg: number }>;
     };
     expect(advancedBody.batch.currentDayIndex).toBe(1);
     expect(advancedBody.batch.revision).toBe(1);
@@ -104,6 +109,7 @@ describe("local execution API", () => {
       endLocal: "09:00",
       endDayOffset: 1,
     });
+    expect(advancedBody.records[0]?.estimatedAverageWeightKg).toBe(3);
     const replay = await request(base, `/api/batches/${batchId}/advance`, {
       method: "POST", headers: { cookie }, body: JSON.stringify(payload),
     });
@@ -126,6 +132,19 @@ describe("local execution API", () => {
     };
     expect(secondBody.batch).toMatchObject({ currentDayIndex: 2, revision: 2 });
     expect(secondBody.today.mealCount).toBe(9);
+
+    const anchoredAdvance = await request(base, `/api/batches/${batchId}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 2,
+        idempotencyKey: "advance-anchored",
+        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 900, mealCount: 10 },
+      }),
+    });
+    expect(anchoredAdvance.status).toBe(200);
+    const anchoredBody = await anchoredAdvance.json() as { today: { mealCount: number } };
+    expect(anchoredBody.today.mealCount).toBe(9);
   });
 
   it("keeps SOP template versions immutable and requires admin", async () => {

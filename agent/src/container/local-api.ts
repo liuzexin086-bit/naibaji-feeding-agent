@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { computeDayDecision } from "../decision/core.js";
+import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
 import type { SqliteLocalStore } from "../local-db/index.js";
 import type { LocalBatch } from "../shared/local-store-contract.js";
 import {
@@ -164,11 +165,18 @@ function modelRecords(records: JsonObject[]): JsonObject[] {
   return records.map((row) => {
     const heads = finite(row.effectiveHeads ?? row.headCount ?? 0, "effectiveHeads", 0);
     const value = finite(row.creepValue ?? CREEP_VALUES[String(row.creepGrade) as keyof typeof CREEP_VALUES] ?? 0, "creepValue");
+    const committedTotal = Number(row.planTotalAtCommit ?? row.plannedTotalPowderGrams ?? 0);
+    const committedMeals = Number(row.feedTimesAtCommit ?? row.mealCount ?? 0);
     return {
       ...row,
       dayAge: finite(row.dayAge ?? 0, "dayAge"),
       headCount: heads,
       totalCreepG: value * heads,
+      ...(committedTotal > 0 && committedMeals > 0 ? {
+        planPerPigAtCommit: Number(row.planPerPigAtCommit ?? committedTotal / Math.max(1, heads)),
+        planTotalAtCommit: committedTotal,
+        feedTimesAtCommit: committedMeals,
+      } : {}),
     };
   });
 }
@@ -189,6 +197,8 @@ function batchPublic(batch: LocalBatch): JsonObject {
     endAge: Number(config.endAge ?? 21),
     initialHeads,
     effectiveHeads,
+    startWeight: Number(config.startWeight ?? modelStandardWeight(Number(config.startAge ?? 3))),
+    startWeightSource: String(config.startWeightSource ?? "model_age_standard"),
     currentDayIndex: batch.currentDay,
     currentDayAge: Number(config.startAge ?? 3) + batch.currentDay,
     status: batch.status,
@@ -242,7 +252,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
   const modelInput = {
     startAge,
     endAge,
-    startWeight: finite(config.startWeight ?? 2.3, "startWeight", 0.1, 50),
+    startWeight: finite(config.startWeight ?? modelStandardWeight(startAge), "startWeight", 0.1, 50),
     headCount,
     records: modelRecords(storedRecords),
     controlStartDay,
@@ -294,6 +304,8 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     dayIndex,
     dayAge,
     plannedTotalPowderGrams: Number(setting.dailyPowderGrams ?? 0),
+    estimatedAverageWeightKg: Number(setting.estimatedAverageWeightKg ?? 0),
+    estimatedEndWeightKg: Number(setting.estimatedEndWeightKg ?? 0),
     singlePowderGrams: Number(setting.singlePowderGrams ?? 0),
     mealCount: Number(setting.mealCount ?? 0),
     mealTimes: Array.isArray(setting.timedMeals)
@@ -307,7 +319,11 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
   };
 }
 
-function recordPublic(row: JsonObject, fallback: { dayIndex: number; dayAge: number; heads: number; revision: number }): JsonObject {
+function recordPublic(
+  row: JsonObject,
+  fallback: { dayIndex: number; dayAge: number; heads: number; revision: number },
+  modelWeight?: { weightStart?: number; weightEnd?: number },
+): JsonObject {
   const grade = String(row.creepGrade ?? "none");
   return {
     dayIndex: Number(row.dayIndex ?? fallback.dayIndex),
@@ -318,6 +334,8 @@ function recordPublic(row: JsonObject, fallback: { dayIndex: number; dayAge: num
     mealCount: Number(row.mealCount ?? 0),
     mealTimes: Array.isArray(row.mealTimes) ? row.mealTimes : [],
     plannedTotalPowderGrams: Number(row.plannedTotalPowderGrams ?? row.planTotalAtCommit ?? 0),
+    estimatedAverageWeightKg: Number(row.estimatedAverageWeightKg ?? modelWeight?.weightStart ?? 0) || null,
+    estimatedEndWeightKg: Number(row.estimatedEndWeightKg ?? modelWeight?.weightEnd ?? 0) || null,
     actualPowderGrams: row.actualPowderGrams == null ? null : Number(row.actualPowderGrams),
     creepGrade: grade,
     creepValue: Number(row.creepValue ?? CREEP_VALUES[grade as keyof typeof CREEP_VALUES] ?? 0),
@@ -334,12 +352,22 @@ function recordPublic(row: JsonObject, fallback: { dayIndex: number; dayAge: num
 function allRecords(batch: LocalBatch): JsonObject[] {
   const config = configOf(batch);
   const heads = Number(config.effectiveHeads ?? config.headCount ?? 0);
+  const startAge = Number(config.startAge ?? 3);
+  const model = computeProductionPlan({
+    startAge,
+    endAge: Number(config.endAge ?? 21),
+    startWeight: Number(config.startWeight ?? modelStandardWeight(startAge)),
+    headCount: Math.max(1, heads),
+    records: modelRecords(recordsOf(batch)),
+    controlStartDay: Number(config.controlStartDay ?? -1),
+  });
+  const weights = new Map((model.control.days ?? []).map((day) => [Number(day.dayAge), day]));
   return recordsOf(batch).map((row) => recordPublic(row, {
     dayIndex: Number(row.dayIndex ?? 0),
     dayAge: Number(row.dayAge ?? Number(config.startAge ?? 3)),
     heads,
     revision: batch.revision,
-  }));
+  }, weights.get(Number(row.dayAge))));
 }
 
 function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
@@ -361,6 +389,8 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     mealCount: Number(source.mealCount ?? today.mealCount ?? 0),
     mealTimes: Array.isArray(source.mealTimes) ? source.mealTimes : today.mealTimes,
     plannedTotalPowderGrams: Number(source.plannedTotalPowderGrams ?? today.plannedTotalPowderGrams ?? 0),
+    estimatedAverageWeightKg: Number(today.estimatedAverageWeightKg ?? 0),
+    estimatedEndWeightKg: Number(today.estimatedEndWeightKg ?? 0),
     actualPowderGrams: source.actualPowderGrams == null ? null : finite(source.actualPowderGrams, "actualPowderGrams", 0),
     creepGrade: grade,
     creepValue: CREEP_VALUES[grade as keyof typeof CREEP_VALUES],
@@ -424,6 +454,10 @@ export async function handleLocalApi(
       const startAge = integer(body.startAge, "start_age", 1, 60);
       const endAge = integer(body.endAge, "end_age", startAge, 60);
       const headCount = integer(body.headCount, "head_count", 1, 100_000);
+      const hasStartWeight = body.startWeight !== undefined && body.startWeight !== null && body.startWeight !== "";
+      const startWeight = hasStartWeight
+        ? finite(body.startWeight, "start_weight", 0.1, 50)
+        : modelStandardWeight(startAge);
       const id = randomUUID();
       const nowDate = new Date().toISOString().slice(0, 10);
       const latestSop = store.listSopTemplates()[0];
@@ -440,7 +474,8 @@ export async function handleLocalApi(
           config: {
             name, room, startAge, endAge,
             initialHeads: headCount, effectiveHeads: headCount,
-            headCount, startWeight: finite(body.startWeight ?? 2.3, "start_weight", 0.1, 50),
+            headCount, startWeight,
+            startWeightSource: hasStartWeight ? "operator" : "model_age_standard",
             planStartDate: nowDate,
             controlStartDay: -1,
             sopTemplate: frozenSop,
@@ -503,7 +538,7 @@ export async function handleLocalApi(
           const result = {
             batch: batchPublic(nextBatch),
             today: nextToday,
-            records: nextRecords.map((row) => recordPublic(row, { dayIndex: Number(row.dayIndex), dayAge: Number(row.dayAge), heads: Number(row.effectiveHeads), revision: nextBatch.revision })),
+            records: allRecords(nextBatch),
             committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
             agentSession: session,
           };
@@ -526,7 +561,7 @@ export async function handleLocalApi(
         const result = {
           batch: batchPublic(nextBatch),
           today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
-          records: nextRecords.map((row) => recordPublic(row, { dayIndex: Number(row.dayIndex), dayAge: Number(row.dayAge), heads: Number(row.effectiveHeads), revision: nextBatch.revision })),
+          records: allRecords(nextBatch),
           committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
         };
         const committed = store.commitRecord({ userId: auth.user.id, batchId, expectedRevision, idempotencyKey: key, dateLocal: String(observation.dateLocal ?? today.dateLocal ?? addDays(String(configOf(batch).planStartDate ?? batch.createdAt.slice(0, 10)), batch.currentDay)), observedAt: String(observation.recordedAt), observation, nextData, result });

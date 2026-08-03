@@ -319,6 +319,9 @@ function computeControlPlan(plan, records, controlStartDay) {
         planTotalControl[i] = cp.total
         feedTimes[i] = Math.max(1, Math.min(10, cp.feedTimes))
         perFeed[i] = Math.round(cp.perPig / feedTimes[i] * 100) / 100
+        // 已保存计划是下一日计算的真实餐次锚点，避免理论曲线在后台
+        // 累计递减后让现场餐次一天跨越两级或更多。
+        currentCount = feedTimes[i]
       } else {
         // 旧记录没有提交值时的 fallback
         perFeed[i] = Math.round(d.perPigMilkPlan / 10 * 10) / 10

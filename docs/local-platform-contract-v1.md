@@ -18,7 +18,8 @@
 ## 核心数据合同
 
 - `Batch`：`id,name,room,startAge,endAge,initialHeads,effectiveHeads,currentDayIndex,status,revision,createdAt,updatedAt`。
-- `DailyRecord`：`dayIndex,dayAge,effectiveHeads,deviceMode,singlePowderGrams,mealCount,mealTimes,plannedTotalPowderGrams,actualPowderGrams,creepGrade,creepValue,diarrheaGrade,waterState,exceptionActions,modelVersion,sopVersion,revision,recordedAt`。
+- 新建批次未提供初重时，按生产模型 `WEIGHT_STANDARD` 自动匹配起始日龄标准初重；21 日龄后按模型文档的 `0.2kg/日` 外推，并记录 `startWeightSource=model_age_standard`。
+- `DailyRecord`：`dayIndex,dayAge,estimatedAverageWeightKg,estimatedEndWeightKg,effectiveHeads,deviceMode,singlePowderGrams,mealCount,mealTimes,plannedTotalPowderGrams,actualPowderGrams,creepGrade,creepValue,diarrheaGrade,waterState,exceptionActions,modelVersion,sopVersion,revision,recordedAt`。
 - 首日数量权威：冻结 SOP 直接总量优先，其次按 `35g/20头/次 × 有效头数 × 6餐` 推导；SOP 无法确定时才回退生产模型。第二日起使用生产模型与控奶逻辑。
 - 计划日界固定为当日 09:00 至次日 09:00；常规现场输出只显示单次奶粉量、程序总奶粉量和按日界排序的配奶时间点。
 - 教槽展示档位为 `none/low/medium/high/excellent`，内部值固定为 `0/10/45/80/130`。
@@ -53,7 +54,7 @@
 - 去掉顶部大型标题/今日计划卡片以及全部风险预测 UI；首屏直接显示“设备设定 + 数据录入”。
 - 顶部只保留产品、在线状态、刷新、当前批次下拉和“新建批次”；移除重复入口。
 - 批次下拉锚定触发按钮向下展开；新建批次使用独立 Sheet；切换批次同步切换 Agent 会话。
-- 历史表完整展示：批次日、日龄、头数、模式、单次量、餐次、时间点、程序总量、实际总量、教槽、腹泻、饮水；移动端表格自身横向滚动，页面不横向溢出。
+- 历史表完整展示：批次日、日龄、模型估重、头数、模式、单次量、餐次、时间点、程序总量、实际总量、教槽、腹泻、饮水；移动端表格自身横向滚动，页面不横向溢出。
 - 推进按钮立即进入 loading，并以一次 `/advance` 请求完成；成功后直接使用响应渲染，不再二次刷新。
 - 保留 Markdown Agent、等待动画、保存图片、0.65 秒长按、草稿恢复、焦点管理和移动端安全区。
 

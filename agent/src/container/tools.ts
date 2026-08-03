@@ -21,6 +21,7 @@ import {
   type SupabaseRuntime,
 } from "../shared/supabase-rest.js";
 import type { SqliteLocalStore } from "../local-db/index.js";
+import { modelStandardWeight } from "../model/production-model.js";
 
 export type AgentToolStorage =
   | { backend: "local"; store: SqliteLocalStore }
@@ -225,7 +226,7 @@ async function batchDecisionState(
   const modelInput = {
     startAge,
     endAge,
-    startWeight: overrides.startWeight ?? finiteNumber(config.startWeight, 2.3),
+    startWeight: overrides.startWeight ?? finiteNumber(config.startWeight, modelStandardWeight(startAge)),
     headCount: overrides.headCount ?? finiteNumber(config.headCount, 20),
     controlStartDay:
       overrides.controlStartDay ??
@@ -343,6 +344,11 @@ export function createFeedingTools(
         run,
         openTasks: tasks,
         fullFeedingCurve: productionPlan?.fullFeedingCurve ?? null,
+        estimatedWeightCurve: productionPlan?.fullFeedingCurve.map((decision) => ({
+          dayAge: decision.setting.dayAge,
+          estimatedAverageWeightKg: decision.setting.estimatedAverageWeightKg,
+          estimatedEndWeightKg: decision.setting.estimatedEndWeightKg,
+        })) ?? null,
         deviceModes: productionPlan?.deviceModes ?? null,
         selectedDecision: productionPlan?.selectedDecision ?? null,
       }, {
