@@ -36,6 +36,11 @@ export type LocalStoreErrorCode =
   | "LOCAL_STORE_STALE_REVISION"
   | "LOCAL_STORE_IDEMPOTENCY_CONFLICT"
   | "LOCAL_STORE_DECISION_CONFLICT"
+  | "LOCAL_STORE_USER_EXISTS"
+  | "LOCAL_STORE_USER_NOT_FOUND"
+  | "LOCAL_STORE_USER_SELF_DELETE"
+  | "LOCAL_STORE_USER_CONFIRM_MISMATCH"
+  | "LOCAL_STORE_LAST_ADMIN"
   | "LOCAL_STORE_INVALID_INPUT";
 
 export class LocalStoreError extends Error {
@@ -196,7 +201,10 @@ function userFromRow(row: Row): LocalUser {
   if (role !== "admin" && role !== "operator") throw new Error("Invalid database users.role");
   return {
     id: stringValue(row.id, "users.id"),
-    email: stringValue(row.email, "users.email"),
+    // Legacy batches may have created an owner row before local auth was
+    // enabled. Keep those rows visible to account administration without
+    // treating a missing credential as a database corruption.
+    email: row.email === null || row.email === undefined ? "" : stringValue(row.email, "users.email"),
     role: role as LocalUserRole,
     createdAt: stringValue(row.created_at, "users.created_at"),
     disabled: Number(row.disabled ?? 0) === 1,
@@ -377,6 +385,48 @@ export class SqliteLocalStore implements LocalStore {
     return row ? userFromRow(row) : null;
   }
 
+  listUsers(): LocalUser[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(
+      "SELECT * FROM users ORDER BY lower(COALESCE(email, '')), created_at ASC, id ASC",
+    ).all() as Row[];
+    return rows.map(userFromRow);
+  }
+
+  createUser(input: {
+    id?: string;
+    email: string;
+    passwordHash: string;
+    passwordSalt: string;
+    role?: LocalUserRole;
+  }): LocalUser {
+    this.#ensureOpen();
+    const email = requiredText(input.email, "email").trim().toLowerCase();
+    const passwordHash = requiredText(input.passwordHash, "passwordHash");
+    const passwordSalt = requiredText(input.passwordSalt, "passwordSalt");
+    const role = input.role ?? "operator";
+    if (role !== "admin" && role !== "operator") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid role");
+    }
+    const id = input.id ?? randomUUID();
+    const now = new Date().toISOString();
+    this.#transaction(() => {
+      const existing = this.#database.prepare(
+        "SELECT id FROM users WHERE lower(email) = ? LIMIT 1",
+      ).get(email) as Row | undefined;
+      if (existing) {
+        throw new LocalStoreError("LOCAL_STORE_USER_EXISTS", "email already exists");
+      }
+      this.#database.prepare(`
+        INSERT INTO users (id, email, password_hash, password_salt, role, disabled, created_at)
+        VALUES (?, ?, ?, ?, ?, 0, ?)
+      `).run(id, email, passwordHash, passwordSalt, role, now);
+    });
+    const result = this.getUserById(id);
+    if (!result) throw new LocalStoreError("LOCAL_STORE_USER_NOT_FOUND", "user was not persisted");
+    return result;
+  }
+
   ensureUser(input: {
     id?: string;
     email: string;
@@ -466,6 +516,64 @@ export class SqliteLocalStore implements LocalStore {
     this.#database.prepare(
       "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE token_hash = ?",
     ).run(revokedAt, requiredText(tokenHash, "tokenHash"));
+  }
+
+  deleteUser(input: {
+    userId: string;
+    actorUserId: string;
+    confirmEmail: string;
+  }): void {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const actorUserId = requiredText(input.actorUserId, "actorUserId");
+    // Do not trim confirmation text: the API contract requires an exact
+    // match against the normalized email stored for the target account.
+    const confirmEmail = input.confirmEmail;
+    if (typeof confirmEmail !== "string" || !confirmEmail) {
+      throw new LocalStoreError("LOCAL_STORE_USER_CONFIRM_MISMATCH", "confirmation email is required");
+    }
+    this.#transaction(() => {
+      const actorRow = this.#database.prepare(
+        "SELECT * FROM users WHERE id = ? LIMIT 1",
+      ).get(actorUserId) as Row | undefined;
+      if (!actorRow) throw new LocalStoreError("LOCAL_STORE_USER_NOT_FOUND", "actor not found");
+      const actor = userFromRow(actorRow);
+      if (actor.role !== "admin" || actor.disabled) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "administrator required");
+      }
+
+      const targetRow = this.#database.prepare(
+        "SELECT * FROM users WHERE id = ? LIMIT 1",
+      ).get(userId) as Row | undefined;
+      if (!targetRow) throw new LocalStoreError("LOCAL_STORE_USER_NOT_FOUND", "user not found");
+      const target = userFromRow(targetRow);
+      if (target.id === actor.id) {
+        throw new LocalStoreError("LOCAL_STORE_USER_SELF_DELETE", "cannot delete current user");
+      }
+      if (!target.email || target.email !== confirmEmail) {
+        throw new LocalStoreError("LOCAL_STORE_USER_CONFIRM_MISMATCH", "confirmation email does not match");
+      }
+      if (target.role === "admin" && !target.disabled) {
+        const row = this.#database.prepare(
+          "SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled = 0",
+        ).get() as Row;
+        const enabledAdmins = Number(row.count ?? 0);
+        if (enabledAdmins <= 1) {
+          throw new LocalStoreError("LOCAL_STORE_LAST_ADMIN", "cannot delete last enabled administrator");
+        }
+      }
+
+      // Preserve immutable SOP records by transferring ownership before the
+      // target user is physically deleted. Other user-owned rows intentionally
+      // cascade through their existing foreign keys.
+      this.#database.prepare(
+        "UPDATE sop_templates SET created_by = ? WHERE created_by = ?",
+      ).run(actor.id, target.id);
+      // Explicitly remove sessions so deletion invalidates every token even
+      // if a future migration changes the users FK action.
+      this.#database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(target.id);
+      this.#database.prepare("DELETE FROM users WHERE id = ?").run(target.id);
+    });
   }
 
   appendDailyObservation(input: AppendDailyObservationInput): DailyObservation {

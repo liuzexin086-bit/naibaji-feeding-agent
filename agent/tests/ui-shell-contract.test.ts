@@ -75,6 +75,19 @@ describe("local frontend contract", () => {
     expect(html).not.toContain("管理批次");
   });
 
+  it("exposes administrator account management with destructive-action confirmation", () => {
+    expect(adminHtml).toContain('id="accountsAdminTab"');
+    expect(adminHtml).toContain('id="accountsAdminView"');
+    expect(adminHtml).toContain('id="accountCreateForm"');
+    expect(adminHtml).toContain('id="accountRows"');
+    expect(adminHtml).toContain("删除会物理清理该账号的批次、现场对话和会话");
+    expect(adminJs).toContain("/api/admin/users");
+    expect(adminJs).toContain("confirmEmail");
+    expect(adminJs).toContain("window.prompt('请输入目标账号的完整邮箱以确认删除：', '')");
+    expect(adminJs).toContain("NBJ_USER_SELF_DELETE");
+    expect(adminJs).toContain("NBJ_LAST_ADMIN");
+  });
+
   it("advances with one idempotent request and renders its response", () => {
     expect(html).toContain("/advance");
     expect(html).toContain("expectedRevision");
@@ -85,11 +98,22 @@ describe("local frontend contract", () => {
 
   it("preserves Agent session switching, Markdown, waiting state, and dialog accessibility", () => {
     expect(html).toContain("/agent/session");
+    expect(html).toContain("agentHistoryLoaded");
+    expect(html).toContain("state.agentHistoryLoaded = false");
+    expect(html).toContain("!state.agentHistoryLoaded");
+    expect(html).toContain("response.agentSession.messages");
     expect(html).toContain("/api/feeding-agent/chat");
     expect(html).toContain("markdown(text)");
     expect(html).toContain("typing");
     expect(html).toContain('aria-modal="true"');
     expect(html).toContain("trapFocus");
     expect(html).toContain("env(safe-area-inset-bottom)");
+  });
+
+  it("drops stale batch responses before rendering or showing switch feedback", () => {
+    expect(html).toContain("if (String(batchId) !== String(state.currentBatchId)) return false;");
+    expect(html).toContain("var loaded = await loadBatch(batchId);");
+    expect(html).toContain("if (loaded && String(batchId) === String(state.currentBatchId)) showToast('已切换批次');");
+    expect(html).toContain("if (String(batchId) === String(state.currentBatchId)) showToast(error.message || '批次载入失败');");
   });
 });

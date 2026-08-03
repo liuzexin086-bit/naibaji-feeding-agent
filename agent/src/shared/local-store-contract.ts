@@ -216,6 +216,14 @@ export interface LocalStore {
   audit(input: AuditInput): AuditEvent;
   getUserByEmail(email: string): LocalUser | null;
   getUserById(userId: string): LocalUser | null;
+  listUsers(): LocalUser[];
+  createUser(input: {
+    id?: string;
+    email: string;
+    passwordHash: string;
+    passwordSalt: string;
+    role?: LocalUserRole;
+  }): LocalUser;
   ensureUser(input: {
     id?: string;
     email: string;
@@ -231,6 +239,11 @@ export interface LocalStore {
   }): LocalSession;
   getAuthSession(tokenHash: string): LocalSession | null;
   revokeAuthSession(tokenHash: string, revokedAt?: string): void;
+  deleteUser(input: {
+    userId: string;
+    actorUserId: string;
+    confirmEmail: string;
+  }): void;
   listSopTemplates(): LocalSopTemplate[];
   createSopTemplate(input: {
     id?: string;

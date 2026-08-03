@@ -10,6 +10,8 @@
     total: 0,
     pageSize: 50,
     activeView: 'batchAdminView',
+    users: [],
+    usersLoaded: false,
     apiConfigLoaded: false,
     apiConfig: null,
     sopTemplates: [],
@@ -55,7 +57,23 @@
   function showOnly(id) { ;['loadingScreen', 'loginScreen', 'noPermissionScreen', 'adminRoot'].forEach(function (screen) { byId(screen).hidden = screen !== id }) }
   function loginMessage(text, isError) { var el = byId('loginMessage'); el.textContent = text || ''; el.style.color = isError ? '' : 'var(--muted)' }
   function notice(id, text, isError) { var el = byId(id); if (!el) return; el.textContent = text || ''; el.className = 'notice' + (isError ? '' : ' ok') }
-  function errorText(error) { return error && (error.message || error.code) || '请求失败' }
+  function errorText(error) {
+    var code = error && error.code
+    var messages = {
+      NBJ_USER_EXISTS: '该邮箱已存在。',
+      NBJ_USER_NOT_FOUND: '账号不存在或已被删除。',
+      NBJ_USER_SELF_DELETE: '不能删除当前登录管理员。',
+      NBJ_USER_CONFIRM_EMAIL_MISMATCH: '确认邮箱与目标账号不一致。',
+      NBJ_USER_CONFIRM_EMAIL_REQUIRED: '必须输入确认邮箱。',
+      NBJ_LAST_ADMIN: '不能删除最后一个启用管理员。',
+      NBJ_AUTH_ROLE_INVALID: '角色只能选择管理员或操作员。',
+      NBJ_AUTH_PASSWORD_INVALID: '密码长度必须为 8–512 个字符。',
+      NBJ_AUTH_EMAIL_INVALID: '请输入有效邮箱地址。',
+      NBJ_ADMIN_REQUIRED: '需要管理员权限。',
+      NBJ_AUTH_REQUIRED: '登录已失效，请重新登录。'
+    }
+    return messages[code] || error && (error.message || code) || '请求失败。'
+  }
 
   async function api(path, options) {
     var request = Object.assign({ credentials: 'include', headers: {} }, options || {})
@@ -72,6 +90,7 @@
     AdminState.activeView = viewId
     document.querySelectorAll('.admin-view').forEach(function (view) { view.hidden = view.id !== viewId })
     document.querySelectorAll('.admin-tab').forEach(function (tab) { var active = tab.getAttribute('data-admin-view') === viewId; tab.setAttribute('aria-selected', active ? 'true' : 'false') })
+    if (viewId === 'accountsAdminView') loadUsers(false)
     if (viewId === 'apiAdminView') loadApiConfig(false)
     if (viewId === 'sopAdminView') loadSopTemplates(false)
   }
@@ -88,6 +107,53 @@
     byId('emptyState').hidden = rows.length !== 0; renderStats(); byId('resultSummary').textContent = '共 ' + rows.length + ' 个批次'; byId('pageInfo').textContent = '本地数据'
   }
   async function loadBatches() { notice('queryNotice', '正在读取本地批次……', false); try { var response = await api('/api/batches'); AdminState.rows = Array.isArray(response.batches) ? response.batches : []; renderBatches(); notice('queryNotice', '', false) } catch (error) { AdminState.rows = []; renderBatches(); notice('queryNotice', errorText(error), true) } }
+
+  function renderUsers() {
+    var body = byId('accountRows');
+    if (!body) return
+    body.innerHTML = AdminState.users.map(function (user) {
+      var current = AdminState.user && String(AdminState.user.id) === String(user.id)
+      var role = user.role === 'admin' ? '管理员' : '操作员'
+      var status = user.disabled ? '已停用' : '启用'
+      var action = current ? '<span class="secret-hint">当前登录</span>' : user.email ? '<button class="btn btn-outline" type="button" data-delete-user="' + escapeHtml(user.id) + '">删除</button>' : '<span class="secret-hint">未绑定邮箱</span>'
+      return '<tr><td>' + escapeHtml(user.email || '未绑定邮箱') + '</td><td>' + role + '</td><td>' + status + '</td><td>' + escapeHtml(dateText(user.createdAt || user.created_at)) + '</td><td>' + action + '</td></tr>'
+    }).join('')
+    byId('accountEmptyState').hidden = AdminState.users.length !== 0
+  }
+
+  async function loadUsers(force) {
+    if (AdminState.usersLoaded && !force) { renderUsers(); return true }
+    notice('accountNotice', '正在读取账号……', false)
+    try {
+      var response = await api('/api/admin/users')
+      AdminState.users = Array.isArray(response.users) ? response.users : []
+      AdminState.usersLoaded = true
+      renderUsers()
+      notice('accountNotice', '', false)
+      return true
+    } catch (error) {
+      AdminState.users = []
+      renderUsers()
+      notice('accountNotice', errorText(error), true)
+      return false
+    }
+  }
+
+  async function deleteUser(userId) {
+    var user = AdminState.users.find(function (item) { return String(item.id) === String(userId) })
+    if (!user || (AdminState.user && String(user.id) === String(AdminState.user.id))) return
+    var warning = '删除账号“' + (user.email || '未绑定邮箱') + '”将物理清理该账号的批次、现场对话和登录会话；其创建的 SOP 模板会转移给当前管理员。此操作不可撤销。继续吗？'
+    if (!window.confirm(warning)) return
+    var confirmEmail = window.prompt('请输入目标账号的完整邮箱以确认删除：', '')
+    if (confirmEmail === null) return
+    notice('accountNotice', '正在删除账号……', false)
+    try {
+      await api('/api/admin/users/' + encodeURIComponent(user.id), { method: 'DELETE', body: { confirmEmail: confirmEmail } })
+      if (await loadUsers(true)) notice('accountNotice', '账号已删除。', false)
+    } catch (error) {
+      notice('accountNotice', errorText(error), true)
+    }
+  }
 
   function renderApiConfig(config) {
     config = config || {}; AdminState.apiConfig = config
@@ -120,6 +186,24 @@
     byId('selectAll').addEventListener('change', function () { document.querySelectorAll('[data-select-batch]').forEach(function (input) { input.checked = byId('selectAll').checked }) })
     byId('batchRows').addEventListener('change', function (event) { if (!event.target.matches('[data-select-batch]')) return; if (event.target.checked) AdminState.selected.add(event.target.dataset.selectBatch); else AdminState.selected.delete(event.target.dataset.selectBatch) })
     byId('batchRows').addEventListener('click', function (event) { var button = event.target.closest('[data-action="detail"]'); if (button) openDetail(decodeURIComponent(button.dataset.batchId)) })
+    byId('accountRefreshButton').addEventListener('click', function () { loadUsers(true) })
+    byId('accountRows').addEventListener('click', function (event) { var button = event.target.closest('[data-delete-user]'); if (button) deleteUser(button.dataset.deleteUser) })
+    byId('accountCreateForm').addEventListener('submit', async function (event) {
+      event.preventDefault()
+      var button = byId('accountCreateButton')
+      button.disabled = true
+      notice('accountNotice', '正在创建账号……', false)
+      try {
+        await api('/api/admin/users', { method: 'POST', body: { email: byId('accountEmail').value, password: byId('accountPassword').value, role: byId('accountRole').value } })
+        byId('accountCreateForm').reset()
+        byId('accountRole').value = 'operator'
+        if (await loadUsers(true)) notice('accountNotice', '账号已创建。', false)
+      } catch (error) {
+        notice('accountNotice', errorText(error), true)
+      } finally {
+        button.disabled = false
+      }
+    })
     document.querySelectorAll('[data-close]').forEach(function (button) { button.addEventListener('click', function () { byId(button.dataset.close).hidden = true }) })
     byId('exportFilteredButton').addEventListener('click', function () { exportRows(AdminState.rows) }); byId('exportSelectedButton').addEventListener('click', function () { var selected = AdminState.rows.filter(function (row) { return AdminState.selected.has(encodeURIComponent(row.id || row.batch && row.batch.id)) }); exportRows(selected) })
     byId('apiProvider').addEventListener('change', function () { var openai = byId('apiProvider').value === 'openai'; byId('apiMode').disabled = !openai; if (!byId('apiBaseUrl').value || /api\.(openai|anthropic)\.com/.test(byId('apiBaseUrl').value)) byId('apiBaseUrl').value = openai ? 'https://api.openai.com/v1' : 'https://api.anthropic.com/v1' })

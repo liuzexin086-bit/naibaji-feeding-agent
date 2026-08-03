@@ -2,17 +2,20 @@ import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { computeDayDecision } from "../decision/core.js";
 import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
-import type { SqliteLocalStore } from "../local-db/index.js";
-import type { LocalBatch } from "../shared/local-store-contract.js";
+import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
+import type { LocalBatch, LocalUser, LocalUserRole } from "../shared/local-store-contract.js";
 import {
   authenticateLocalUser,
   clearSessionCookie,
   getSessionToken,
   hashSessionToken,
+  hashPassword,
+  normalizeEmail,
   requireLocalAdmin,
   requireLocalAuth,
   resolveLocalAuth,
   setSessionCookie,
+  validatePassword,
 } from "./local-auth.js";
 
 export const CREEP_VALUES = {
@@ -61,6 +64,17 @@ function json(response: ServerResponse, body: unknown, status = 200, extra?: Rec
 }
 
 function errorCode(error: unknown): string {
+  if (error instanceof LocalStoreError) {
+    const codes: Record<string, string> = {
+      LOCAL_STORE_USER_EXISTS: "NBJ_USER_EXISTS",
+      LOCAL_STORE_USER_NOT_FOUND: "NBJ_USER_NOT_FOUND",
+      LOCAL_STORE_USER_SELF_DELETE: "NBJ_USER_SELF_DELETE",
+      LOCAL_STORE_USER_CONFIRM_MISMATCH: "NBJ_USER_CONFIRM_EMAIL_MISMATCH",
+      LOCAL_STORE_LAST_ADMIN: "NBJ_LAST_ADMIN",
+      LOCAL_STORE_INVALID_INPUT: "NBJ_LOCAL_API_INVALID_INPUT",
+    };
+    return codes[error.code] ?? `NBJ_${error.code.replace(/^LOCAL_STORE_/, "")}`;
+  }
   return error instanceof Error && error.message.startsWith("NBJ_")
     ? error.message
     : "NBJ_LOCAL_API_UNAVAILABLE";
@@ -72,14 +86,32 @@ function sendError(response: ServerResponse, error: unknown): void {
     ? 401
     : code === "NBJ_ADMIN_REQUIRED"
       ? 403
-      : code === "NBJ_BATCH_STALE"
+      : code === "NBJ_BATCH_STALE" || code === "NBJ_USER_EXISTS" || code === "NBJ_LAST_ADMIN"
         ? 409
-        : code === "NBJ_BATCH_NOT_FOUND"
+        : code === "NBJ_BATCH_NOT_FOUND" || code === "NBJ_USER_NOT_FOUND"
           ? 404
           : code === "NBJ_METHOD_NOT_ALLOWED"
             ? 405
             : 400;
   json(response, { code }, status);
+}
+
+function publicUser(user: LocalUser): LocalUser {
+  // LocalUser intentionally contains no password hash/salt. Keep this
+  // projection explicit so future credential fields cannot leak accidentally.
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+    disabled: user.disabled,
+  };
+}
+
+function userRole(value: unknown): LocalUserRole {
+  if (value === undefined || value === null || value === "") return "operator";
+  if (value !== "admin" && value !== "operator") throw new Error("NBJ_AUTH_ROLE_INVALID");
+  return value;
 }
 
 async function readJson(request: IncomingMessage): Promise<JsonObject> {
@@ -370,6 +402,28 @@ function allRecords(batch: LocalBatch): JsonObject[] {
   }, weights.get(Number(row.dayAge))));
 }
 
+/**
+ * Batch responses carry the complete history for that batch's Agent session.
+ * Keeping it nested under agentSession preserves the existing response shape
+ * while preventing the frontend from reusing a previous batch's transcript.
+ */
+function agentSessionPublic(
+  store: SqliteLocalStore,
+  userId: string,
+  batchId: string,
+): JsonObject {
+  const session = store.listSessions(userId, batchId)[0] ?? store.createSession({
+    id: randomUUID(),
+    userId,
+    batchId,
+    status: "active",
+  });
+  return {
+    ...session,
+    messages: store.listMessages(userId, batchId, session.id, { limit: 1_000 }),
+  };
+}
+
 function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
   const source = object(body.observation ?? {}, "observation");
   const config = configOf(batch);
@@ -442,6 +496,48 @@ export async function handleLocalApi(
     }
     const auth = requireLocalAuth(request, store);
 
+    if (url.pathname === "/api/admin/users") {
+      const admin = requireLocalAdmin(request, store);
+      if (request.method === "GET") {
+        json(response, { users: store.listUsers().map(publicUser) });
+        return true;
+      }
+      if (request.method === "POST") {
+        const body = await readJson(request);
+        const email = normalizeEmail(body.email);
+        const password = validatePassword(body.password);
+        const role = userRole(body.role);
+        const { hash, salt } = hashPassword(password);
+        const user = store.createUser({
+          email,
+          passwordHash: hash,
+          passwordSalt: salt,
+          role,
+        });
+        // Keep the actor reference in the branch so authorization remains
+        // explicit even though the store performs the insert atomically.
+        void admin;
+        json(response, { user: publicUser(user) }, 201);
+        return true;
+      }
+      throw new Error("NBJ_METHOD_NOT_ALLOWED");
+    }
+
+    const userDeleteMatch = url.pathname.match(/^\/api\/admin\/users\/([^/]+)$/);
+    if (userDeleteMatch) {
+      const admin = requireLocalAdmin(request, store);
+      if (request.method !== "DELETE") throw new Error("NBJ_METHOD_NOT_ALLOWED");
+      const body = await readJson(request);
+      const confirmEmail = body.confirmEmail;
+      if (typeof confirmEmail !== "string" || !confirmEmail) {
+        throw new Error("NBJ_USER_CONFIRM_EMAIL_REQUIRED");
+      }
+      const userId = decodeURIComponent(userDeleteMatch[1]);
+      store.deleteUser({ userId, actorUserId: admin.user.id, confirmEmail });
+      json(response, { ok: true, userId });
+      return true;
+    }
+
     if (request.method === "GET" && url.pathname === "/api/batches") {
       const batches = store.listBatches(auth.user.id).map(batchPublic);
       json(response, { batches, currentBatchId: batches[0]?.id ?? null });
@@ -485,7 +581,7 @@ export async function handleLocalApi(
           control_start_day: -1,
         },
       });
-      const session = store.createSession({ id: randomUUID(), userId: auth.user.id, batchId: id, status: "active" });
+      const session = agentSessionPublic(store, auth.user.id, id);
       const today = decisionFor(batch);
       json(response, { batch: batchPublic(batch), today, records: [], agentSession: session }, 201);
       return true;
@@ -498,13 +594,19 @@ export async function handleLocalApi(
       let batch = store.getBatch(auth.user.id, batchId);
       if (!batch) throw new Error("NBJ_BATCH_NOT_FOUND");
       if (request.method === "GET" && !suffix) {
-        const session = store.listSessions(auth.user.id, batchId)[0] ?? store.createSession({ id: randomUUID(), userId: auth.user.id, batchId, status: "active" });
-        json(response, { batch: batchPublic(batch), today: decisionFor(batch), records: allRecords(batch), agentSession: session });
+        const session = agentSessionPublic(store, auth.user.id, batchId);
+        json(response, {
+          batch: batchPublic(batch),
+          today: decisionFor(batch),
+          records: allRecords(batch),
+          agentSession: session,
+          messages: session.messages,
+        });
         return true;
       }
       if (request.method === "GET" && suffix === "agent/session") {
-        const session = store.listSessions(auth.user.id, batchId)[0] ?? store.createSession({ id: randomUUID(), userId: auth.user.id, batchId, status: "active" });
-        json(response, { session, messages: store.listMessages(auth.user.id, batchId, session.id, { limit: 1_000 }) });
+        const session = agentSessionPublic(store, auth.user.id, batchId);
+        json(response, { session, messages: session.messages });
         return true;
       }
       if (request.method === "POST" && (suffix === "advance" || suffix === "records")) {
@@ -534,13 +636,14 @@ export async function handleLocalApi(
             data: nextData,
           } as LocalBatch;
           const nextToday = decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision);
-          const session = store.listSessions(auth.user.id, batchId)[0] ?? store.createSession({ id: randomUUID(), userId: auth.user.id, batchId, status: "active" });
+          const session = agentSessionPublic(store, auth.user.id, batchId);
           const result = {
             batch: batchPublic(nextBatch),
             today: nextToday,
             records: allRecords(nextBatch),
             committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
             agentSession: session,
+            messages: session.messages,
           };
           const committed = store.commitAdvance({
             userId: auth.user.id,

@@ -11,7 +11,7 @@ import type { LocalUser } from "../shared/local-store-contract.js";
 export const SESSION_COOKIE_NAME = "nbj_session";
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 
-function normalizedEmail(value: unknown): string {
+export function normalizeEmail(value: unknown): string {
   if (typeof value !== "string") throw new Error("NBJ_AUTH_FIELDS_REQUIRED");
   const email = value.trim().toLowerCase();
   if (!email || email.length > 320 || !email.includes("@")) {
@@ -20,7 +20,7 @@ function normalizedEmail(value: unknown): string {
   return email;
 }
 
-function passwordValue(value: unknown): string {
+export function validatePassword(value: unknown): string {
   if (typeof value !== "string" || value.length < 8 || value.length > 512) {
     throw new Error("NBJ_AUTH_PASSWORD_INVALID");
   }
@@ -54,8 +54,8 @@ export function initializeLocalAdmin(
   password: string | undefined,
 ): LocalUser | null {
   if (!email || !password) return null;
-  const normalized = normalizedEmail(email);
-  const secret = passwordValue(password);
+  const normalized = normalizeEmail(email);
+  const secret = validatePassword(password);
   const { hash, salt } = hashPassword(secret);
   return store.ensureUser({
     email: normalized,
@@ -132,8 +132,8 @@ export function authenticateLocalUser(
   emailInput: unknown,
   passwordInput: unknown,
 ): { user: LocalUser; token: string; sessionId: string; expiresAt: string } {
-  const email = normalizedEmail(emailInput);
-  const password = passwordValue(passwordInput);
+  const email = normalizeEmail(emailInput);
+  const password = validatePassword(passwordInput);
   const credential = store.getUserCredential(email);
   if (!credential || !verifyPassword(password, credential.passwordHash, credential.passwordSalt)) {
     throw new Error("NBJ_AUTH_INVALID_CREDENTIALS");

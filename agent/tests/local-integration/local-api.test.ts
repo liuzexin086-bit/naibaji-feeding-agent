@@ -194,4 +194,151 @@ describe("local execution API", () => {
       setting: { source: "sop_indirect" },
     });
   });
+
+  it("returns history for the requested batch session without cross-batch leakage", async () => {
+    const { base, store } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+    const user = (await request(base, "/api/auth/session", { headers: { cookie } })).json() as Promise<{ user: { id: string } }>;
+    const userId = (await user).user.id;
+    const create = async (name: string) => {
+      const response = await request(base, "/api/batches", {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({ name, startAge: 3, endAge: 12, headCount: 20 }),
+      });
+      expect(response.status).toBe(201);
+      return response.json() as Promise<{ batch: { id: string }; agentSession: { id: string } }>;
+    };
+    const batchA = await create("批次 A");
+    const batchB = await create("批次 B");
+    store.appendMessage({
+      userId,
+      batchId: batchA.batch.id,
+      sessionId: batchA.agentSession.id,
+      role: "user",
+      content: "A 的问题",
+      evidence: {},
+    });
+    store.appendMessage({
+      userId,
+      batchId: batchA.batch.id,
+      sessionId: batchA.agentSession.id,
+      role: "assistant",
+      content: "A 的回答",
+      evidence: {},
+    });
+    store.appendMessage({
+      userId,
+      batchId: batchB.batch.id,
+      sessionId: batchB.agentSession.id,
+      role: "assistant",
+      content: "B 的回答",
+      evidence: {},
+    });
+
+    const detailA = await request(base, `/api/batches/${batchA.batch.id}`, { headers: { cookie } });
+    const detailABody = await detailA.json() as {
+      agentSession: { id: string; messages: Array<{ content: string }> };
+    };
+    expect(detailABody.agentSession.id).toBe(batchA.agentSession.id);
+    expect(detailABody.agentSession.messages.map((message) => message.content)).toEqual([
+      "A 的问题",
+      "A 的回答",
+    ]);
+
+    const detailB = await request(base, `/api/batches/${batchB.batch.id}`, { headers: { cookie } });
+    const detailBBody = await detailB.json() as {
+      agentSession: { id: string; messages: Array<{ content: string }> };
+    };
+    expect(detailBBody.agentSession.id).toBe(batchB.agentSession.id);
+    expect(detailBBody.agentSession.messages.map((message) => message.content)).toEqual(["B 的回答"]);
+  });
+
+  it("allows admins to create, list, and confirmed-delete local accounts without credential leakage", async () => {
+    const { base, store } = await startApi();
+    expect((await request(base, "/api/admin/users")).status).toBe(401);
+    const adminLogin = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const adminCookie = cookieOf(adminLogin);
+    const adminSession = await request(base, "/api/auth/session", { headers: { cookie: adminCookie } });
+    const adminId = ((await adminSession.json()) as { user: { id: string } }).user.id;
+
+    const created = await request(base, "/api/admin/users", {
+      method: "POST",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ email: "  Operator@Example.com ", password: "operator-pass", role: "operator" }),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as { user: { id: string; email: string; role: string; passwordHash?: string; passwordSalt?: string } };
+    expect(createdBody.user).toMatchObject({ email: "operator@example.com", role: "operator" });
+    expect(createdBody.user).not.toHaveProperty("passwordHash");
+    expect(createdBody.user).not.toHaveProperty("passwordSalt");
+
+    const listed = await request(base, "/api/admin/users", { headers: { cookie: adminCookie } });
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json() as { users: Array<{ id: string; email: string; passwordHash?: string }> };
+    expect(listedBody.users.some((user) => user.id === createdBody.user.id && user.email === "operator@example.com")).toBe(true);
+    expect(JSON.stringify(listedBody)).not.toContain("passwordHash");
+
+    const operatorLogin = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "operator@example.com", password: "operator-pass" }),
+    });
+    expect(operatorLogin.status).toBe(200);
+    const operatorCookie = cookieOf(operatorLogin);
+    expect((await request(base, "/api/admin/users", { headers: { cookie: operatorCookie } })).status).toBe(403);
+    const operatorBatch = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie: operatorCookie },
+      body: JSON.stringify({ name: "待删除批次", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    expect(operatorBatch.status).toBe(201);
+    const operatorBatchBody = await operatorBatch.json() as { batch: { id: string }; agentSession: { id: string } };
+    store.appendMessage({
+      userId: createdBody.user.id,
+      batchId: operatorBatchBody.batch.id,
+      sessionId: operatorBatchBody.agentSession.id,
+      role: "user",
+      content: "operator-owned message",
+    });
+    store.createSopTemplate({
+      id: "operator-owned-template",
+      version: "operator-owned-v1",
+      name: "Operator owned",
+      config: {},
+      createdBy: createdBody.user.id,
+    });
+
+    const mismatch = await request(base, `/api/admin/users/${encodeURIComponent(createdBody.user.id)}`, {
+      method: "DELETE",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ confirmEmail: "wrong@example.com" }),
+    });
+    expect(mismatch.status).toBe(400);
+    expect((await request(base, "/api/auth/session", { headers: { cookie: operatorCookie } })).status).toBe(200);
+
+    const deleted = await request(base, `/api/admin/users/${encodeURIComponent(createdBody.user.id)}`, {
+      method: "DELETE",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ confirmEmail: "operator@example.com" }),
+    });
+    expect(deleted.status).toBe(200);
+    expect((await request(base, "/api/auth/session", { headers: { cookie: operatorCookie } })).status).toBe(401);
+    expect(store.getUserById(createdBody.user.id)).toBeNull();
+    expect(store.getBatch(createdBody.user.id, operatorBatchBody.batch.id)).toBeNull();
+    expect(store.listSopTemplates().find((template) => template.id === "operator-owned-template")?.createdBy).toBe(adminId);
+
+    const selfDelete = await request(base, `/api/admin/users/${encodeURIComponent(adminId)}`, {
+      method: "DELETE",
+      headers: { cookie: adminCookie },
+      body: JSON.stringify({ confirmEmail: "admin@example.com" }),
+    });
+    expect(selfDelete.status).toBe(400);
+  });
 });

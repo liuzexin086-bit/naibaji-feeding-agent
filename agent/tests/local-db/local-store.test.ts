@@ -208,4 +208,83 @@ describe("SQLite local store", () => {
     expect(() => store.getBatch("user-a", "batch-1"))
       .toThrowError(expect.objectContaining({ code: "LOCAL_STORE_CLOSED" }));
   });
+
+  it("lists accounts and deletes an account atomically after transferring SOP ownership", () => {
+    const store = memoryStore();
+    const admin = store.createUser({
+      id: "admin-a",
+      email: "admin@example.com",
+      passwordHash: "hash-admin",
+      passwordSalt: "salt-admin",
+      role: "admin",
+    });
+    const target = store.createUser({
+      id: "operator-a",
+      email: "operator@example.com",
+      passwordHash: "hash-operator",
+      passwordSalt: "salt-operator",
+      role: "operator",
+    });
+    store.createBatch({ userId: target.id, batchId: "owned-batch" });
+    store.createSession({ userId: target.id, batchId: "owned-batch", id: "owned-session" });
+    store.appendMessage({
+      userId: target.id,
+      batchId: "owned-batch",
+      sessionId: "owned-session",
+      role: "user",
+      content: "owned message",
+    });
+    store.createSopTemplate({
+      id: "owned-template",
+      version: "owned-v1",
+      name: "Owned",
+      config: {},
+      createdBy: target.id,
+    });
+
+    expect(store.listUsers().map((user) => user.email)).toEqual([
+      "admin@example.com",
+      "operator@example.com",
+    ]);
+    expect(() => store.deleteUser({
+      userId: target.id,
+      actorUserId: admin.id,
+      confirmEmail: "wrong@example.com",
+    })).toThrowError(expect.objectContaining({ code: "LOCAL_STORE_USER_CONFIRM_MISMATCH" }));
+
+    store.deleteUser({
+      userId: target.id,
+      actorUserId: admin.id,
+      confirmEmail: target.email,
+    });
+    expect(store.getUserById(target.id)).toBeNull();
+    expect(store.getBatch(target.id, "owned-batch")).toBeNull();
+    expect(store.listSessions(target.id, "owned-batch")).toEqual([]);
+    expect(store.listSopTemplates().find((template) => template.id === "owned-template")?.createdBy)
+      .toBe(admin.id);
+    store.close();
+  });
+
+  it("protects the current administrator and duplicate normalized emails", () => {
+    const store = memoryStore();
+    const admin = store.createUser({
+      id: "admin-a",
+      email: "ADMIN@example.com",
+      passwordHash: "hash-admin",
+      passwordSalt: "salt-admin",
+      role: "admin",
+    });
+    expect(() => store.createUser({
+      email: " admin@EXAMPLE.com ",
+      passwordHash: "hash-other",
+      passwordSalt: "salt-other",
+      role: "operator",
+    })).toThrowError(expect.objectContaining({ code: "LOCAL_STORE_USER_EXISTS" }));
+    expect(() => store.deleteUser({
+      userId: admin.id,
+      actorUserId: admin.id,
+      confirmEmail: admin.email,
+    })).toThrowError(expect.objectContaining({ code: "LOCAL_STORE_USER_SELF_DELETE" }));
+    store.close();
+  });
 });

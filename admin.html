@@ -55,6 +55,7 @@
   <main>
     <nav class="admin-tabs" role="tablist" aria-label="管理员功能">
       <button class="admin-tab" id="batchAdminTab" role="tab" aria-selected="true" aria-controls="batchAdminView" data-admin-view="batchAdminView" type="button">批次管理</button>
+      <button class="admin-tab" id="accountsAdminTab" role="tab" aria-selected="false" aria-controls="accountsAdminView" data-admin-view="accountsAdminView" type="button">账号管理</button>
       <button class="admin-tab" id="apiAdminTab" role="tab" aria-selected="false" aria-controls="apiAdminView" data-admin-view="apiAdminView" type="button">Agent API</button>
       <button class="admin-tab" id="sopAdminTab" role="tab" aria-selected="false" aria-controls="sopAdminView" data-admin-view="sopAdminView" type="button">SOP 版本</button>
     </nav>
@@ -82,6 +83,22 @@
       <div class="table-wrap"><table><thead><tr><th><input id="selectAll" type="checkbox" aria-label="选择当前页"></th><th>用户邮箱</th><th>批次名称</th><th>栏位编号</th><th>起始日龄</th><th>结束日龄</th><th>状态</th><th>已录天数</th><th>revision</th><th>更新时间</th><th>操作</th></tr></thead><tbody id="batchRows"></tbody></table><div id="emptyState" class="empty" hidden>没有符合条件的批次。</div></div>
       <div class="pagination"><button id="prevPageButton" class="btn btn-outline" type="button">上一页</button><span id="pageInfo">第 1 页</span><button id="nextPageButton" class="btn btn-outline" type="button">下一页</button></div>
     </section>
+    </div>
+
+    <div id="accountsAdminView" class="admin-view" role="tabpanel" aria-labelledby="accountsAdminTab" hidden>
+      <section class="panel" style="margin-top:0">
+        <div class="panel-head"><div><h2>账号管理</h2><p class="panel-copy">创建现场操作员或管理员账号。密码只在创建时提交，后台不会显示或回传凭据。</p></div><div id="accountNotice" class="notice" aria-live="polite"></div></div>
+        <form id="accountCreateForm" class="config-card">
+          <div class="config-grid">
+            <label class="field">邮箱<input id="accountEmail" type="email" maxlength="320" autocomplete="off" required></label>
+            <label class="field">初始密码<input id="accountPassword" type="password" minlength="8" maxlength="512" autocomplete="new-password" required><span class="secret-hint">8–512 个字符。</span></label>
+            <label class="field">角色<select id="accountRole"><option value="operator">操作员</option><option value="admin">管理员</option></select></label>
+          </div>
+          <div class="form-actions"><button id="accountCreateButton" class="btn btn-primary" type="submit">创建账号</button></div>
+        </form>
+        <div class="panel-head" style="margin-top:20px"><div><h3>现有账号</h3><p class="panel-copy">删除会物理清理该账号的批次、现场对话和会话；该账号创建的 SOP 模板会转移给当前管理员。</p></div><button id="accountRefreshButton" class="btn btn-outline" type="button">刷新</button></div>
+        <div class="table-wrap"><table><thead><tr><th>邮箱</th><th>角色</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="accountRows"></tbody></table><div id="accountEmptyState" class="empty" hidden>暂无本地账号。</div></div>
+      </section>
     </div>
 
     <div id="apiAdminView" class="admin-view" role="tabpanel" aria-labelledby="apiAdminTab" hidden>

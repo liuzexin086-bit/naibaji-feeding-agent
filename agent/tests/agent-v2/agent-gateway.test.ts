@@ -79,6 +79,15 @@ describe("Agent V2 deterministic gateway", () => {
     expect(server).not.toMatch(/assistantText\.(?:slice|substring)|content:\s*assistantText\.slice/);
   });
 
+  it("buffers assistant messages and sanitizes public tool evidence", () => {
+    expect(server).toContain("bufferedAssistantText");
+    expect(server).toContain('event.type === "message_end"');
+    expect(server).toContain('type === "toolCall"');
+    expect(server).toContain("completed: true");
+    expect(server).not.toContain("name: event.toolName");
+    expect(server).not.toContain("evidence: event.result?.details");
+  });
+
   it("supports replay deduplication and a replaceable message store", () => {
     expect(server).toContain('request.headers["last-event-id"]');
     expect(server).toContain("body.clientMessageId");
@@ -94,7 +103,9 @@ describe("Agent V2 deterministic gateway", () => {
     expect(server).toContain("不输出风险分数、等级或预测");
     expect(server).toContain("无/低/中/高/极好五档");
     expect(server).toContain("0/10/45/80/130");
-    expect(server).toContain("必须先调用 preview_diarrhea_adjustment");
+    expect(server).toContain("系统自动读取确定性的调整结果");
+    expect(server).toContain("最终回复只直接回答现场问题");
+    expect(server).not.toContain("必须先调用 preview_diarrhea_adjustment");
     expect(server).toContain("严重异常必须进入人工处置");
   });
 
