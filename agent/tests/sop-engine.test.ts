@@ -23,7 +23,7 @@ const modelMeal = {
   mealCount: 10,
   dayAge: 3,
   calculationDate: "2026-07-31",
-  modelVersion: "feeding-model+V5-Lite@2026-08-03",
+  modelVersion: "feeding-model+V5-Lite@2026-08-03-control-v2",
 };
 
 function createRun(admittedAt = "2026-07-31T01:00:00.000Z") {

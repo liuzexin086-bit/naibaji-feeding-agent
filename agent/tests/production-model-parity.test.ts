@@ -13,7 +13,7 @@ function sha256(path: string): string {
 describe("protected production model parity", () => {
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "75C132304973524490EDAD5AECDFFF795EC368CAE25FBED9B110A80259F40406",
+      "5378C5AAB45E1A4EFCEDEE8A258A6AC044824B69AD024553BA0FACFA72B8B94F",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -118,7 +118,7 @@ describe("protected production model parity", () => {
     expect(output.selectedDay.totalMilkGrams).toBe(595);
   });
 
-  it("starts control on the day after the first non-none creep grade", () => {
+  it("does not start control from a single non-none creep grade", () => {
     const output = computeProductionPlan({
       startAge: 3,
       endAge: 8,
@@ -126,11 +126,53 @@ describe("protected production model parity", () => {
       headCount: 20,
       records: [{ dayAge: 4, creepGrade: "high", creepValue: 80, headCount: 20 }],
     });
+    expect(output.controlStartDay).toBe(6);
+    expect(output.control.feedTimes.every((count) => count === 10)).toBe(true);
+    expect(output.deviceOperation.curve[0]?.meals).toHaveLength(10);
+  });
+
+  it.each([
+    { grade: "low", floor: 9 },
+    { grade: "medium", floor: 8 },
+    { grade: "high", floor: 6 },
+    { grade: "excellent", floor: 4 },
+  ])("reduces at most once daily to the sustained $grade floor of $floor", ({ grade, floor }) => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 12,
+      startWeight: 10,
+      headCount: 20,
+      records: [
+        { dayAge: 3, creepGrade: grade, headCount: 20 },
+        { dayAge: 4, creepGrade: grade, headCount: 20 },
+      ],
+    });
     expect(output.controlStartDay).toBe(2);
     expect(output.control.feedTimes.slice(0, 2)).toEqual([10, 10]);
-    expect(output.control.feedTimes[2]).toBe(8);
-    expect(output.deviceOperation.curve[0]?.meals).toHaveLength(10);
-    expect(output.deviceOperation.curve[2]?.mealCount).toBe(8);
+    expect(Math.max(...output.control.feedTimes)).toBe(10);
+    expect(Math.min(...output.control.feedTimes)).toBe(floor);
+    expect(output.control.feedTimes.every((count) => count >= floor && count <= 10)).toBe(true);
+    output.control.feedTimes.slice(1).forEach((count, index) => {
+      const previous = output.control.feedTimes[index];
+      expect(count).toBeLessThanOrEqual(previous);
+      expect(previous - count).toBeLessThanOrEqual(1);
+    });
+  });
+
+  it("treats two of the latest three observations at a grade or higher as sustained", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 7,
+      startWeight: 10,
+      headCount: 20,
+      records: [
+        { dayAge: 3, creepGrade: "low", headCount: 20 },
+        { dayAge: 4, creepGrade: "none", headCount: 20 },
+        { dayAge: 5, creepGrade: "high", headCount: 20 },
+      ],
+    });
+    expect(output.controlStartDay).toBe(3);
+    expect(output.control.feedTimes).toEqual([10, 10, 10, 9, 9]);
   });
 
   it("keeps all days at ten meals when no non-none grade is recorded", () => {

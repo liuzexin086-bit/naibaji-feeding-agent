@@ -39,6 +39,15 @@ const CREEP_GRADE_VALUES = Object.freeze({
   excellent: 130,
 })
 
+const CREEP_GRADE_ORDER = Object.freeze(['none', 'low', 'medium', 'high', 'excellent'])
+const CREEP_MEAL_FLOORS = Object.freeze({
+  none: 10,
+  low: 9,
+  medium: 8,
+  high: 6,
+  excellent: 4,
+})
+
 function creepValueFromRecord(record) {
   const label = record && (record.creepGrade ?? record.creep_grade)
   if (typeof label === 'string' && Object.prototype.hasOwnProperty.call(CREEP_GRADE_VALUES, label)) {
@@ -53,6 +62,26 @@ function creepValueFromRecord(record) {
     if (Number.isFinite(value)) return value
   }
   return null
+}
+
+function creepGradeFromRecord(record) {
+  const label = record && (record.creepGrade ?? record.creep_grade)
+  if (typeof label === 'string' && CREEP_GRADE_ORDER.includes(label)) return label
+  const value = creepValueFromRecord(record)
+  const exact = Object.entries(CREEP_GRADE_VALUES).find(([, gradeValue]) => gradeValue === value)
+  return exact ? exact[0] : 'none'
+}
+
+// “持续教槽”定义：最近三次现场观察中至少两次达到同一档或更高。
+// 例如 low + medium 可持续触发 low；单次 high 不触发控奶。
+function sustainedCreepGrade(grades) {
+  const recent = grades.slice(-3)
+  if (recent.length < 2) return 'none'
+  for (let index = CREEP_GRADE_ORDER.length - 1; index >= 1; index--) {
+    const count = recent.filter((grade) => CREEP_GRADE_ORDER.indexOf(grade) >= index).length
+    if (count >= 2) return CREEP_GRADE_ORDER[index]
+  }
+  return 'none'
 }
 
 // ──────────────────────────────────────────────
@@ -189,26 +218,14 @@ function generatePlan(opts) {
 /**
  * 控奶逻辑：教槽决定启动值和递减间隔，每日检查日增重保护。
  *
- * 启动次数：
- *   教槽3日均值 ≥70g → 从 8 次/天开始递减
- *   30g ≤ 均值 < 70g → 从 10 次/天
- *   均值 < 30g → 从 11 次/天
- *
- * 递减间隔（教槽决定递减速度）：
- *   ≥70g → 每 1 天减 1 次
- *   30-70g → 每 2 天减 1 次
- *   <30g → 每 3 天减 1 次
- *
- * 日增重保护（每次减前检查）：
- *   预测日增重 = 实际可喝量 / FCR
- *   如果 < 180g 则停止减少
- *   如果单次量 > 胃容量 × 85%，按胃容量上限倒推实际可喝量
- *
- * 下限 2 次/天。
+ * 餐次规则：
+ *   起始/最高 10 次；餐次只减不增；每个计划日最多减少 1 次。
+ *   最近三次观察中至少两次达到同一档或更高，才视为持续教槽。
+ *   低/中/高/极好档的餐次下限分别为 9/8/6/4 次。
  *
  * @param {object} plan - generatePlan() 输出
  * @param {Array} records - 每日实际记录
- * @param {number|undefined} controlStartDay - 控奶开启的天索引；省略时由首个非 none 教槽记录决定
+ * @param {number|undefined} controlStartDay - 已冻结的控奶开启天索引；省略时由持续教槽首次成立的次日决定
  * @returns {{ planMilkPPControl, planMilkTotalControl, feedTimes, perFeed, controlStartDay }}
  */
 function computeControlPlan(plan, records, controlStartDay) {
@@ -222,9 +239,9 @@ function computeControlPlan(plan, records, controlStartDay) {
   // 构建教槽映射 & 已录天计划值。新合同只允许五个固定教槽档位；
   // totalCreepG 仍可被旧记录读取，但不能改变档位映射。
   const creepMap = {}
+  const creepGradeMap = {}
   const committed = new Set()
   const committedPlans = {}
-  let firstNonNoneDayAge = null
   for (let i = 0; i < records.length; i++) {
     const r = records[i]
     committed.add(r.dayAge)
@@ -232,81 +249,46 @@ function computeControlPlan(plan, records, controlStartDay) {
       committedPlans[r.dayAge] = {
         perPig: r.planPerPigAtCommit,
         total: r.planTotalAtCommit,
-        feedTimes: r.feedTimesAtCommit || 10,
+        feedTimes: Math.max(1, Math.min(10, Number(r.feedTimesAtCommit) || 10)),
       }
     }
     const creepValue = creepValueFromRecord(r)
     if (creepValue != null) {
       creepMap[r.dayAge] = creepValue  // 转头均（固定档位值）
-      const label = r.creepGrade ?? r.creep_grade
-      const nonNone = label
-        ? label !== "none"
-        : creepValue > CREEP_GRADE_VALUES.none
-      if (nonNone && (firstNonNoneDayAge == null || r.dayAge < firstNonNoneDayAge)) {
-        firstNonNoneDayAge = Number(r.dayAge)
-      }
+      creepGradeMap[r.dayAge] = creepGradeFromRecord(r)
     }
   }
 
-  // The first non-none observation fixes the start permanently at the next
-  // batch day.  An explicit non-negative value is used only for replay of a
-  // previously committed schedule.
-  const automaticStart = firstNonNoneDayAge == null
-    ? nDays
-    : Math.max(0, Math.min(nDays, firstNonNoneDayAge + 1 - plan.startAge))
+  // 控奶只能由持续教槽触发，并从持续状态成立后的下一个计划日开始。
+  const automaticGrades = []
+  let automaticStart = nDays
+  for (let i = 0; i < nDays; i++) {
+    const dayAge = plan.days[i].dayAge
+    if (creepGradeMap[dayAge] !== undefined) {
+      automaticGrades.push(creepGradeMap[dayAge])
+      if (automaticGrades.length > 3) automaticGrades.shift()
+    }
+    if (sustainedCreepGrade(automaticGrades) !== 'none') {
+      automaticStart = Math.min(nDays, i + 1)
+      break
+    }
+  }
   const resolvedControlStartDay = Number.isFinite(Number(controlStartDay)) && Number(controlStartDay) >= 0
     ? Math.max(0, Math.min(nDays, Number(controlStartDay)))
     : automaticStart
 
-  const creepRolling = []
-  let started = false
+  const creepGradeRolling = []
   let currentCount = 10
-  let interval = 3   // 无教槽时默认每3天减1次（低教槽）
-  let lastReductionDay = -1
   let latestCreep = 0  // 最新录入的教槽值，用于补充日增重
-
-  // 根据教槽均值获取启动参数
-  function getStartParams(avg) {
-    if (avg >= 70) return { start: 8, intv: 1 }
-    if (avg >= 30) return { start: 10, intv: 2 }
-    return { start: 11, intv: 3 }
-  }
-
-  // 更新控奶参数（基于教槽数据或默认值）
-  function updateControlParams() {
-    if (creepRolling.length > 0) {
-      const avg = creepRolling.reduce((a, b) => a + b, 0) / creepRolling.length
-      const p = getStartParams(avg)
-      currentCount = p.start
-      interval = p.intv
-    } else {
-      // No non-none grade means normal 10-meal feeding.  Automatic control
-      // does not start until an observation provides a real signal.
-      currentCount = 10
-    }
-  }
-
-  // 检查是否可以减少到 targetCount
-  function canReduceTo(targetCount, dailyCap, originalPlan, dayAge) {
-    if (targetCount < 2) return false
-    const perFeedCap = dailyCap / 10
-    const totalFromFormula = perFeedCap * targetCount
-    const effectiveTotal = Math.min(originalPlan, totalFromFormula)
-    // 预计日增重 = (奶粉 + 教槽×0.7) / FCR
-    const creepForDay = creepMap[dayAge] || latestCreep
-    const totalNutrition = effectiveTotal + creepForDay * INTERNAL.creepEq
-    const predictedGain = totalNutrition / INTERNAL.fcr  // 预测日增重(g)
-    return predictedGain >= 180
-  }
 
   for (let i = 0; i < nDays; i++) {
     const d = plan.days[i]
 
     // 更新教槽滚动
-    const hasCreep = creepMap[d.dayAge] !== undefined
+    const hasCreep = creepGradeMap[d.dayAge] !== undefined
     if (hasCreep) {
-      creepRolling.push(creepMap[d.dayAge])
-      if (creepRolling.length > 3) creepRolling.shift()
+      creepGradeRolling.push(creepGradeMap[d.dayAge])
+      if (creepGradeRolling.length > 3) creepGradeRolling.shift()
       latestCreep = creepMap[d.dayAge]  // 保存最新教槽值
     }
 
@@ -316,30 +298,14 @@ function computeControlPlan(plan, records, controlStartDay) {
       continue
     }
 
-    // 控奶开启日：确定启动参数
-    if (!started) {
-      started = true
-      updateControlParams()
-      lastReductionDay = d.dayAge
+    const stableGrade = sustainedCreepGrade(creepGradeRolling)
+    const mealFloor = CREEP_MEAL_FLOORS[stableGrade]
+    // 循环按日执行，因此每个计划日最多只会减少一次；currentCount 从不回升。
+    if (stableGrade !== 'none' && currentCount > mealFloor) {
+      currentCount -= 1
     }
 
-    // 逐日检查教槽数据更新，有数据时重新设参数
-    if (hasCreep) {
-      updateControlParams()
-    }
-
-    // 逐日检查是否到减少时机
-    if (currentCount > 2) {
-      const daysSinceReduction = d.dayAge - lastReductionDay
-      if (daysSinceReduction >= interval) {
-        const targetCount = currentCount - 1
-        if (canReduceTo(targetCount, d.dailyCapacity, d.perPigMilkPlan, d.dayAge)) {
-          currentCount = targetCount
-          lastReductionDay = d.dayAge
-        }
-      }
-    }
-
+    currentCount = Math.min(10, currentCount)
     feedTimes[i] = currentCount
 
     // 已录天用提交时的计划值（保持当时看到的版本）
@@ -348,8 +314,8 @@ function computeControlPlan(plan, records, controlStartDay) {
       if (cp) {
         planPPControl[i] = cp.perPig
         planTotalControl[i] = cp.total
-        feedTimes[i] = cp.feedTimes
-        perFeed[i] = Math.round(cp.perPig / cp.feedTimes * 100) / 100
+        feedTimes[i] = Math.max(1, Math.min(10, cp.feedTimes))
+        perFeed[i] = Math.round(cp.perPig / feedTimes[i] * 100) / 100
       } else {
         // 旧记录没有提交值时的 fallback
         perFeed[i] = Math.round(d.perPigMilkPlan / 10 * 10) / 10

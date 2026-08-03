@@ -140,10 +140,24 @@ function recordsOf(batch: LocalBatch): JsonObject[] {
     : [];
 }
 
-function internalGrade(value: unknown): "none" | "low" | "medium" | "high" {
-  return value === "excellent" ? "high" : ["none", "low", "medium", "high"].includes(String(value))
-    ? value as "none" | "low" | "medium" | "high"
+type InternalCreepGrade = "none" | "low" | "medium" | "high" | "excellent";
+const INTERNAL_CREEP_ORDER: InternalCreepGrade[] = ["none", "low", "medium", "high", "excellent"];
+
+function internalGrade(value: unknown): InternalCreepGrade {
+  return INTERNAL_CREEP_ORDER.includes(String(value) as InternalCreepGrade)
+    ? value as InternalCreepGrade
     : "none";
+}
+
+function sustainedCreepGrade(records: JsonObject[]): InternalCreepGrade {
+  const recent = records.slice(-3).map((row) => internalGrade(row.creepGrade));
+  if (recent.length < 2) return "none";
+  for (let index = INTERNAL_CREEP_ORDER.length - 1; index >= 1; index -= 1) {
+    if (recent.filter((grade) => INTERNAL_CREEP_ORDER.indexOf(grade) >= index).length >= 2) {
+      return INTERNAL_CREEP_ORDER[index];
+    }
+  }
+  return "none";
 }
 
 function modelRecords(records: JsonObject[]): JsonObject[] {
@@ -159,7 +173,7 @@ function modelRecords(records: JsonObject[]): JsonObject[] {
   });
 }
 
-function latestGrades(records: JsonObject[]): Array<"none" | "low" | "medium" | "high"> {
+function latestGrades(records: JsonObject[]): InternalCreepGrade[] {
   return records.slice(-3).map((row) => internalGrade(row.creepGrade));
 }
 
@@ -467,7 +481,9 @@ export async function handleLocalApi(
         const existingRecords = recordsOf(batch);
         const nextRecords = [...existingRecords.filter((row) => Number(row.dayIndex) !== Number(observation.dayIndex)), observation];
         let controlStartDay = Number(configOf(batch).controlStartDay ?? -1);
-        if (controlStartDay < 0 && observation.creepGrade !== "none") controlStartDay = batch.currentDay + 1;
+        if (controlStartDay < 0 && sustainedCreepGrade(nextRecords) !== "none") {
+          controlStartDay = batch.currentDay + 1;
+        }
         const nextData: JsonObject = {
           ...batch.data,
           config: { ...configOf(batch), controlStartDay },

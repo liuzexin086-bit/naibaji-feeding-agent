@@ -9,9 +9,9 @@ import type {
   SopTemplateSnapshot,
 } from "./types.js";
 
-export const PRODUCTION_MODEL_VERSION = "feeding-model+V5-Lite@2026-08-03";
+export const PRODUCTION_MODEL_VERSION = "feeding-model+V5-Lite@2026-08-03-control-v2";
 export const PRODUCTION_MODEL_HASH =
-  "feeding-model:A566B3A71B643A78610BCA0F30348A70DE87B0E59A782A9C40775BB35DA8842A;" +
+  "feeding-model:5378C5AAB45E1A4EFCEDEE8A258A6AC044824B69AD024553BA0FACFA72B8B94F;" +
   "v5lite:124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE";
 
 export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze({

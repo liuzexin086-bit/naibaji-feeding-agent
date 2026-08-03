@@ -94,10 +94,10 @@ describe("local execution API", () => {
     };
     expect(advancedBody.batch.currentDayIndex).toBe(1);
     expect(advancedBody.batch.revision).toBe(1);
-    expect(advancedBody.today.mealCount).toBe(8);
+    expect(advancedBody.today.mealCount).toBe(10);
     expect(advancedBody.today.mealTimes).toEqual([
-      "10:00", "14:00", "18:00", "20:00",
-      "22:00", "02:00", "06:00", "08:00",
+      "10:00", "14:00", "16:00", "18:00", "20:00",
+      "22:00", "02:00", "04:00", "06:00", "08:00",
     ]);
     expect(advancedBody.today.planWindow).toEqual({
       startLocal: "09:00",
@@ -109,6 +109,23 @@ describe("local execution API", () => {
     });
     expect(replay.status).toBe(200);
     expect((await replay.json() as { batch: { currentDayIndex: number } }).batch.currentDayIndex).toBe(1);
+
+    const secondAdvance = await request(base, `/api/batches/${batchId}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "advance-1",
+        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 700 },
+      }),
+    });
+    expect(secondAdvance.status).toBe(200);
+    const secondBody = await secondAdvance.json() as {
+      batch: { currentDayIndex: number; revision: number };
+      today: { mealCount: number };
+    };
+    expect(secondBody.batch).toMatchObject({ currentDayIndex: 2, revision: 2 });
+    expect(secondBody.today.mealCount).toBe(9);
   });
 
   it("keeps SOP template versions immutable and requires admin", async () => {

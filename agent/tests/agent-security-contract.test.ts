@@ -103,6 +103,8 @@ describe("Agent security boundary", () => {
     expect(server).toContain("正常饲喂初始为每天 10 次");
     expect(server).toContain("当日 09:00 至次日 09:00");
     expect(server).toContain("00:00 与 12:00 不配奶");
+    expect(server).toContain("低/中/高/极好餐次下限为 9/8/6/4");
+    expect(server).toContain("餐次只减不增、每天最多减一次且最高 10 次");
     expect(server).toContain("SOP 直接给出的总量优先");
     expect(server).toContain("只有 SOP 不能直接或间接确定总量时");
     expect(page).toContain("首夜教奶程序");

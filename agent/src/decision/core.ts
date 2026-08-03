@@ -118,15 +118,13 @@ export function majorityCreepGrade(
   );
   if (!areGrades && !areGrams) fail("INVALID_CREEP_GRADE_HISTORY");
   const grades: CreepGrade[] = areGrades ? values : values.map(creepGrade);
-  const counts = new Map<CreepGrade, number>();
-  grades.forEach((grade) => counts.set(grade, (counts.get(grade) ?? 0) + 1));
-  const maximum = Math.max(...counts.values());
-  const tied = new Set(
-    GRADE_ORDER.filter((grade) => (counts.get(grade) ?? 0) === maximum),
-  );
-  // A 1-1-1 split has no literal majority; the latest observation is the
-  // deterministic and least stale tie-breaker.
-  return [...grades].reverse().find((grade) => tied.has(grade)) ?? "none";
+  if (grades.length < 2) return "none";
+  // 持续状态：最近三次中至少两次达到候选档或更高。
+  for (let index = GRADE_ORDER.length - 1; index >= 1; index -= 1) {
+    const count = grades.filter((grade) => GRADE_ORDER.indexOf(grade) >= index).length;
+    if (count >= 2) return GRADE_ORDER[index];
+  }
+  return "none";
 }
 
 function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
@@ -353,7 +351,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const creepGradeInput = input.creepFeedGradesLast3Days !== undefined
     ? input.creepFeedGradesLast3Days
     : input.creepFeedGramsLast3Days;
-  const majorityGrade = majorityCreepGrade(creepGradeInput);
+  const sustainedGrade = majorityCreepGrade(creepGradeInput);
   const creepGradeInputSource = input.creepFeedGradesLast3Days !== undefined
     ? "recorded_grades"
     : input.creepFeedGramsLast3Days !== undefined
@@ -425,9 +423,9 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
           explanation: "仅生成确定性现场处置，不输出风险分数、等级或预测。",
         },
         {
-          name: "creep_majority_grade",
-          value: { grade: majorityGrade, inputSource: creepGradeInputSource },
-          explanation: "优先按现场最近三天记录的 none/low/medium/high/excellent 档位取多数；平票取最近一天。",
+          name: "creep_sustained_grade",
+          value: { grade: sustainedGrade, inputSource: creepGradeInputSource },
+          explanation: "最近三次观察中至少两次达到同一档或更高才形成持续教槽状态。",
         },
         {
           name: "device_program",
@@ -444,7 +442,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
         {
           name: "control_start",
           value: model.controlStartDay,
-          explanation: "首个非 none 教槽记录的次日开始控奶；此前保持 10 餐。",
+          explanation: "持续教槽成立的次日开始控奶；餐次只减不增、每天最多减一次，最高 10 餐。",
         },
       ],
     },

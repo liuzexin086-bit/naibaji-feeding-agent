@@ -49,7 +49,7 @@ computeDayDecision(input: DayDecisionInput): FeedingDecision;
 previewDiarrheaAdjustment(input: DiarrheaAdjustmentInput): FeedingDecision;
 ```
 
-决策顺序固定为：SOP 直接总量 → SOP 参数可推导总量 → `feeding-model + V5-Lite`。模型标准曲线为上限；`>100%` 标记腹泻风险，`>115%` 标记高风险并禁止自动启用。教槽等级为无/低/中/高，对应 0、<30、30–<70、≥70；三日采用多数档。
+决策顺序固定为：SOP 直接总量 → SOP 参数可推导总量 → `feeding-model + V5-Lite`。教槽等级为无/低/中/高/极好，对应 0/10/45/80/130；最近三次至少两次达到同一档或更高才形成持续状态。餐次只减不增、每天最多减一次、最高 10 次，低/中/高/极好下限为 9/8/6/4 次。
 
 ## Agent 工具契约
 

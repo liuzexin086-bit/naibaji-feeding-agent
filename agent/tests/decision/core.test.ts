@@ -81,7 +81,8 @@ describe("deterministic day decision", () => {
       .toEqual(["none", "low", "medium", "high", "excellent"]);
     expect(majorityCreepGrade([10, 45, 45])).toBe("medium");
     expect(majorityCreepGrade(["low", "excellent", "excellent"])).toBe("excellent");
-    expect(majorityCreepGrade(["none", "low", "high"])).toBe("high");
+    expect(majorityCreepGrade(["none", "low", "high"])).toBe("low");
+    expect(majorityCreepGrade(["high"])).toBe("none");
   });
 
   it("computes the control grade from grade-only field and records its evidence", () => {
@@ -92,7 +93,7 @@ describe("deterministic day decision", () => {
       creepFeedGradesLast3Days: ["low", "medium", "medium"],
       creepFeedGramsLast3Days: [],
     });
-    expect(decision.evidence.steps.find((step) => step.name === "creep_majority_grade"))
+    expect(decision.evidence.steps.find((step) => step.name === "creep_sustained_grade"))
       .toMatchObject({
         value: { grade: "medium", inputSource: "recorded_grades" },
       });
@@ -103,12 +104,12 @@ describe("deterministic day decision", () => {
       creepFeedGradesLast3Days: ["none", "low", "low"],
       creepFeedGramsLast3Days: [80, 80, 80],
     }));
-    expect(preferred.evidence.steps.find((step) => step.name === "creep_majority_grade")?.value)
+    expect(preferred.evidence.steps.find((step) => step.name === "creep_sustained_grade")?.value)
       .toEqual({ grade: "low", inputSource: "recorded_grades" });
 
     const legacy = computeDayDecision(baseInput({ creepFeedGramsLast3Days: [0, 10, 80] }));
-    expect(legacy.evidence.steps.find((step) => step.name === "creep_majority_grade")?.value)
-      .toEqual({ grade: "high", inputSource: "legacy_grams" });
+    expect(legacy.evidence.steps.find((step) => step.name === "creep_sustained_grade")?.value)
+      .toEqual({ grade: "low", inputSource: "legacy_grams" });
   });
 
   it("uses the fixed six-meal teaching program and SOP single amount", () => {

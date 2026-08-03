@@ -165,7 +165,8 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
   const records = input.records ?? [];
   const requestedControlStartDay = input.controlStartDay ?? -1;
   // A negative/omitted value means automatic control: the protected model
-  // finds the first recorded non-none creep grade and starts on the next day.
+  // finds the first sustained creep state (two of the latest three observations
+  // at the same grade or higher) and starts on the next day.
   // A non-negative value remains available for deterministic replay of a
   // previously committed plan.
   const effectiveControlStartDay = requestedControlStartDay >= 0
@@ -215,7 +216,7 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
   });
 
   return {
-    modelVersion: "feeding-model+V5-Lite@2026-08-03",
+    modelVersion: "feeding-model+V5-Lite@2026-08-03-control-v2",
     calculationDate: new Date().toISOString().slice(0, 10),
     basis: {
       startAge: input.startAge,
