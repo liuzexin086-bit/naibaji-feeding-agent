@@ -326,21 +326,27 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const sopSingle = selected.perMeal != null
     ? floorToPrecision(positive(selected.perMeal, "INVALID_SOP_MEAL_AMOUNT"), precision)
     : undefined;
-  const singlePowderGrams = sopSingle ?? modelSinglePowder;
+  const resolvedSinglePowderGrams = sopSingle ?? modelSinglePowder;
   let timedMeals: TimedMeal[] = [];
   if (mode === "timed_quantity") {
-    if (input.teachingProgram?.enabled || selected.source === "production_model" || sopSingle != null) {
+    if (selected.source === "production_model" || sopSingle != null) {
       // Model/SOP per-meal quantities are never reconstructed from a daily
       // total.  Every device event receives the same deterministic amount.
-      timedMeals = times.map((timeLocal) => ({ timeLocal, powderGrams: singlePowderGrams }));
+      timedMeals = times.map((timeLocal) => ({
+        timeLocal,
+        powderGrams: resolvedSinglePowderGrams,
+      }));
     } else {
       // A direct SOP daily total without a per-meal quantity is the sole case
       // where the SOP itself requests allocation across its schedule.
       timedMeals = allocate(safeDailyTotal, times, precision);
     }
   }
+  const singlePowderGrams = timedMeals[0]?.powderGrams ?? resolvedSinglePowderGrams;
   const programTotal = floorToPrecision(
-    singlePowderGrams * (mode === "timed_quantity" ? times.length : referenceMealCount),
+    mode === "timed_quantity"
+      ? timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)
+      : singlePowderGrams * referenceMealCount,
     precision,
   );
   const status = input.requestedStatus === "active" ? "active" : "draft";
@@ -357,8 +363,10 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   if (selected.target > curveLimit) reasons.push("SOP 目标量超过模型曲线，已生成现场人工确认处置。 ");
   if (forcedTimed) reasons.push("异常或控奶条件触发定时定量模式。 ");
   if (input.teachingProgram?.enabled) reasons.push("教奶程序持续至次日 08:00（含 08:00 餐）。");
-  if (input.teachingProgram?.enabled && selected.source === "production_model") {
-    reasons.push("教奶单次下粉量采用生产模型单次量，按实际 6 个教奶时间点汇总程序量。");
+  if (input.teachingProgram?.enabled && selected.source !== "production_model") {
+    reasons.push("首日教奶量采用冻结 SOP，按实际 6 个教奶时间点形成设备程序。");
+  } else if (input.teachingProgram?.enabled) {
+    reasons.push("SOP 未提供可计算数量，回退到生产模型单次量。");
   }
 
   return {

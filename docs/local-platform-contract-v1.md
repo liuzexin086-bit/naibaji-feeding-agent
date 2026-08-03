@@ -19,6 +19,7 @@
 
 - `Batch`：`id,name,room,startAge,endAge,initialHeads,effectiveHeads,currentDayIndex,status,revision,createdAt,updatedAt`。
 - `DailyRecord`：`dayIndex,dayAge,effectiveHeads,deviceMode,singlePowderGrams,mealCount,mealTimes,plannedTotalPowderGrams,actualPowderGrams,creepGrade,creepValue,diarrheaGrade,waterState,exceptionActions,modelVersion,sopVersion,revision,recordedAt`。
+- 首日数量权威：冻结 SOP 直接总量优先，其次按 `35g/20头/次 × 有效头数 × 6餐` 推导；SOP 无法确定时才回退生产模型。第二日起使用生产模型与控奶逻辑。
 - 教槽展示档位为 `none/low/medium/high/excellent`，内部值固定为 `0/10/45/80/130`。
 - 首次记录非 `none` 教槽后，`controlStartDay` 固定为下一日；之后由生产模型根据最近三次档位对应值决定餐次，不允许 UI 自行计算。
 - 正常首始餐次为 10，排除 `00:00` 与 `12:00`；程序总量固定为“模型整栏单餐下粉量 × 实际餐次”，禁止用日总量反推单餐。

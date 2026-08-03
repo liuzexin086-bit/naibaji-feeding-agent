@@ -258,6 +258,9 @@ function decisionInput(
   requestedMode: "timed_quantity" | "free_feeding",
 ): DayDecisionInput {
   const creepGrades = state.batch.config?.creepFeedGradesLast3Days;
+  const firstDay = dayAge === state.modelInput.startAge;
+  const directTotal = finiteNumber(state.template.teachingDirectTotalPowderGrams, 0);
+  const perTwenty = finiteNumber(state.template.teachingPowderGramsPerTwenty, 35);
   return {
     revision: state.revision,
     batchId: state.batchId,
@@ -265,7 +268,7 @@ function decisionInput(
     calculationDate: state.dateLocal,
     sopVersion: state.sopVersion,
     modelInput: { ...state.modelInput, dayAge },
-    requestedMode,
+    requestedMode: firstDay ? "timed_quantity" : requestedMode,
     requestedStatus: "draft",
     precisionGrams: finiteNumber(state.template.devicePowderPrecisionGrams, 1),
     freeWindows: [{ startLocal: "00:00", endLocal: "23:59" }],
@@ -273,6 +276,19 @@ function decisionInput(
       ? creepGrades.filter((grade): grade is CreepGrade =>
           ["none", "low", "medium", "high", "excellent"].includes(String(grade)))
       : undefined,
+    ...(firstDay ? {
+      sop: {
+        ...(directTotal > 0 ? { directTotalPowderGrams: directTotal } : {}),
+        ...(perTwenty > 0 ? { powderGramsPerTwentyHeadsPerMeal: perTwenty } : {}),
+        mealCount: 6,
+      },
+      teachingProgram: {
+        enabled: state.template.teachingProgramEnabled !== false,
+        firstTeachingLocal: "17:00",
+        intervalHours: finiteNumber(state.template.teachingIntervalHours, 3),
+        endLocal: "08:00",
+      },
+    } : {}),
   };
 }
 
@@ -426,7 +442,7 @@ export function createFeedingTools(
         sopVersion: teachingDecision.evidence.sopVersion,
         modelVersion: teachingDecision.evidence.modelVersion,
         calculationDate: teachingDecision.evidence.calculationDate,
-        basis: "computeDayDecision 使用固定 6 个教奶时间点，并采用 feeding-model + V5-Lite 当日模型单次量。",
+        basis: "computeDayDecision 使用固定 6 个教奶时间点；首日数量按冻结 SOP 直接总量或 35g/20头/次推导，SOP 无法确定时才回退模型。",
         evidence: teachingDecision.evidence,
       });
     },

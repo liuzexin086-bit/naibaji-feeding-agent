@@ -123,15 +123,16 @@ describe("Supabase feeding-agent contract", () => {
     expect(sql).toContain("grant execute on function public.ensure_feeding_agent_session");
   });
 
-  it("publishes the fixed teaching/model-meal SOP for future runs", () => {
+  it("publishes the first-day SOP quantity template for future runs", () => {
     expect(sql).toContain("'pending', 'scheduled', 'completed'");
-    expect(sql).toContain("2026.08.03-v5-fixed-teaching-model-meal");
+    expect(sql).toContain("2026.08.03-v6-first-day-sop");
     expect(sql).toContain("'teachingProgramEndDayOffset', 1");
     expect(sql).toContain("'teachingProgramEndLocal', '08:00'");
-    expect(sql).toContain("'teachingQuantitySource', 'production_model'");
+    expect(sql).toContain("'teachingQuantitySource', 'sop'");
+    expect(sql).toContain("'teachingPowderGramsPerTwenty', 35");
     expect(sql).toContain("'initialMealCount', 10");
     expect(sql).toContain("'excludedMealTimes', jsonb_build_array('00:00', '12:00')");
-    expect(sql).toContain("p_config ->> 'teachingQuantitySource' <> 'production_model'");
+    expect(sql).toContain("p_config ->> 'teachingQuantitySource' <> 'sop'");
     expect(sql).toContain("'quantityAuthorityOrder', jsonb_build_array('sop_direct', 'sop_indirect', 'production_model')");
     expect(sql).toContain("'modelQuantityFallbackEnabled', true");
     expect(sql).toContain("jsonb_build_array('powderGrams', 'timeLocal')");

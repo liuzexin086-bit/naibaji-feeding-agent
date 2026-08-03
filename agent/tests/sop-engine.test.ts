@@ -60,14 +60,18 @@ describe("first teaching window", () => {
 });
 
 describe("teaching meal", () => {
-  it.each([10, 20, 17])("uses the model single-meal amount for %i active heads", (heads) => {
+  it.each([
+    [10, 18],
+    [20, 35],
+    [17, 30],
+  ])("uses the SOP single-meal amount for %i active heads", (heads, expectedPowder) => {
     expect(computeSopMeal(heads, modelMeal)).toMatchObject({
       activeHeadCount: heads,
-      powderGrams: 70,
-      dailyPowderGrams: 70,
+      powderGrams: expectedPowder,
+      dailyPowderGrams: expectedPowder,
       mealCount: 1,
-      amountSource: "production_model_fallback",
-      quantityAuthority: "production_model",
+      amountSource: "sop_indirect_total",
+      quantityAuthority: "sop_indirect",
       planSource: "sop_teaching",
     });
   });
@@ -80,7 +84,7 @@ describe("teaching meal", () => {
         { ...DEFAULT_SOP_TEMPLATE, devicePowderPrecisionGrams: 5 },
       )
         .powderGrams,
-    ).toBe(70);
+    ).toBe(30);
   });
 
   it("uses a direct SOP program total before indirect parameters", () => {
@@ -188,9 +192,9 @@ describe("teaching timeline", () => {
     expect(meals.every((task) => task.requiresConfirmation === false)).toBe(true);
     expect(meals[0]?.metadata).toMatchObject({
       executionMode: "device_program",
-      amountSource: "production_model_fallback",
-      quantityAuthority: "production_model",
-      resolvedProgramTotalPowderGrams: 420,
+      amountSource: "sop_indirect_total",
+      quantityAuthority: "sop_indirect",
+      resolvedProgramTotalPowderGrams: 210,
       deviceConfigurationFields: ["powderGrams", "timeLocal"],
     });
     expect(meals[0]?.numericPlan).not.toHaveProperty("liquidMl");
@@ -215,17 +219,17 @@ describe("execution gap semantics", () => {
     expect(committed).toMatchObject({
       planSource: "sop_teaching",
       mealCount: 3,
-      plannedPowderGrams: 210,
+      plannedPowderGrams: 105,
     });
     expect(
       checkExecutionGap({
         planSource: "sop_teaching",
-        committedPlan: 210,
-        actual: 140,
+        committedPlan: 105,
+        actual: 70,
         submittedRevision: 4,
         currentRevision: 4,
       }),
-    ).toMatchObject({ gap: 70, stale: false });
+    ).toMatchObject({ gap: 35, stale: false });
   });
 
   it("rejects an old revision", () => {

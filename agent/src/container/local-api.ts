@@ -22,11 +22,18 @@ export const CREEP_VALUES = {
   excellent: 130,
 } as const;
 
+export const DEFAULT_LOCAL_SOP_VERSION = "2026.08.03-v6-first-day-sop";
+
 export const DEFAULT_SOP_CONFIG: Record<string, unknown> = {
   teachingProgramEnabled: true,
   teachingFirstLocal: "17:00",
   teachingIntervalHours: 3,
   teachingEndLocal: "08:00",
+  teachingDirectTotalPowderGrams: 0,
+  teachingPowderGramsPerTwenty: 35,
+  teachingQuantitySource: "sop",
+  quantityAuthorityOrder: ["sop_direct", "sop_indirect", "production_model"],
+  modelQuantityFallbackEnabled: true,
   devicePowderPrecisionGrams: 1,
   waterClosedUntilDayAge: 12,
   initialMealCount: 10,
@@ -182,11 +189,29 @@ function templateConfig(batch: LocalBatch): { version: string; config: JsonObjec
   if (template && typeof template === "object" && !Array.isArray(template)) {
     const row = template as JsonObject;
     return {
-      version: String(row.version ?? "local-sop-default-v1"),
+      version: String(row.version ?? DEFAULT_LOCAL_SOP_VERSION),
       config: { ...DEFAULT_SOP_CONFIG, ...(row.config as JsonObject ?? {}) },
     };
   }
-  return { version: "local-sop-default-v1", config: { ...DEFAULT_SOP_CONFIG } };
+  return { version: DEFAULT_LOCAL_SOP_VERSION, config: { ...DEFAULT_SOP_CONFIG } };
+}
+
+function firstDaySopQuantity(config: JsonObject): JsonObject {
+  const directTotal = finite(
+    config.teachingDirectTotalPowderGrams ?? 0,
+    "teachingDirectTotalPowderGrams",
+    0,
+  );
+  const perTwenty = finite(
+    config.teachingPowderGramsPerTwenty ?? 35,
+    "teachingPowderGramsPerTwenty",
+    0,
+  );
+  return {
+    ...(directTotal > 0 ? { directTotalPowderGrams: directTotal } : {}),
+    ...(perTwenty > 0 ? { powderGramsPerTwentyHeadsPerMeal: perTwenty } : {}),
+    mealCount: 6,
+  };
 }
 
 function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = batch.revision): JsonObject {
@@ -235,6 +260,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     },
   };
   if (dayIndex === 0 && template.config.teachingProgramEnabled !== false) {
+    decisionInput.sop = firstDaySopQuantity(template.config);
     decisionInput.teachingProgram = {
       enabled: true,
       firstTeachingLocal: String(template.config.teachingFirstLocal ?? "17:00"),
@@ -384,6 +410,13 @@ export async function handleLocalApi(
       const headCount = integer(body.headCount, "head_count", 1, 100_000);
       const id = randomUUID();
       const nowDate = new Date().toISOString().slice(0, 10);
+      const latestSop = store.listSopTemplates()[0];
+      const frozenSop = latestSop
+        ? {
+            version: latestSop.version,
+            config: { ...DEFAULT_SOP_CONFIG, ...latestSop.config },
+          }
+        : { version: DEFAULT_LOCAL_SOP_VERSION, config: { ...DEFAULT_SOP_CONFIG } };
       const batch = store.createBatch({
         userId: auth.user.id,
         batchId: id,
@@ -394,7 +427,7 @@ export async function handleLocalApi(
             headCount, startWeight: finite(body.startWeight ?? 2.3, "start_weight", 0.1, 50),
             planStartDate: nowDate,
             controlStartDay: -1,
-            sopTemplate: { version: "local-sop-default-v1", config: { ...DEFAULT_SOP_CONFIG } },
+            sopTemplate: frozenSop,
           },
           records: [],
           current_day_index: 0,

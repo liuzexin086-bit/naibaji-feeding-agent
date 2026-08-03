@@ -111,18 +111,31 @@ describe("deterministic day decision", () => {
       .toEqual({ grade: "high", inputSource: "legacy_grams" });
   });
 
-  it("uses the fixed six-meal teaching program and model single amount", () => {
+  it("uses the fixed six-meal teaching program and SOP single amount", () => {
     const decision = computeDayDecision(baseInput({
-      precisionGrams: 3,
-      sop: { directTotalPowderGrams: 101 },
+      precisionGrams: 1,
+      sop: { powderGramsPerTwentyHeadsPerMeal: 35, mealCount: 6 },
       teachingProgram: { enabled: true, firstTeachingLocal: "20:00" },
     }));
     expect(decision.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual([
       "17:00", "20:00", "23:00", "02:00", "05:00", "08:00",
     ]);
-    expect(decision.setting.singlePowderGrams).toBe(69);
-    expect(decision.setting.dailyPowderGrams).toBe(414);
-    expect(decision.setting.timedMeals.every((meal) => meal.powderGrams === 69)).toBe(true);
+    expect(decision.setting.source).toBe("sop_indirect");
+    expect(decision.setting.singlePowderGrams).toBe(35);
+    expect(decision.setting.dailyPowderGrams).toBe(210);
+    expect(decision.setting.timedMeals.every((meal) => meal.powderGrams === 35)).toBe(true);
+  });
+
+  it("allocates a direct first-day SOP total across the six device times", () => {
+    const decision = computeDayDecision(baseInput({
+      precisionGrams: 1,
+      sop: { directTotalPowderGrams: 211, mealCount: 6 },
+      teachingProgram: { enabled: true, firstTeachingLocal: "17:00" },
+    }));
+    expect(decision.setting.source).toBe("sop_direct");
+    expect(decision.setting.dailyPowderGrams).toBe(211);
+    expect(decision.setting.timedMeals).toHaveLength(6);
+    expect(decision.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(211);
   });
 
   it("limits free feeding to eight windows and forces timed mode for risk/control/diarrhea", () => {

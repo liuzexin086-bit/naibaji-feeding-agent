@@ -1135,6 +1135,50 @@ where template_key = 'naibaji-early-weaning'
       and replacement.status = 'published'
   );
 
+-- V6 修正数量权威：首日教奶量恢复由 SOP 决定；模型仅在 SOP 无法计算时兜底。
+insert into public.feeding_sop_templates (
+  user_id, template_key, version, name, config, status, created_by
+)
+select
+  source.user_id,
+  source.template_key,
+  '2026.08.03-v6-first-day-sop',
+  '奶爸机超早期断奶 SOP · 首日 SOP 数量版',
+  source.config || jsonb_build_object(
+    'version', '2026.08.03-v6-first-day-sop',
+    'teachingDirectTotalPowderGrams', 0,
+    'teachingPowderGramsPerTwenty', 35,
+    'teachingQuantitySource', 'sop',
+    'quantityAuthorityOrder', jsonb_build_array('sop_direct', 'sop_indirect', 'production_model'),
+    'modelQuantityFallbackEnabled', true
+  ),
+  'published',
+  source.created_by
+from public.feeding_sop_templates source
+where source.template_key = 'naibaji-early-weaning'
+order by
+  case
+    when source.version = '2026.08.03-v5-fixed-teaching-model-meal' then 0
+    when source.status = 'published' then 1
+    else 2
+  end,
+  source.created_at desc
+limit 1
+on conflict (template_key, version) do nothing;
+
+update public.feeding_sop_templates
+set status = 'retired'
+where template_key = 'naibaji-early-weaning'
+  and version = '2026.08.03-v5-fixed-teaching-model-meal'
+  and status = 'published'
+  and exists (
+    select 1
+    from public.feeding_sop_templates replacement
+    where replacement.template_key = 'naibaji-early-weaning'
+      and replacement.version = '2026.08.03-v6-first-day-sop'
+      and replacement.status = 'published'
+  );
+
 -- 管理员以“复制并发布”创建新版本；可选地在同一事务中退役来源版本。
 create or replace function public.admin_publish_feeding_sop_template(
   p_base_template_id uuid,
@@ -1213,7 +1257,7 @@ begin
      or split_part(p_config ->> 'teachingProgramEndLocal', ':', 1)::integer > 23 then
     raise exception 'NBJ_SOP_TEACHING_PROGRAM_END_TIME_INVALID' using errcode = '22023';
   end if;
-  if p_config ->> 'teachingQuantitySource' <> 'production_model' then
+  if p_config ->> 'teachingQuantitySource' <> 'sop' then
     raise exception 'NBJ_SOP_TEACHING_QUANTITY_SOURCE_INVALID' using errcode = '22023';
   end if;
   if p_config -> 'quantityAuthorityOrder'

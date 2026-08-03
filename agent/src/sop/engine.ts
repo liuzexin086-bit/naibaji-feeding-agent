@@ -16,7 +16,7 @@ export const PRODUCTION_MODEL_HASH =
 
 export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze({
   templateId: "naibaji-early-weaning",
-  version: "2026.08.03-v5-fixed-teaching-model-meal",
+  version: "2026.08.03-v6-first-day-sop",
   timezone: "Asia/Shanghai",
   utcOffsetMinutes: 480,
   defaultAdmissionDeadlineLocal: "09:00",
@@ -32,7 +32,7 @@ export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze
   teachingDirectTotalPowderGrams: 0,
   quantityAuthorityOrder: ["sop_direct", "sop_indirect", "production_model"] as const,
   modelQuantityFallbackEnabled: true,
-  teachingQuantitySource: "production_model",
+  teachingQuantitySource: "sop",
   deviceConfigurationFields: ["powderGrams", "timeLocal"] as const,
   teachingLatestDay: 3,
   waterClosedBeforeAgeDays: 12,
@@ -294,7 +294,7 @@ export function startSopRun(input: {
     preferredFirstTeachingLocal: "17:00",
     teachingProgramEndDayOffset: 1,
     teachingProgramEndLocal: "08:00",
-    teachingQuantitySource: "production_model" as const,
+    teachingQuantitySource: "sop" as const,
     productionProgramStartLocal: "02:00",
   };
   const first = computeFirstTeachingTime(input.admittedAt, template);

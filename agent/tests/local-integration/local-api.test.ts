@@ -61,8 +61,19 @@ describe("local execution API", () => {
       body: JSON.stringify({ name: "一栏", room: "育婴室", startAge: 3, endAge: 12, headCount: 20 }),
     });
     expect(created.status).toBe(201);
-    const createdBody = await created.json() as { batch: { id: string; revision: number }; today: { mealCount: number } };
+    const createdBody = await created.json() as {
+      batch: { id: string; revision: number };
+      today: {
+        mealCount: number;
+        singlePowderGrams: number;
+        plannedTotalPowderGrams: number;
+        setting: { source: string };
+      };
+    };
     expect(createdBody.today.mealCount).toBe(6);
+    expect(createdBody.today.singlePowderGrams).toBe(35);
+    expect(createdBody.today.plannedTotalPowderGrams).toBe(210);
+    expect(createdBody.today.setting.source).toBe("sop_indirect");
     const batchId = createdBody.batch.id;
     const payload = {
       expectedRevision: 0,
@@ -92,7 +103,11 @@ describe("local execution API", () => {
     const cookie = cookieOf(login);
     const created = await request(base, "/api/admin/sop/templates", {
       method: "POST", headers: { cookie },
-      body: JSON.stringify({ version: "sop-local-v1", name: "本地默认", config: { initialMealCount: 10 } }),
+      body: JSON.stringify({
+        version: "sop-local-v1",
+        name: "本地默认",
+        config: { initialMealCount: 10, teachingPowderGramsPerTwenty: 40 },
+      }),
     });
     expect(created.status).toBe(201);
     const body = await created.json() as { template: { id: string; version: string } };
@@ -105,5 +120,26 @@ describe("local execution API", () => {
     const listed = await request(base, "/api/admin/sop/templates", { headers: { cookie } });
     expect((await listed.json() as { templates: Array<{ version: string }> }).templates.map((row) => row.version))
       .toEqual(["sop-local-v2", "sop-local-v1"]);
+
+    const batch = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "采用新 SOP", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    expect(batch.status).toBe(201);
+    const batchBody = await batch.json() as {
+      today: {
+        singlePowderGrams: number;
+        plannedTotalPowderGrams: number;
+        sopVersion: string;
+        setting: { source: string };
+      };
+    };
+    expect(batchBody.today).toMatchObject({
+      singlePowderGrams: 40,
+      plannedTotalPowderGrams: 240,
+      sopVersion: "sop-local-v2",
+      setting: { source: "sop_indirect" },
+    });
   });
 });
