@@ -237,7 +237,7 @@ async function batchDecisionState(
       template.devicePowderPrecisionGrams,
       1,
     ),
-    programStartLocal: "02:00",
+    programStartLocal: "09:00",
   };
   return {
     batchId: context.batchId,
@@ -411,7 +411,7 @@ export function createFeedingTools(
   const computeTeaching: AgentTool = {
     name: "compute_sop_meal",
     label: "计算教奶餐",
-    description: "按固定的 17:00 至次日 08:00 教奶程序计算；每次下粉量采用生产模型当日单次量。",
+    description: "按固定的 17:00 至次日 08:00 教奶程序计算；首日数量以冻结 SOP 为准。",
     parameters: Type.Object({
       activeHeadCount: Type.Integer({ minimum: 1, maximum: 10000 }),
     }),

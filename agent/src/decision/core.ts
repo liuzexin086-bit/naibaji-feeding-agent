@@ -61,7 +61,7 @@ function minuteLabel(minutes: number): string {
 }
 
 function defaultMealTimes(mealCount: number): string[] {
-  const allowed = Array.from({ length: 24 }, (_, hour) => hour)
+  const allowed = Array.from({ length: 24 }, (_, offset) => (9 + offset) % 24)
     .filter((hour) => hour !== 0 && hour !== 12)
     .map((hour) => `${String(hour).padStart(2, "0")}:00`);
   return Array.from({ length: mealCount }, (_, index) =>

@@ -38,6 +38,7 @@ export const DEFAULT_SOP_CONFIG: Record<string, unknown> = {
   waterClosedUntilDayAge: 12,
   initialMealCount: 10,
   excludedMealTimes: ["00:00", "12:00"],
+  productionProgramStartLocal: "09:00",
 };
 
 type JsonObject = Record<string, unknown>;
@@ -234,7 +235,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     dayAge,
     dilutionRatio: String(config.dilutionRatio ?? "水:粉=6:1"),
     devicePowderPrecisionGrams: finite(template.config.devicePowderPrecisionGrams ?? 1, "devicePowderPrecisionGrams", 0.1, 100),
-    programStartLocal: "02:00",
+    programStartLocal: "09:00",
   };
   const decisionInput: JsonObject = {
     revision,
@@ -288,6 +289,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     modelVersion: String((decision.evidence as JsonObject | undefined)?.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: template.version,
     waterState: dayAge < Number(template.config.waterClosedUntilDayAge ?? 12) ? "closed" : "open",
+    planWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
   };
 }
 

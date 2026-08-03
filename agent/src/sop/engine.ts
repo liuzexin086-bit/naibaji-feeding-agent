@@ -44,7 +44,7 @@ export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze
   soakedFeedEnabled: true,
   transitionEnabled: true,
   maintenanceEnabled: true,
-  productionProgramStartLocal: "02:00",
+  productionProgramStartLocal: "09:00",
   initialMealCount: 10,
   excludedMealTimes: ["00:00", "12:00"] as const,
   customTasks: [],
@@ -295,7 +295,7 @@ export function startSopRun(input: {
     teachingProgramEndDayOffset: 1,
     teachingProgramEndLocal: "08:00",
     teachingQuantitySource: "sop" as const,
-    productionProgramStartLocal: "02:00",
+    productionProgramStartLocal: "09:00",
   };
   const first = computeFirstTeachingTime(input.admittedAt, template);
   const now = input.now ?? new Date().toISOString();

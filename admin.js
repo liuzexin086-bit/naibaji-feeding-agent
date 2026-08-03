@@ -25,7 +25,7 @@
     teachingQuantitySource: 'sop', deviceConfigurationFields: ['powderGrams', 'timeLocal'], teachingLatestDay: 3,
     waterClosedBeforeAgeDays: 12, waterPolicyEnabled: true, teachingProgramEnabled: true, gentleMovementEnabled: true,
     laggardEvaluationEnabled: true, creepFeedEnabled: true, soakedFeedEnabled: true, transitionEnabled: true,
-    maintenanceEnabled: true, productionProgramStartLocal: '00:00', customTasks: [], standardCleanEveryDays: 2,
+    maintenanceEnabled: true, productionProgramStartLocal: '09:00', customTasks: [], standardCleanEveryDays: 2,
     deepCleanEveryDays: 7, creepAgeStart: 8, creepAgeEnd: 11, soakedFeedAgeStart: 12, soakedFeedAgeEnd: 14,
     soakedFeedRatio: '4:1', transitionAgeStart: 20, transitionMealsMin: 2, transitionMealsMax: 3
   }

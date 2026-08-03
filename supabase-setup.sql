@@ -1150,7 +1150,8 @@ select
     'teachingPowderGramsPerTwenty', 35,
     'teachingQuantitySource', 'sop',
     'quantityAuthorityOrder', jsonb_build_array('sop_direct', 'sop_indirect', 'production_model'),
-    'modelQuantityFallbackEnabled', true
+    'modelQuantityFallbackEnabled', true,
+    'productionProgramStartLocal', '09:00'
   ),
   'published',
   source.created_by

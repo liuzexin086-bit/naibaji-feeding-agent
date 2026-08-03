@@ -95,11 +95,13 @@ describe("Agent security boundary", () => {
   it("uses deterministic complete curves for concrete device advice", () => {
     expect(tools).toContain("fullFeedingCurve");
     expect(tools).toContain("devicePowderPrecisionGrams");
-    expect(server).toContain("下奶时间点、当日总粉量、餐次和单次下粉量");
+    expect(server).toContain("常规日计划回复只输出三行");
+    expect(server).toContain("单次配奶粉量、程序总奶粉量、配奶时间点");
     expect(server).toContain("不得把加水量或奶液量说成设备设置项");
     expect(server).toContain("教奶程序固定为断奶首日 17:00、20:00、23:00");
     expect(server).toContain("次日 02:00、05:00、08:00");
     expect(server).toContain("正常饲喂初始为每天 10 次");
+    expect(server).toContain("当日 09:00 至次日 09:00");
     expect(server).toContain("00:00 与 12:00 不配奶");
     expect(server).toContain("SOP 直接给出的总量优先");
     expect(server).toContain("只有 SOP 不能直接或间接确定总量时");

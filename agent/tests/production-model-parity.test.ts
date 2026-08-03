@@ -78,7 +78,7 @@ describe("protected production model parity", () => {
       mealCount: 10,
     });
     expect(output.deviceOperation.curve[0]?.meals[0]).toMatchObject({
-      timeLocal: "02:00",
+      timeLocal: "10:00",
       powderGrams: 70,
     });
     expect(output.deviceOperation.curve[0]?.meals[0]).not.toHaveProperty("waterMl");
@@ -89,9 +89,10 @@ describe("protected production model parity", () => {
       ),
     ).toBe(700);
     expect(output.deviceOperation.curve[0]?.meals.map((meal) => meal.timeLocal)).toEqual([
-      "02:00", "04:00", "06:00", "08:00", "10:00",
-      "14:00", "16:00", "18:00", "20:00", "22:00",
+      "10:00", "14:00", "16:00", "18:00", "20:00",
+      "22:00", "02:00", "04:00", "06:00", "08:00",
     ]);
+    expect(output.deviceOperation.programStartLocal).toBe("09:00");
     expect(output.deviceOperation.curve[0]?.meals.map((meal) => meal.timeLocal))
       .not.toContain("00:00");
     expect(output.deviceOperation.curve[0]?.meals.map((meal) => meal.timeLocal))

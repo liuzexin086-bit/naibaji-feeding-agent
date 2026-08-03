@@ -36,6 +36,17 @@ describe("local frontend contract", () => {
     expect(html).toContain("creepValue");
   });
 
+  it("shows only the single amount, program total, and feeding times in the daily setting", () => {
+    expect(html).toContain('<span class="label">单次下粉</span>');
+    expect(html).toContain('<span class="label">程序总量</span>');
+    expect(html).toContain('<div class="program-time-label">配奶时间点</div>');
+    expect(html).not.toContain('<span class="label">今日餐次</span>');
+    expect(html).not.toContain('<span class="label">下一次</span>');
+    expect(html).not.toContain("设备按设定执行");
+    expect(html).not.toContain("自动下奶");
+    expect(html).toContain("只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。");
+  });
+
   it("keeps the complete daily table and mobile-only horizontal scrolling", () => {
     for (const heading of ["批次日", "日龄", "有效头数", "模式", "单次量", "餐次", "时间点", "程序总量", "实际总量", "教槽", "腹泻", "饮水"]) {
       expect(html).toContain(`<th>${heading}</th>`);

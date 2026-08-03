@@ -84,10 +84,26 @@ describe("local execution API", () => {
       method: "POST", headers: { cookie }, body: JSON.stringify(payload),
     });
     expect(advanced.status).toBe(200);
-    const advancedBody = await advanced.json() as { batch: { currentDayIndex: number; revision: number }; today: { mealCount: number } };
+    const advancedBody = await advanced.json() as {
+      batch: { currentDayIndex: number; revision: number };
+      today: {
+        mealCount: number;
+        mealTimes: string[];
+        planWindow: { startLocal: string; endLocal: string; endDayOffset: number };
+      };
+    };
     expect(advancedBody.batch.currentDayIndex).toBe(1);
     expect(advancedBody.batch.revision).toBe(1);
-    expect(advancedBody.today.mealCount).toBeGreaterThan(0);
+    expect(advancedBody.today.mealCount).toBe(8);
+    expect(advancedBody.today.mealTimes).toEqual([
+      "10:00", "14:00", "18:00", "20:00",
+      "22:00", "02:00", "06:00", "08:00",
+    ]);
+    expect(advancedBody.today.planWindow).toEqual({
+      startLocal: "09:00",
+      endLocal: "09:00",
+      endDayOffset: 1,
+    });
     const replay = await request(base, `/api/batches/${batchId}/advance`, {
       method: "POST", headers: { cookie }, body: JSON.stringify(payload),
     });

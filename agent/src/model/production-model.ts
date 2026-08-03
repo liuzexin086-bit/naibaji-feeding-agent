@@ -121,16 +121,16 @@ function floorToPrecision(value: number, precision: number): number {
 }
 
 const INITIAL_DEVICE_TIMES = [
-  "02:00",
-  "04:00",
-  "06:00",
-  "08:00",
   "10:00",
   "14:00",
   "16:00",
   "18:00",
   "20:00",
   "22:00",
+  "02:00",
+  "04:00",
+  "06:00",
+  "08:00",
 ] as const;
 
 function deviceMealTimes(mealCount: number): string[] {
@@ -144,7 +144,7 @@ function deviceMealTimes(mealCount: number): string[] {
       return INITIAL_DEVICE_TIMES[sourceIndex];
     });
   }
-  const allowedHours = Array.from({ length: 24 }, (_, hour) => hour)
+  const allowedHours = Array.from({ length: 24 }, (_, offset) => (9 + offset) % 24)
     .filter((hour) => hour !== 0 && hour !== 12)
     .map((hour) => `${String(hour).padStart(2, "0")}:00`);
   return Array.from({ length: mealCount }, (_, index) =>
@@ -229,11 +229,11 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
     deviceOperation: {
       mode: "equal_interval_program",
       powderPrecisionGrams: precision,
-      programStartLocal: "02:00",
+      programStartLocal: "09:00",
       configurationFields: ["powderGrams", "timeLocal"],
       curve: deviceCurve,
       basis:
-        "feeding-model + V5-Lite 先计算单头单餐量；整栏单餐下粉量按单头单餐量乘有效头数并向下取设备精度，程序总量再由整栏单餐量乘实际餐次得到。初始 10 餐，00:00 与 12:00 不下奶。",
+        "feeding-model + V5-Lite 先计算单头单餐量；整栏单餐下粉量按单头单餐量乘有效头数并向下取设备精度，程序总量再由整栏单餐量乘实际餐次得到。计划窗口为当日 09:00 至次日 09:00；初始 10 餐，00:00 与 12:00 不下奶。",
     },
     selectedDay: {
       dayIndex,
