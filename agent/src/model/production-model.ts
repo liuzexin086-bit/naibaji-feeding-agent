@@ -57,6 +57,8 @@ export interface ProductionPlanOutput {
     v5Lite: Record<string, unknown> | null;
     deviceProgram: DeviceDayProgram | undefined;
   };
+  /** Index of the first day on which model control is active. */
+  controlStartDay: number;
 }
 
 export interface ModelDerivedMealAmount {
@@ -96,12 +98,13 @@ interface FeedingModel {
   computeControlPlan(
     plan: Record<string, unknown>,
     records: Array<Record<string, unknown>>,
-    controlStartDay: number,
+    controlStartDay?: number,
   ): {
     planMilkPPControl: number[];
     planMilkTotalControl: number[];
     feedTimes: number[];
     perFeed: number[];
+    controlStartDay?: number;
   };
 }
 
@@ -113,23 +116,40 @@ interface V5Model {
   ): Record<string, unknown>;
 }
 
-function roundToPrecision(value: number, precision: number): number {
-  return Math.round((value + Number.EPSILON) / precision) * precision;
+function floorToPrecision(value: number, precision: number): number {
+  return Math.floor((value + Number.EPSILON) / precision) * precision;
 }
 
-function localMinuteLabel(totalMinutes: number): string {
-  const normalized = ((Math.round(totalMinutes) % 1440) + 1440) % 1440;
-  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(
-    normalized % 60,
-  ).padStart(2, "0")}`;
-}
+const INITIAL_DEVICE_TIMES = [
+  "02:00",
+  "04:00",
+  "06:00",
+  "08:00",
+  "10:00",
+  "14:00",
+  "16:00",
+  "18:00",
+  "20:00",
+  "22:00",
+] as const;
 
-function programStartMinutes(value?: string): number {
-  const match = String(value || "00:00").match(/^(\d{2}):(\d{2})$/);
-  if (!match) return 0;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  return hours < 24 && minutes < 60 ? hours * 60 + minutes : 0;
+function deviceMealTimes(mealCount: number): string[] {
+  if (mealCount === INITIAL_DEVICE_TIMES.length) return [...INITIAL_DEVICE_TIMES];
+  if (mealCount <= 1) return [INITIAL_DEVICE_TIMES[0]];
+  if (mealCount < INITIAL_DEVICE_TIMES.length) {
+    return Array.from({ length: mealCount }, (_, index) => {
+      const sourceIndex = Math.round(
+        (index * (INITIAL_DEVICE_TIMES.length - 1)) / (mealCount - 1),
+      );
+      return INITIAL_DEVICE_TIMES[sourceIndex];
+    });
+  }
+  const allowedHours = Array.from({ length: 24 }, (_, hour) => hour)
+    .filter((hour) => hour !== 0 && hour !== 12)
+    .map((hour) => `${String(hour).padStart(2, "0")}:00`);
+  return Array.from({ length: mealCount }, (_, index) =>
+    allowedHours[Math.floor((index * allowedHours.length) / mealCount)] ?? "02:00",
+  );
 }
 
 function loadModels(): { feeding: FeedingModel; v5: V5Model } {
@@ -144,8 +164,13 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
   const plan = feeding.generatePlan(input);
   const records = input.records ?? [];
   const requestedControlStartDay = input.controlStartDay ?? -1;
-  const effectiveControlStartDay =
-    requestedControlStartDay >= 0 ? requestedControlStartDay : plan.days.length;
+  // A negative/omitted value means automatic control: the protected model
+  // finds the first recorded non-none creep grade and starts on the next day.
+  // A non-negative value remains available for deterministic replay of a
+  // previously committed plan.
+  const effectiveControlStartDay = requestedControlStartDay >= 0
+    ? requestedControlStartDay
+    : undefined;
   const control = feeding.computeControlPlan(plan, records, effectiveControlStartDay);
   const dayIndex = input.dayAge == null
     ? 0
@@ -160,24 +185,22 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
       })
     : null;
   const precision = Math.max(0.1, input.devicePowderPrecisionGrams ?? 1);
-  const startMinutes = programStartMinutes(input.programStartLocal);
   const deviceCurve = plan.days.map((day, index) => {
     const mealCount = Math.max(1, Number(control.feedTimes[index] ?? 1));
-    const dailyPowderGrams = Number(control.planMilkTotalControl[index] ?? 0);
-    const regularPowderGrams = roundToPrecision(
-      dailyPowderGrams / mealCount,
+    const mealTimes = deviceMealTimes(mealCount);
+    const perHeadPerMealGrams = Number(control.perFeed[index] ?? 0);
+    const regularPowderGrams = floorToPrecision(
+      perHeadPerMealGrams * input.headCount,
+      precision,
+    );
+    const dailyPowderGrams = floorToPrecision(
+      regularPowderGrams * mealCount,
       precision,
     );
     const meals = Array.from({ length: mealCount }, (_, mealIndex) => {
-      const powderGrams = mealIndex === mealCount - 1
-        ? roundToPrecision(
-            dailyPowderGrams - regularPowderGrams * (mealCount - 1),
-            precision,
-          )
-        : regularPowderGrams;
       return {
-        timeLocal: localMinuteLabel(startMinutes + (mealIndex * 1440) / mealCount),
-        powderGrams,
+        timeLocal: mealTimes[mealIndex] ?? "02:00",
+        powderGrams: regularPowderGrams,
       };
     });
     return {
@@ -186,13 +209,13 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
       dailyPowderGrams,
       mealCount,
       intervalMinutes: Math.round(1440 / mealCount),
-      perHeadPerMealGrams: control.perFeed[index],
+      perHeadPerMealGrams,
       meals,
     };
   });
 
   return {
-    modelVersion: "feeding-model+V5-Lite@2026-07-11",
+    modelVersion: "feeding-model+V5-Lite@2026-08-03",
     calculationDate: new Date().toISOString().slice(0, 10),
     basis: {
       startAge: input.startAge,
@@ -206,11 +229,11 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
     deviceOperation: {
       mode: "equal_interval_program",
       powderPrecisionGrams: precision,
-      programStartLocal: input.programStartLocal || "00:00",
+      programStartLocal: "02:00",
       configurationFields: ["powderGrams", "timeLocal"],
       curve: deviceCurve,
       basis:
-        "feeding-model + V5-Lite 日总粉量和餐次；按设备精度分配到定时下奶点，末餐补齐取整差额。设备只需设置下粉量和下奶时间。",
+        "feeding-model + V5-Lite 先计算单头单餐量；整栏单餐下粉量按单头单餐量乘有效头数并向下取设备精度，程序总量再由整栏单餐量乘实际餐次得到。初始 10 餐，00:00 与 12:00 不下奶。",
     },
     selectedDay: {
       dayIndex,
@@ -221,5 +244,6 @@ export function computeProductionPlan(input: ProductionPlanInput): ProductionPla
       v5Lite: shadow,
       deviceProgram: deviceCurve[dayIndex] ?? deviceCurve[0],
     },
+    controlStartDay: Number(control.controlStartDay ?? (effectiveControlStartDay ?? plan.days.length)),
   };
 }

@@ -56,35 +56,31 @@ describe("deterministic day decision", () => {
     expect(fallback.setting.dailyPowderGrams).toBe(700);
   });
 
-  it("keeps >100% elevated and >115% high boundaries exact", () => {
-    expect(computeDayDecision(baseInput({
+  it("removes predictive risk and emits deterministic curve exception actions", () => {
+    const normal = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 700 },
       requestedStatus: "active",
-    })).risk.level).toBe("normal");
-    expect(computeDayDecision(baseInput({
-      sop: { directTotalPowderGrams: 700.01 },
-      requestedStatus: "active",
-    })).risk.level).toBe("elevated");
-    const exactly115 = computeDayDecision(baseInput({
+    }));
+    expect(normal.status).toBe("active");
+    expect(normal).not.toHaveProperty("risk");
+    expect(normal.exceptionActions).toEqual([]);
+
+    const aboveCurve = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 805 },
       requestedStatus: "active",
     }));
-    expect(exactly115.risk.level).toBe("elevated");
-    expect(exactly115.status).toBe("active");
-    const high = computeDayDecision(baseInput({
-      sop: { directTotalPowderGrams: 805.01 },
-      requestedStatus: "active",
-    }));
-    expect(high.risk.level).toBe("high");
-    expect(high.status).toBe("draft");
-    expect(high.setting.dailyPowderGrams).toBe(700);
+    expect(aboveCurve.status).toBe("active");
+    expect(aboveCurve.setting.dailyPowderGrams).toBe(805);
+    expect(aboveCurve.exceptionActions).toMatchObject([
+      { type: "curve_cap", requiresHumanConfirmation: true },
+    ]);
   });
 
-  it("classifies legacy gram boundaries and supports recorded-grade majority", () => {
-    expect([creepGrade(0), creepGrade(29.99), creepGrade(30), creepGrade(69.99), creepGrade(70)])
-      .toEqual(["none", "low", "medium", "medium", "high"]);
-    expect(majorityCreepGrade([29, 30, 35])).toBe("medium");
-    expect(majorityCreepGrade(["low", "high", "high"])).toBe("high");
+  it("maps the five creep grades to their fixed internal values", () => {
+    expect([creepGrade(0), creepGrade(10), creepGrade(45), creepGrade(80), creepGrade(130)])
+      .toEqual(["none", "low", "medium", "high", "excellent"]);
+    expect(majorityCreepGrade([10, 45, 45])).toBe("medium");
+    expect(majorityCreepGrade(["low", "excellent", "excellent"])).toBe("excellent");
     expect(majorityCreepGrade(["none", "low", "high"])).toBe("high");
   });
 
@@ -110,22 +106,23 @@ describe("deterministic day decision", () => {
     expect(preferred.evidence.steps.find((step) => step.name === "creep_majority_grade")?.value)
       .toEqual({ grade: "low", inputSource: "recorded_grades" });
 
-    const legacy = computeDayDecision(baseInput({ creepFeedGramsLast3Days: [0, 20, 80] }));
+    const legacy = computeDayDecision(baseInput({ creepFeedGramsLast3Days: [0, 10, 80] }));
     expect(legacy.evidence.steps.find((step) => step.name === "creep_majority_grade")?.value)
       .toEqual({ grade: "high", inputSource: "legacy_grams" });
   });
 
-  it("runs teaching through the next 08:00 and never rounds above its cap", () => {
+  it("uses the fixed six-meal teaching program and model single amount", () => {
     const decision = computeDayDecision(baseInput({
       precisionGrams: 3,
       sop: { directTotalPowderGrams: 101 },
       teachingProgram: { enabled: true, firstTeachingLocal: "20:00" },
     }));
     expect(decision.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual([
-      "20:00", "23:00", "02:00", "05:00", "08:00",
+      "17:00", "20:00", "23:00", "02:00", "05:00", "08:00",
     ]);
-    expect(decision.setting.dailyPowderGrams).toBe(99);
-    expect(decision.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(99);
+    expect(decision.setting.singlePowderGrams).toBe(69);
+    expect(decision.setting.dailyPowderGrams).toBe(414);
+    expect(decision.setting.timedMeals.every((meal) => meal.powderGrams === 69)).toBe(true);
   });
 
   it("limits free feeding to eight windows and forces timed mode for risk/control/diarrhea", () => {
@@ -145,11 +142,26 @@ describe("deterministic day decision", () => {
       .toBe("timed_quantity");
   });
 
-  it("computes free-feeding single powder from reference meals and caps stomach capacity", () => {
+  it("returns deterministic exception operations without a risk prediction", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      exceptionSignals: { refusal: true, blockage: true, probeContaminated: true },
+    }));
+    expect(decision.setting.mode).toBe("timed_quantity");
+    expect(decision.exceptionActions.map((action) => action.type)).toEqual([
+      "refusal",
+      "blockage",
+      "probe_contamination",
+    ]);
+    expect(decision.exceptionActions.every((action) => action.requiresHumanConfirmation)).toBe(true);
+    expect(decision).not.toHaveProperty("risk");
+  });
+
+  it("keeps SOP per-meal quantity for free-feeding and model quantity for fallback", () => {
     const divided = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       precisionGrams: 3,
-      sop: { directTotalPowderGrams: 101, mealCount: 4 },
+      sop: { powderGramsPerMeal: 25, mealCount: 4 },
     }));
     expect(divided.setting).toMatchObject({
       mode: "free_feeding",
@@ -159,13 +171,10 @@ describe("deterministic day decision", () => {
       timedMeals: [],
     });
 
-    const capacityCapped = computeDayDecision(baseInput({
-      requestedMode: "free_feeding",
-      sop: { directTotalPowderGrams: 600, mealCount: 1 },
-    }));
-    expect(capacityCapped.setting.singlePowderGrams).toBe(58);
-    expect(capacityCapped.setting.singlePowderGrams)
-      .toBeLessThan(capacityCapped.setting.dailyPowderGrams);
+    const modelSingle = computeDayDecision(baseInput({ requestedMode: "free_feeding" }));
+    expect(modelSingle.setting.singlePowderGrams).toBe(70);
+    expect(modelSingle.setting.dailyPowderGrams)
+      .toBe(modelSingle.setting.singlePowderGrams * modelSingle.setting.mealCount);
   });
 });
 

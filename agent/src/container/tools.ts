@@ -13,7 +13,6 @@ import {
   checkExecutionGap,
   DEFAULT_SOP_TEMPLATE,
   PRODUCTION_MODEL_VERSION,
-  teachingProgramTimes,
 } from "../sop/engine.js";
 import { searchKnowledge } from "../knowledge/sop-knowledge.js";
 import {
@@ -43,6 +42,7 @@ interface BatchRecord {
   control_start_day?: number;
   status?: string;
   revision?: number;
+  created_at?: string;
   updated_at?: string;
 }
 
@@ -55,7 +55,7 @@ async function loadBatch(context: AgentRequestContext): Promise<BatchRecord | nu
     const rows = await supabaseRest<BatchRecord[]>(
       context.storage.env,
       context.storage.token,
-      `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=id,config,records,current_day_index,control_start_day,status,revision,updated_at&limit=1`,
+      `/rest/v1/batches?id=eq.${encodeURIComponent(context.batchId)}&select=id,config,records,current_day_index,control_start_day,status,revision,created_at,updated_at&limit=1`,
     );
     return rows[0] ?? null;
   }
@@ -154,42 +154,7 @@ async function currentRun(context: AgentRequestContext) {
     context.storage.token,
     `/rest/v1/feeding_sop_runs?batch_id=eq.${encodeURIComponent(context.batchId)}&status=in.(active,paused)&select=*&order=started_at.desc&limit=1`,
   );
-  const run = rows[0] ?? null;
-  if (!run) return null;
-  const storedPhase = String(run.phase || "adaptation");
-  if (
-    run.status === "active" &&
-    ["adaptation", "first_teaching", "teaching_loop", "production_feeding"]
-      .includes(storedPhase)
-  ) {
-    const now = Date.now();
-    const firstTeaching = Date.parse(String(run.first_teaching_at));
-    const admitted = Date.parse(String(run.admitted_at));
-    const template = (run.template_snapshot ?? {}) as Record<string, unknown>;
-    const offsetMinutes = finiteNumber(template.utcOffsetMinutes, 480);
-    const endDayOffset = Math.max(
-      0,
-      Math.floor(finiteNumber(template.teachingProgramEndDayOffset, 1)),
-    );
-    const endMatch = String(template.teachingProgramEndLocal ?? "08:00")
-      .match(/^(\d{2}):(\d{2})$/);
-    const endMinutes = endMatch ? Number(endMatch[1]) * 60 + Number(endMatch[2]) : 480;
-    const localDate = new Date(admitted + offsetMinutes * 60_000)
-      .toISOString()
-      .slice(0, 10);
-    const teachingEnd =
-      Date.parse(`${localDate}T00:00:00.000Z`) +
-      endDayOffset * 86_400_000 +
-      endMinutes * 60_000 -
-      offsetMinutes * 60_000;
-    run.phase =
-      Number.isFinite(firstTeaching) && now < firstTeaching
-        ? "adaptation"
-        : Number.isFinite(teachingEnd) && now < teachingEnd
-          ? "teaching_loop"
-          : "production_feeding";
-  }
-  return run;
+  return rows[0] ?? null;
 }
 
 function finiteNumber(value: unknown, fallback: number): number {
@@ -227,14 +192,6 @@ function addLocalDays(dateLocal: string, days: number): string {
   return instant.toISOString().slice(0, 10);
 }
 
-function localTimeAt(iso: string, utcOffsetMinutes: number): string {
-  const instant = new Date(iso);
-  if (!Number.isFinite(instant.getTime())) throw new Error("NBJ_SOP_INVALID_LOCAL_TIME");
-  return new Date(instant.getTime() + utcOffsetMinutes * 60_000)
-    .toISOString()
-    .slice(11, 16);
-}
-
 async function batchDecisionState(
   context: AgentRequestContext,
   overrides: Partial<{
@@ -254,6 +211,17 @@ async function batchDecisionState(
   const startAge = overrides.startAge ?? finiteNumber(config.startAge, 3);
   const endAge = overrides.endAge ?? finiteNumber(config.endAge, 21);
   const currentDayIndex = finiteNumber(batch.current_day_index, 0);
+  if (run?.status === "active") {
+    run.phase = currentDayIndex === 0 ? "teaching_loop" : "production_feeding";
+  }
+  const utcOffsetMinutes = finiteNumber(template.utcOffsetMinutes, 480);
+  const configuredStart = String(config.planStartDate ?? "");
+  const baseDateLocal = /^\d{4}-\d{2}-\d{2}$/.test(configuredStart)
+    ? configuredStart
+    : localDateAt(
+        new Date(String(run?.admitted_at ?? batch.created_at ?? batch.updated_at)),
+        utcOffsetMinutes,
+      );
   const modelInput = {
     startAge,
     endAge,
@@ -269,7 +237,7 @@ async function batchDecisionState(
       template.devicePowderPrecisionGrams,
       1,
     ),
-    programStartLocal: template.productionProgramStartLocal ?? "00:00",
+    programStartLocal: "02:00",
   };
   return {
     batchId: context.batchId,
@@ -279,7 +247,7 @@ async function batchDecisionState(
     modelInput,
     revision: finiteNumber(run?.revision ?? batch.revision, 0),
     currentDayAge: modelInput.dayAge,
-    dateLocal: localDateAt(new Date(), finiteNumber(template.utcOffsetMinutes, 480)),
+    dateLocal: addLocalDays(baseDateLocal, currentDayIndex),
     sopVersion: String(run?.template_version ?? template.version),
   } satisfies BatchDecisionState;
 }
@@ -303,7 +271,7 @@ function decisionInput(
     freeWindows: [{ startLocal: "00:00", endLocal: "23:59" }],
     creepFeedGradesLast3Days: Array.isArray(creepGrades)
       ? creepGrades.filter((grade): grade is CreepGrade =>
-          ["none", "low", "medium", "high"].includes(String(grade)))
+          ["none", "low", "medium", "high", "excellent"].includes(String(grade)))
       : undefined,
   };
 }
@@ -376,11 +344,11 @@ export function createFeedingTools(
     description: "读取当前批次按时间排序的饲喂、巡栏、饮水和维护任务。",
     parameters: Type.Object({}),
     execute: async () => {
-      const run = await currentRun(context);
-      const tasks = await loadSopTasks(context, run, false);
+      const state = await batchDecisionState(context);
+      const tasks = await loadSopTasks(context, state.run, false);
       return record(context, "get_today_timeline", {
-        calculationDate: new Date().toISOString().slice(0, 10),
-        sopVersion: run?.template_version ?? DEFAULT_SOP_TEMPLATE.version,
+        calculationDate: state.dateLocal,
+        sopVersion: state.run?.template_version ?? DEFAULT_SOP_TEMPLATE.version,
         tasks,
       });
     },
@@ -389,7 +357,7 @@ export function createFeedingTools(
   const computeProduction: AgentTool = {
     name: "compute_production_plan",
     label: "计算生产饲喂计划",
-    description: "从当前批次调用唯一权威 feeding-model + V5-Lite，返回完整日龄配奶曲线、餐次、定时下奶时间、下粉量和风险。",
+    description: "从当前批次调用唯一权威 feeding-model + V5-Lite，返回完整日龄配奶曲线、餐次、定时下奶时间、下粉量和确定性异常处置。",
     parameters: Type.Object({
       startAge: Type.Optional(Type.Number({ minimum: 1, maximum: 60 })),
       endAge: Type.Optional(Type.Number({ minimum: 1, maximum: 60 })),
@@ -427,7 +395,7 @@ export function createFeedingTools(
   const computeTeaching: AgentTool = {
     name: "compute_sop_meal",
     label: "计算教奶餐",
-    description: "按 SOP 直接总量、SOP 参数推导、生产模型兜底的顺序确定教奶量；设备只设置下粉量和下奶时间。",
+    description: "按固定的 17:00 至次日 08:00 教奶程序计算；每次下粉量采用生产模型当日单次量。",
     parameters: Type.Object({
       activeHeadCount: Type.Integer({ minimum: 1, maximum: 10000 }),
     }),
@@ -438,31 +406,13 @@ export function createFeedingTools(
       });
       const { state } = production;
       const { run, template } = state;
-      const scheduledMealCount = run
-        ? teachingProgramTimes({
-            firstTeachingAt: String(run.first_teaching_at),
-            admittedAt: String(run.admitted_at),
-            template,
-          }).length
-        : 1;
-      const firstTeachingLocal = run
-        ? localTimeAt(String(run.first_teaching_at), finiteNumber(template.utcOffsetMinutes, 480))
-        : template.preferredFirstTeachingLocal;
-      const directTotal = finiteNumber(template.teachingDirectTotalPowderGrams, 0);
-      const sop = directTotal > 0
-        ? { directTotalPowderGrams: directTotal, mealCount: scheduledMealCount }
-        : {
-            powderGramsPerTwentyHeadsPerMeal: template.teachingPowderGramsPerTwenty,
-            mealCount: scheduledMealCount,
-          };
       const teachingDecision = computeDayDecision({
         ...decisionInput(state, state.currentDayAge, "timed_quantity"),
-        sop,
         teachingProgram: {
           enabled: template.teachingProgramEnabled !== false,
-          firstTeachingLocal,
+          firstTeachingLocal: "17:00",
           intervalHours: finiteNumber(template.teachingIntervalHours, 3),
-          endLocal: template.teachingProgramEndLocal ?? "08:00",
+          endLocal: "08:00",
         },
       });
       return record(context, "compute_sop_meal", {
@@ -476,7 +426,7 @@ export function createFeedingTools(
         sopVersion: teachingDecision.evidence.sopVersion,
         modelVersion: teachingDecision.evidence.modelVersion,
         calculationDate: teachingDecision.evidence.calculationDate,
-        basis: "computeDayDecision 按 SOP 直接总量、SOP 参数推导、模型兜底的固定优先级计算教奶程序。",
+        basis: "computeDayDecision 使用固定 6 个教奶时间点，并采用 feeding-model + V5-Lite 当日模型单次量。",
         evidence: teachingDecision.evidence,
       });
     },

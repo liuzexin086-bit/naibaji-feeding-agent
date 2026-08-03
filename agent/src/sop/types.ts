@@ -77,6 +77,8 @@ export interface SopTemplateSnapshot {
   transitionEnabled?: boolean;
   maintenanceEnabled?: boolean;
   productionProgramStartLocal?: string;
+  initialMealCount?: number;
+  excludedMealTimes?: ReadonlyArray<string>;
   customTasks?: SopCustomTaskDefinition[];
   standardCleanEveryDays: number;
   deepCleanEveryDays: number;

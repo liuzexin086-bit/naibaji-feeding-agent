@@ -4,6 +4,35 @@ export interface LocalStoreOptions {
   filename: string;
 }
 
+export type LocalUserRole = "admin" | "operator";
+
+export interface LocalUser {
+  id: string;
+  email: string;
+  role: LocalUserRole;
+  createdAt: string;
+  disabled: boolean;
+}
+
+export interface LocalSession {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  expiresAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+}
+
+export interface LocalSopTemplate {
+  id: string;
+  version: string;
+  name: string;
+  config: Record<string, unknown>;
+  createdBy: string;
+  sourceTemplateId: string | null;
+  createdAt: string;
+}
+
 export interface LocalBatch {
   userId: string;
   batchId: string;
@@ -13,6 +42,40 @@ export interface LocalBatch {
   data: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface BatchListOptions {
+  limit?: number;
+}
+
+export interface CommitAdvanceInput {
+  userId: string;
+  batchId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  dateLocal: string;
+  observedAt?: string;
+  observation: Record<string, unknown>;
+  nextDayIndex: number;
+  nextData: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export interface CommitRecordInput {
+  userId: string;
+  batchId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  dateLocal: string;
+  observedAt?: string;
+  observation: Record<string, unknown>;
+  nextData: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+export interface CommitResult {
+  replayed: boolean;
+  result: Record<string, unknown>;
 }
 
 export interface CreateBatchInput {
@@ -131,6 +194,8 @@ export interface LocalStore {
   close(): void;
   migrate(): void;
   getBatch(userId: string, batchId: string): LocalBatch | null;
+  listBatches(userId: string, options?: BatchListOptions): LocalBatch[];
+  listObservations(userId: string, batchId: string): DailyObservation[];
   createBatch(input: CreateBatchInput): LocalBatch;
   appendDailyObservation(input: AppendDailyObservationInput): DailyObservation;
   saveDecision(input: SaveDecisionInput): FeedingDecision;
@@ -140,6 +205,7 @@ export interface LocalStore {
     dateLocal?: string,
   ): FeedingDecision | null;
   createSession(input: CreateSessionInput): AgentSession;
+  listSessions(userId: string, batchId: string): AgentSession[];
   appendMessage(input: AppendMessageInput): AgentMessage;
   listMessages(
     userId: string,
@@ -148,4 +214,32 @@ export interface LocalStore {
     options?: ListMessagesOptions,
   ): AgentMessage[];
   audit(input: AuditInput): AuditEvent;
+  getUserByEmail(email: string): LocalUser | null;
+  getUserById(userId: string): LocalUser | null;
+  ensureUser(input: {
+    id?: string;
+    email: string;
+    passwordHash: string;
+    passwordSalt: string;
+    role?: LocalUserRole;
+  }): LocalUser;
+  createAuthSession(input: {
+    userId: string;
+    id?: string;
+    tokenHash: string;
+    expiresAt: string;
+  }): LocalSession;
+  getAuthSession(tokenHash: string): LocalSession | null;
+  revokeAuthSession(tokenHash: string, revokedAt?: string): void;
+  listSopTemplates(): LocalSopTemplate[];
+  createSopTemplate(input: {
+    id?: string;
+    version: string;
+    name: string;
+    config: Record<string, unknown>;
+    createdBy: string;
+    sourceTemplateId?: string | null;
+  }): LocalSopTemplate;
+  commitAdvance(input: CommitAdvanceInput): CommitResult;
+  commitRecord(input: CommitRecordInput): CommitResult;
 }

@@ -7,6 +7,8 @@ const tools = readFileSync(resolve(root, "src/container/tools.ts"), "utf8");
 const server = readFileSync(resolve(root, "src/container/server.ts"), "utf8");
 const worker = readFileSync(resolve(root, "src/worker/index.ts"), "utf8");
 const runtimeConfig = readFileSync(resolve(root, "src/container/runtime-config.ts"), "utf8");
+const localAuth = readFileSync(resolve(root, "src/container/local-auth.ts"), "utf8");
+const localApi = readFileSync(resolve(root, "src/container/local-api.ts"), "utf8");
 const wrangler = readFileSync(resolve(root, "wrangler.jsonc"), "utf8");
 const page = readFileSync(resolve(root, "../index.html"), "utf8");
 const adminPage = readFileSync(resolve(root, "../admin.html"), "utf8");
@@ -41,16 +43,21 @@ describe("Agent security boundary", () => {
     expect(tools).toContain("controlsEquipment: false");
   });
 
-  it("scopes all data access to the caller JWT and server-selected batch", () => {
-    expect(worker).toContain("verifySupabaseJwt");
-    expect(worker).toContain("const auth = await authenticate(request, env)");
+  it("scopes local data to an authenticated cookie and server-selected batch", () => {
+    expect(localAuth).toContain('SESSION_COOKIE_NAME = "nbj_session"');
+    expect(localAuth).toContain('role !== "admin"');
+    expect(localApi).toContain("requireLocalAuth");
+    expect(worker).toContain('headers.set("x-agent-gateway-secret"');
+    expect(worker).not.toContain("verifySupabaseJwt");
     expect(tools).not.toContain("service_role");
     expect(worker).not.toContain("service_role");
   });
 
-  it("keeps staging Agent chat disabled until provider simulation is approved", () => {
-    expect(wrangler).toContain('"AGENT_ENABLED": "false"');
-    expect(worker).toContain('requireFeature(env.AGENT_ENABLED, "NBJ_AGENT_DISABLED")');
+  it("keeps the public Worker outside authentication and business-data concerns", () => {
+    expect(worker).toContain("proxyToLocalBackend");
+    expect(worker).toContain("NBJ_LOCAL_BACKEND_UNAVAILABLE");
+    expect(worker).not.toContain("supabaseRest");
+    expect(wrangler).toContain('"LOCAL_AGENT_URL": "http://127.0.0.1:8080"');
   });
 
   it("keeps Agent controls hidden outside an authenticated application", () => {
@@ -90,8 +97,10 @@ describe("Agent security boundary", () => {
     expect(tools).toContain("devicePowderPrecisionGrams");
     expect(server).toContain("下奶时间点、当日总粉量、餐次和单次下粉量");
     expect(server).toContain("不得把加水量或奶液量说成设备设置项");
-    expect(server).toContain("教奶程序覆盖断奶首日和首夜");
-    expect(server).toContain("次日 08:00 下奶并完成早间巡栏后结束");
+    expect(server).toContain("教奶程序固定为断奶首日 17:00、20:00、23:00");
+    expect(server).toContain("次日 02:00、05:00、08:00");
+    expect(server).toContain("正常饲喂初始为每天 10 次");
+    expect(server).toContain("00:00 与 12:00 不配奶");
     expect(server).toContain("SOP 直接给出的总量优先");
     expect(server).toContain("只有 SOP 不能直接或间接确定总量时");
     expect(page).toContain("首夜教奶程序");
@@ -107,18 +116,20 @@ describe("Agent security boundary", () => {
     expect(page).toContain("escapeHtml(String(text || ''))");
   });
 
-  it("applies completion results locally and reconciles without blocking the click", () => {
+  it("advances a batch with one local atomic request and renders its response", () => {
     expect(page).toContain("this.current.tasks = (this.current.tasks || []).map");
     expect(page).toContain("setTimeout(function() { FeedingAgentUI.refresh({ preserveStatus: true }) }, 0)");
     expect(page).toContain("正在保存…");
-    expect(worker).toContain("const [tasks, laggards] = await Promise.all");
+    expect(localApi).toContain('suffix === "advance"');
+    expect(localApi).toContain("store.commitAdvance");
+    expect(localApi).toContain("idempotencyKey");
   });
 
-  it("requires a verified admin before forwarding runtime API configuration", () => {
-    expect(worker).toContain('"/rest/v1/rpc/is_admin"');
-    expect(worker).toContain("await ensureAdmin(env, auth)");
-    expect(worker).toContain('headers.set("x-agent-admin", "true")');
-    expect(server).toContain('request.headers["x-agent-admin"] !== "true"');
+  it("requires a verified local administrator for runtime API configuration", () => {
+    expect(localAuth).toContain("requireLocalAdmin");
+    expect(localApi).toContain('"/api/admin/feeding-agent/config"');
+    expect(server).toContain("handleAdminConfig");
+    expect(worker).not.toContain("is_admin");
   });
 
   it("encrypts runtime credentials and never stores them in Supabase", () => {
@@ -132,7 +143,7 @@ describe("Agent security boundary", () => {
   it("provides separate admin entries for Agent API and immutable SOP versions", () => {
     expect(adminPage).toContain('data-admin-view="apiAdminView"');
     expect(adminPage).toContain('data-admin-view="sopAdminView"');
-    expect(adminScript).toContain("admin_publish_feeding_sop_template");
+    expect(adminScript).toContain("/api/admin/sop/templates");
   });
 
   it("supports custom HTTPS provider endpoints and OpenAI-compatible API modes", () => {

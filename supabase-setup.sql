@@ -1089,6 +1089,52 @@ where template_key = 'naibaji-early-weaning'
       and replacement.status = 'published'
   );
 
+-- V5 固定教奶时段；教奶单次量使用模型，正式饲喂初始 10 餐且避开 00:00/12:00。
+insert into public.feeding_sop_templates (
+  user_id, template_key, version, name, config, status, created_by
+)
+select
+  source.user_id,
+  source.template_key,
+  '2026.08.03-v5-fixed-teaching-model-meal',
+  '奶爸机超早期断奶 SOP · 固定教奶模型单次版',
+  source.config || jsonb_build_object(
+    'version', '2026.08.03-v5-fixed-teaching-model-meal',
+    'preferredFirstTeachingLocal', '17:00',
+    'teachingProgramEndDayOffset', 1,
+    'teachingProgramEndLocal', '08:00',
+    'teachingQuantitySource', 'production_model',
+    'productionProgramStartLocal', '02:00',
+    'initialMealCount', 10,
+    'excludedMealTimes', jsonb_build_array('00:00', '12:00')
+  ),
+  'published',
+  source.created_by
+from public.feeding_sop_templates source
+where source.template_key = 'naibaji-early-weaning'
+order by
+  case
+    when source.version = '2026.07.31-v4-sop-priority' then 0
+    when source.status = 'published' then 1
+    else 2
+  end,
+  source.created_at desc
+limit 1
+on conflict (template_key, version) do nothing;
+
+update public.feeding_sop_templates
+set status = 'retired'
+where template_key = 'naibaji-early-weaning'
+  and version = '2026.07.31-v4-sop-priority'
+  and status = 'published'
+  and exists (
+    select 1
+    from public.feeding_sop_templates replacement
+    where replacement.template_key = 'naibaji-early-weaning'
+      and replacement.version = '2026.08.03-v5-fixed-teaching-model-meal'
+      and replacement.status = 'published'
+  );
+
 -- 管理员以“复制并发布”创建新版本；可选地在同一事务中退役来源版本。
 create or replace function public.admin_publish_feeding_sop_template(
   p_base_template_id uuid,
@@ -1167,7 +1213,7 @@ begin
      or split_part(p_config ->> 'teachingProgramEndLocal', ':', 1)::integer > 23 then
     raise exception 'NBJ_SOP_TEACHING_PROGRAM_END_TIME_INVALID' using errcode = '22023';
   end if;
-  if p_config ->> 'teachingQuantitySource' <> 'sop' then
+  if p_config ->> 'teachingQuantitySource' <> 'production_model' then
     raise exception 'NBJ_SOP_TEACHING_QUANTITY_SOURCE_INVALID' using errcode = '22023';
   end if;
   if p_config -> 'quantityAuthorityOrder'

@@ -8,13 +8,21 @@ import type {
   AppendMessageInput,
   AuditEvent,
   AuditInput,
+  BatchListOptions,
+  CommitAdvanceInput,
+  CommitRecordInput,
+  CommitResult,
   CreateBatchInput,
   CreateSessionInput,
   DailyObservation,
   ListMessagesOptions,
   LocalBatch,
+  LocalSession,
+  LocalSopTemplate,
   LocalStore,
   LocalStoreOptions,
+  LocalUser,
+  LocalUserRole,
   SaveDecisionInput,
 } from "../shared/local-store-contract.js";
 import { INITIAL_SCHEMA, MIGRATION_VERSION } from "./schema.js";
@@ -183,6 +191,46 @@ function decisionFromRow(row: Row): FeedingDecision {
   return JSON.parse(stringValue(row.decision_json, "feeding_decisions.decision_json")) as FeedingDecision;
 }
 
+function userFromRow(row: Row): LocalUser {
+  const role = stringValue(row.role ?? "operator", "users.role");
+  if (role !== "admin" && role !== "operator") throw new Error("Invalid database users.role");
+  return {
+    id: stringValue(row.id, "users.id"),
+    email: stringValue(row.email, "users.email"),
+    role: role as LocalUserRole,
+    createdAt: stringValue(row.created_at, "users.created_at"),
+    disabled: Number(row.disabled ?? 0) === 1,
+  };
+}
+
+function authSessionFromRow(row: Row): LocalSession {
+  return {
+    id: stringValue(row.id, "auth_sessions.id"),
+    userId: stringValue(row.user_id, "auth_sessions.user_id"),
+    tokenHash: stringValue(row.token_hash, "auth_sessions.token_hash"),
+    expiresAt: stringValue(row.expires_at, "auth_sessions.expires_at"),
+    revokedAt: nullableString(row.revoked_at, "auth_sessions.revoked_at"),
+    createdAt: stringValue(row.created_at, "auth_sessions.created_at"),
+  };
+}
+
+function sopTemplateFromRow(row: Row): LocalSopTemplate {
+  return {
+    id: stringValue(row.id, "sop_templates.id"),
+    version: stringValue(row.version, "sop_templates.version"),
+    name: stringValue(row.name, "sop_templates.name"),
+    config: jsonObject(row.config_json, "sop_templates.config_json"),
+    createdBy: stringValue(row.created_by, "sop_templates.created_by"),
+    sourceTemplateId: nullableString(row.source_template_id, "sop_templates.source_template_id"),
+    createdAt: stringValue(row.created_at, "sop_templates.created_at"),
+  };
+}
+
+function resultFromJson(value: string): CommitResult {
+  const parsed = JSON.parse(value) as Record<string, unknown>;
+  return { replayed: true, result: parsed };
+}
+
 function isMemoryFilename(filename: string): boolean {
   return filename === ":memory:" || filename.includes("mode=memory");
 }
@@ -208,6 +256,29 @@ export class SqliteLocalStore implements LocalStore {
     this.#ensureOpen();
     this.#transaction(() => {
       this.#database.exec(INITIAL_SCHEMA);
+      // Existing development volumes may contain the pre-auth users table.
+      // The product no longer migrates business data, but adding nullable
+      // credential columns keeps a restart safe without copying or exposing
+      // any legacy records.
+      const columns = new Set(
+        (this.#database.prepare("PRAGMA table_info(users)").all() as Row[])
+          .map((row) => String(row.name)),
+      );
+      for (const [name, definition] of [
+        ["email", "TEXT"],
+        ["password_hash", "TEXT"],
+        ["password_salt", "TEXT"],
+        ["role", "TEXT NOT NULL DEFAULT 'operator'"],
+        ["disabled", "INTEGER NOT NULL DEFAULT 0"],
+      ] as const) {
+        if (!columns.has(name)) {
+          this.#database.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
+        }
+      }
+      this.#database.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx
+          ON users(email) WHERE email IS NOT NULL;
+      `);
       this.#database.prepare(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
       ).run(MIGRATION_VERSION, new Date().toISOString());
@@ -220,6 +291,31 @@ export class SqliteLocalStore implements LocalStore {
       "SELECT * FROM batches WHERE user_id = ? AND id = ?",
     ).get(requiredText(userId, "userId"), requiredText(batchId, "batchId")) as Row | undefined;
     return row ? batchFromRow(row) : null;
+  }
+
+  listBatches(userId: string, options: BatchListOptions = {}): LocalBatch[] {
+    this.#ensureOpen();
+    const limit = Math.min(nonNegativeInteger(options.limit ?? 500, "limit"), 2_000);
+    const rows = this.#database.prepare(`
+      SELECT * FROM batches
+      WHERE user_id = ?
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT ?
+    `).all(requiredText(userId, "userId"), limit) as Row[];
+    return rows.map(batchFromRow);
+  }
+
+  listObservations(userId: string, batchId: string): DailyObservation[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT * FROM daily_observations
+      WHERE user_id = ? AND batch_id = ?
+      ORDER BY json_extract(data_json, '$.dayIndex') ASC, created_at ASC
+    `).all(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+    ) as Row[];
+    return rows.map(observationFromRow);
   }
 
   createBatch(input: CreateBatchInput): LocalBatch {
@@ -262,6 +358,114 @@ export class SqliteLocalStore implements LocalStore {
       );
     }
     return stored;
+  }
+
+  getUserByEmail(email: string): LocalUser | null {
+    this.#ensureOpen();
+    const normalized = requiredText(email, "email").toLowerCase();
+    const row = this.#database.prepare(
+      "SELECT * FROM users WHERE lower(email) = ? LIMIT 1",
+    ).get(normalized) as Row | undefined;
+    return row ? userFromRow(row) : null;
+  }
+
+  getUserById(userId: string): LocalUser | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(
+      "SELECT * FROM users WHERE id = ? LIMIT 1",
+    ).get(requiredText(userId, "userId")) as Row | undefined;
+    return row ? userFromRow(row) : null;
+  }
+
+  ensureUser(input: {
+    id?: string;
+    email: string;
+    passwordHash: string;
+    passwordSalt: string;
+    role?: LocalUserRole;
+  }): LocalUser {
+    this.#ensureOpen();
+    const email = requiredText(input.email, "email").toLowerCase();
+    const passwordHash = requiredText(input.passwordHash, "passwordHash");
+    const passwordSalt = requiredText(input.passwordSalt, "passwordSalt");
+    const role = input.role ?? "operator";
+    if (role !== "admin" && role !== "operator") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid role");
+    }
+    const now = new Date().toISOString();
+    this.#transaction(() => {
+      const existing = this.#database.prepare(
+        "SELECT id FROM users WHERE lower(email) = ? LIMIT 1",
+      ).get(email) as Row | undefined;
+      if (existing) {
+        this.#database.prepare(`
+          UPDATE users SET password_hash = ?, password_salt = ?, role = ?, disabled = 0
+          WHERE id = ?
+        `).run(passwordHash, passwordSalt, role, stringValue(existing.id, "users.id"));
+      } else {
+        this.#database.prepare(`
+          INSERT INTO users (id, email, password_hash, password_salt, role, disabled, created_at)
+          VALUES (?, ?, ?, ?, ?, 0, ?)
+        `).run(input.id ?? randomUUID(), email, passwordHash, passwordSalt, role, now);
+      }
+    });
+    const result = this.getUserByEmail(email);
+    if (!result) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "user was not persisted");
+    return result;
+  }
+
+  getUserCredential(email: string): { user: LocalUser; passwordHash: string; passwordSalt: string } | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(
+      "SELECT * FROM users WHERE lower(email) = ? LIMIT 1",
+    ).get(requiredText(email, "email").toLowerCase()) as Row | undefined;
+    if (!row) return null;
+    const user = userFromRow(row);
+    const passwordHash = nullableString(row.password_hash, "users.password_hash");
+    const passwordSalt = nullableString(row.password_salt, "users.password_salt");
+    if (!passwordHash || !passwordSalt) return null;
+    return { user, passwordHash, passwordSalt };
+  }
+
+  createAuthSession(input: {
+    userId: string;
+    id?: string;
+    tokenHash: string;
+    expiresAt: string;
+  }): LocalSession {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    if (!this.getUserById(userId)) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "user not found");
+    const now = new Date().toISOString();
+    this.#database.prepare(`
+      INSERT INTO auth_sessions (id, user_id, token_hash, expires_at, revoked_at, created_at)
+      VALUES (?, ?, ?, ?, NULL, ?)
+    `).run(
+      input.id ?? randomUUID(),
+      userId,
+      requiredText(input.tokenHash, "tokenHash"),
+      requiredText(input.expiresAt, "expiresAt"),
+      now,
+    );
+    const row = this.#database.prepare(
+      "SELECT * FROM auth_sessions WHERE token_hash = ? LIMIT 1",
+    ).get(input.tokenHash) as Row;
+    return authSessionFromRow(row);
+  }
+
+  getAuthSession(tokenHash: string): LocalSession | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(
+      "SELECT * FROM auth_sessions WHERE token_hash = ? LIMIT 1",
+    ).get(requiredText(tokenHash, "tokenHash")) as Row | undefined;
+    return row ? authSessionFromRow(row) : null;
+  }
+
+  revokeAuthSession(tokenHash: string, revokedAt = new Date().toISOString()): void {
+    this.#ensureOpen();
+    this.#database.prepare(
+      "UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, ?) WHERE token_hash = ?",
+    ).run(revokedAt, requiredText(tokenHash, "tokenHash"));
   }
 
   appendDailyObservation(input: AppendDailyObservationInput): DailyObservation {
@@ -402,6 +606,151 @@ export class SqliteLocalStore implements LocalStore {
     return row ? decisionFromRow(row) : null;
   }
 
+  listSopTemplates(): LocalSopTemplate[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(
+      "SELECT * FROM sop_templates ORDER BY created_at DESC, id DESC",
+    ).all() as Row[];
+    return rows.map(sopTemplateFromRow);
+  }
+
+  createSopTemplate(input: {
+    id?: string;
+    version: string;
+    name: string;
+    config: Record<string, unknown>;
+    createdBy: string;
+    sourceTemplateId?: string | null;
+  }): LocalSopTemplate {
+    this.#ensureOpen();
+    const version = requiredText(input.version, "version");
+    const name = requiredText(input.name, "name");
+    const createdBy = requiredText(input.createdBy, "createdBy");
+    if (!this.getUserById(createdBy)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "creator not found");
+    }
+    const id = input.id ?? randomUUID();
+    const now = new Date().toISOString();
+    this.#database.prepare(`
+      INSERT INTO sop_templates (
+        id, version, name, config_json, created_by, source_template_id, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      version,
+      name,
+      serializeObject(input.config, "config"),
+      createdBy,
+      input.sourceTemplateId ?? null,
+      now,
+    );
+    const row = this.#database.prepare(
+      "SELECT * FROM sop_templates WHERE id = ?",
+    ).get(id) as Row;
+    return sopTemplateFromRow(row);
+  }
+
+  commitAdvance(input: CommitAdvanceInput): CommitResult {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const key = requiredText(input.idempotencyKey, "idempotencyKey");
+    const replay = this.#database.prepare(`
+      SELECT response_json FROM operation_results
+      WHERE user_id = ? AND batch_id = ? AND operation = 'advance' AND idempotency_key = ?
+    `).get(userId, batchId, key) as Row | undefined;
+    if (replay) return resultFromJson(stringValue(replay.response_json, "operation_results.response_json"));
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
+    if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
+    const now = new Date().toISOString();
+    const resultJson = serializeObject(input.result, "result");
+    const observation = {
+      ...input.observation,
+      dayIndex: Number(input.observation.dayIndex ?? batch.currentDay),
+      revision: expected,
+    };
+    this.#transaction(() => {
+      this.#insertObservation({
+        userId,
+        batchId,
+        dateLocal: requiredText(input.dateLocal, "dateLocal"),
+        observedAt: input.observedAt ?? now,
+        batchRevision: expected,
+        data: observation,
+        idempotencyKey: key,
+      });
+      const update = this.#database.prepare(`
+        UPDATE batches
+        SET revision = ?, current_day = ?, data_json = ?, updated_at = ?
+        WHERE user_id = ? AND id = ? AND revision = ?
+      `).run(
+        expected + 1,
+        nonNegativeInteger(input.nextDayIndex, "nextDayIndex"),
+        serializeObject(input.nextData, "nextData"),
+        now,
+        userId,
+        batchId,
+        expected,
+      );
+      if (Number(update.changes) !== 1) this.#staleRevision(expected + 1, expected);
+      this.#database.prepare(`
+        INSERT INTO operation_results (
+          user_id, batch_id, operation, idempotency_key, response_json, created_at
+        ) VALUES (?, ?, 'advance', ?, ?, ?)
+      `).run(userId, batchId, key, resultJson, now);
+    });
+    return { replayed: false, result: input.result };
+  }
+
+  commitRecord(input: CommitRecordInput): CommitResult {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const key = requiredText(input.idempotencyKey, "idempotencyKey");
+    const replay = this.#database.prepare(`
+      SELECT response_json FROM operation_results
+      WHERE user_id = ? AND batch_id = ? AND operation = 'record' AND idempotency_key = ?
+    `).get(userId, batchId, key) as Row | undefined;
+    if (replay) return resultFromJson(stringValue(replay.response_json, "operation_results.response_json"));
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
+    if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
+    const now = new Date().toISOString();
+    const resultJson = serializeObject(input.result, "result");
+    this.#transaction(() => {
+      this.#insertObservation({
+        userId,
+        batchId,
+        dateLocal: requiredText(input.dateLocal, "dateLocal"),
+        observedAt: input.observedAt ?? now,
+        batchRevision: expected,
+        data: { ...input.observation, revision: expected },
+        idempotencyKey: key,
+      });
+      const update = this.#database.prepare(`
+        UPDATE batches SET revision = ?, data_json = ?, updated_at = ?
+        WHERE user_id = ? AND id = ? AND revision = ?
+      `).run(
+        expected + 1,
+        serializeObject(input.nextData, "nextData"),
+        now,
+        userId,
+        batchId,
+        expected,
+      );
+      if (Number(update.changes) !== 1) this.#staleRevision(expected + 1, expected);
+      this.#database.prepare(`
+        INSERT INTO operation_results (
+          user_id, batch_id, operation, idempotency_key, response_json, created_at
+        ) VALUES (?, ?, 'record', ?, ?, ?)
+      `).run(userId, batchId, key, resultJson, now);
+    });
+    return { replayed: false, result: input.result };
+  }
+
   createSession(input: CreateSessionInput): AgentSession {
     this.#ensureOpen();
     const userId = requiredText(input.userId, "userId");
@@ -465,6 +814,19 @@ export class SqliteLocalStore implements LocalStore {
       requiredText(sessionId, "sessionId"),
     ) as Row | undefined;
     return row ? sessionFromRow(row) : null;
+  }
+
+  listSessions(userId: string, batchId: string): AgentSession[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT * FROM agent_sessions
+      WHERE user_id = ? AND batch_id = ?
+      ORDER BY updated_at DESC, created_at DESC
+    `).all(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+    ) as Row[];
+    return rows.map(sessionFromRow);
   }
 
   appendMessage(input: AppendMessageInput): AgentMessage {
@@ -590,6 +952,31 @@ export class SqliteLocalStore implements LocalStore {
     }
   }
 
+  #insertObservation(input: AppendDailyObservationInput): DailyObservation {
+    const now = new Date().toISOString();
+    const id = requiredText(input.id ?? randomUUID(), "id");
+    this.#database.prepare(`
+      INSERT INTO daily_observations (
+        user_id, id, batch_id, date_local, observed_at, batch_revision,
+        data_json, idempotency_key, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      requiredText(input.userId, "userId"),
+      id,
+      requiredText(input.batchId, "batchId"),
+      requiredText(input.dateLocal, "dateLocal"),
+      input.observedAt ?? now,
+      nonNegativeInteger(input.batchRevision, "batchRevision"),
+      serializeObject(input.data, "data"),
+      requiredText(input.idempotencyKey, "idempotencyKey"),
+      now,
+    );
+    const row = this.#database.prepare(
+      "SELECT * FROM daily_observations WHERE user_id = ? AND id = ?",
+    ).get(input.userId, id) as Row;
+    return observationFromRow(row);
+  }
+
   #sessionExists(userId: string, batchId: string, sessionId: string): boolean {
     return Boolean(this.#database.prepare(`
       SELECT 1 FROM agent_sessions
@@ -635,7 +1022,11 @@ export type {
   DailyObservation,
   ListMessagesOptions,
   LocalBatch,
+  LocalSession,
+  LocalSopTemplate,
   LocalStore,
   LocalStoreOptions,
+  LocalUser,
+  LocalUserRole,
   SaveDecisionInput,
 } from "../shared/local-store-contract.js";

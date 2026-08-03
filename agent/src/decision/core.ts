@@ -5,13 +5,28 @@ import type {
   DeviceSetting,
   DiarrheaAdjustmentInput,
   DiarrheaGrade,
+  ExceptionAction,
   FeedingDecision,
-  RiskLevel,
   TimedMeal,
 } from "../shared/agent-v2-contract.js";
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
-const GRADE_ORDER: CreepGrade[] = ["none", "low", "medium", "high"];
+const GRADE_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
+const GRADE_VALUES: Record<CreepGrade, number> = {
+  none: 0,
+  low: 10,
+  medium: 45,
+  high: 80,
+  excellent: 130,
+};
+const FIXED_TEACHING_TIMES = [
+  "17:00",
+  "20:00",
+  "23:00",
+  "02:00",
+  "05:00",
+  "08:00",
+] as const;
 
 function fail(code: string): never {
   throw new Error(`NBJ_DECISION_${code}`);
@@ -46,8 +61,11 @@ function minuteLabel(minutes: number): string {
 }
 
 function defaultMealTimes(mealCount: number): string[] {
+  const allowed = Array.from({ length: 24 }, (_, hour) => hour)
+    .filter((hour) => hour !== 0 && hour !== 12)
+    .map((hour) => `${String(hour).padStart(2, "0")}:00`);
   return Array.from({ length: mealCount }, (_, index) =>
-    minuteLabel(Math.floor((index * 1440) / mealCount)),
+    allowed[Math.floor((index * allowed.length) / mealCount)] ?? "02:00",
   );
 }
 
@@ -56,15 +74,12 @@ function teachingTimes(
   intervalHours = 3,
   endLocal = "08:00",
 ): string[] {
-  const start = minuteOfDay(firstTeachingLocal);
-  const end = minuteOfDay(endLocal) + 1440;
-  const intervalMinutes = positive(intervalHours, "INVALID_TEACHING_INTERVAL") * 60;
-  const times: string[] = [];
-  for (let cursor = start; cursor <= end; cursor += intervalMinutes) {
-    times.push(minuteLabel(cursor));
-  }
-  if (times.at(-1) !== endLocal) times.push(endLocal);
-  return times;
+  // The field remains in the input for compatibility, but the SOP fixes the
+  // first-night device program and no caller may alter its six time points.
+  minuteOfDay(firstTeachingLocal);
+  minuteOfDay(endLocal);
+  positive(intervalHours, "INVALID_TEACHING_INTERVAL");
+  return [...FIXED_TEACHING_TIMES];
 }
 
 function allocate(total: number, times: string[], precision: number): TimedMeal[] {
@@ -83,10 +98,10 @@ function allocate(total: number, times: string[], precision: number): TimedMeal[
 
 export function creepGrade(powderGrams: number): CreepGrade {
   finiteNonNegative(powderGrams, "INVALID_CREEP_FEED");
-  if (powderGrams === 0) return "none";
-  if (powderGrams < 30) return "low";
-  if (powderGrams < 70) return "medium";
-  return "high";
+  const exact = (Object.entries(GRADE_VALUES) as Array<[CreepGrade, number]>)
+    .find(([, value]) => value === powderGrams);
+  if (!exact) fail("INVALID_CREEP_FEED_GRADE_VALUE");
+  return exact[0];
 }
 
 export function majorityCreepGrade(
@@ -98,7 +113,9 @@ export function majorityCreepGrade(
     (value): value is CreepGrade =>
       typeof value === "string" && GRADE_ORDER.includes(value as CreepGrade),
   );
-  const areGrams = values.every((value): value is number => typeof value === "number");
+  const areGrams = values.every((value): value is number =>
+    typeof value === "number" && Object.values(GRADE_VALUES).includes(value),
+  );
   if (!areGrades && !areGrams) fail("INVALID_CREEP_GRADE_HISTORY");
   const grades: CreepGrade[] = areGrades ? values : values.map(creepGrade);
   const counts = new Map<CreepGrade, number>();
@@ -116,6 +133,8 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
   target: number;
   source: DeviceSetting["source"];
   explanation: string;
+  perMeal?: number;
+  mealCount?: number;
 } {
   const sop = input.sop;
   if (sop?.directTotalPowderGrams != null) {
@@ -124,6 +143,8 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
       target: sop.directTotalPowderGrams,
       source: "sop_direct",
       explanation: "采用最高优先级的 SOP 直接程序/日总粉量。",
+      perMeal: sop.powderGramsPerMeal,
+      mealCount: sop.mealCount,
     };
   }
 
@@ -151,6 +172,8 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
         target: perMeal * mealCount,
         source: "sop_indirect",
         explanation: "SOP 未给直接总量，按完整的单餐参数、有效头数和餐次推导总量。",
+        perMeal,
+        mealCount,
       };
     }
   }
@@ -162,36 +185,70 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
   };
 }
 
-function riskFor(
-  target: number,
-  curveLimit: number,
-  diarrhea: boolean,
-): { level: RiskLevel; score: number; overCurveRatio: number; reasons: string[] } {
-  const ratio = target / positive(curveLimit, "MODEL_CURVE_UNAVAILABLE");
-  const reasons: string[] = [];
-  let level: RiskLevel = "normal";
-  let score = 0;
-  if (ratio > 1.15) {
-    level = "high";
-    score = 100;
-    reasons.push("权威目标量超过模型标准曲线 115%，禁止自动激活。 ");
-  } else if (ratio > 1) {
-    level = "elevated";
-    score = 60;
-    reasons.push("权威目标量超过模型标准曲线 100%，标记腹泻风险。 ");
-  }
-  if (diarrhea) {
-    if (level === "normal") {
-      level = "elevated";
-      score = 60;
-    }
-    reasons.push("存在腹泻记录，强制使用定时定量模式。 ");
-  }
-  return { level, score, overCurveRatio: ratio, reasons: reasons.map((r) => r.trim()) };
-}
-
 function hasDiarrhea(grades: DiarrheaGrade[] = []): boolean {
   return grades.some((grade) => grade !== "none");
+}
+
+function exceptionActionsFor(
+  input: DayDecisionInput,
+  target: number,
+  curveLimit: number,
+): ExceptionAction[] {
+  const actions: ExceptionAction[] = [];
+  if (target > curveLimit) {
+    actions.push({
+      type: "curve_cap",
+      severity: "urgent",
+      title: "SOP 数量超过模型曲线",
+      actions: [
+        "暂停自动套用该数量。",
+        "核对当前 SOP、头数和单餐量。",
+        "由现场负责人确认是否覆盖模型曲线上限。",
+      ],
+      requiresHumanConfirmation: true,
+    });
+  }
+  if (hasDiarrhea(input.diarrheaGrades)) {
+    actions.push({
+      type: "diarrhea",
+      severity: "urgent",
+      title: "记录到腹泻",
+      actions: [
+        "切换为定时定量。",
+        "暂停常规增量，按腹泻调整预览重排剩余餐次。",
+        "现场检查并按兽医/场区 SOP 处置。",
+      ],
+      requiresHumanConfirmation: true,
+    });
+  }
+  if (input.exceptionSignals?.refusal) {
+    actions.push({
+      type: "refusal",
+      severity: "urgent",
+      title: "持续拒奶",
+      actions: ["暂停常规加量。", "检查仔猪精神、腹部和奶槽，转人工处置。"],
+      requiresHumanConfirmation: true,
+    });
+  }
+  if (input.exceptionSignals?.blockage) {
+    actions.push({
+      type: "blockage",
+      severity: "urgent",
+      title: "设备堵塞",
+      actions: ["停止继续下粉。", "清理出粉口/奶槽并确认设备恢复后再启用。"],
+      requiresHumanConfirmation: true,
+    });
+  }
+  if (input.exceptionSignals?.probeContaminated) {
+    actions.push({
+      type: "probe_contamination",
+      severity: "urgent",
+      title: "探头污染",
+      actions: ["停止依据探头的自动调整。", "清洁探头并完成功能检查后人工确认。"],
+      requiresHumanConfirmation: true,
+    });
+  }
+  return actions;
 }
 
 export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
@@ -208,19 +265,39 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     minuteOfDay(window.endLocal);
   });
 
+  const currentDayAge = input.modelInput.dayAge ?? input.modelInput.startAge;
+  const recordedGrades = input.creepFeedGradesLast3Days;
+  const modelRecords = [...(input.modelInput.records ?? [])];
+  // A direct decision caller may provide only the compact last-three-grade
+  // field.  Materialise those grades as model records so the protected model
+  // still owns the control start and meal-count decision.
+  if (recordedGrades?.length) {
+    const existingAges = new Set(modelRecords.map((record) => Number(record.dayAge)));
+    const firstAge = currentDayAge - recordedGrades.length;
+    recordedGrades.forEach((grade, index) => {
+      const dayAge = firstAge + index;
+      if (existingAges.has(dayAge)) return;
+      modelRecords.push({
+        dayAge,
+        creepGrade: grade,
+        creepValue: GRADE_VALUES[grade],
+        headCount: input.modelInput.headCount,
+      });
+    });
+  }
   const model = computeProductionPlan({
     ...input.modelInput,
-    dayAge: input.modelInput.dayAge ?? input.modelInput.startAge,
+    dayAge: currentDayAge,
+    records: modelRecords,
     devicePowderPrecisionGrams: precision,
   });
   const program = model.selectedDay.deviceProgram;
   if (!program) fail("MODEL_DAY_UNAVAILABLE");
   const curveLimit = positive(program.dailyPowderGrams, "MODEL_CURVE_UNAVAILABLE");
   const selected = resolveSopTarget(input, curveLimit);
-  const safeDailyTotal = floorToPrecision(Math.min(selected.target, curveLimit), precision);
-  const diarrhea = hasDiarrhea(input.diarrheaGrades);
-  const risk = riskFor(selected.target, curveLimit, diarrhea);
-  const forcedTimed = diarrhea || input.milkControlActive === true || risk.level !== "normal";
+  const safeDailyTotal = floorToPrecision(selected.target, precision);
+  const exceptionActions = exceptionActionsFor(input, selected.target, curveLimit);
+  const forcedTimed = exceptionActions.length > 0 || input.milkControlActive === true;
   const mode = forcedTimed ? "timed_quantity" : (input.requestedMode ?? "timed_quantity");
 
   let times: string[];
@@ -237,25 +314,36 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   } else {
     times = program.meals.map((meal) => meal.timeLocal);
   }
-  const timedMeals = mode === "timed_quantity" ? allocate(safeDailyTotal, times, precision) : [];
+  const modelSinglePowder = floorToPrecision(
+    positive(program.meals[0]?.powderGrams ?? 0, "MODEL_SINGLE_MEAL_UNAVAILABLE"),
+    precision,
+  );
   const referenceMealCount = Math.floor(
-    input.sop?.mealCount != null
-      ? positive(input.sop.mealCount, "INVALID_SOP_MEAL_COUNT")
+    selected.mealCount != null
+      ? positive(selected.mealCount, "INVALID_SOP_MEAL_COUNT")
       : positive(program.mealCount, "INVALID_MODEL_MEAL_COUNT"),
   );
-  const modelSingleCapacity = program.perHeadPerMealGrams == null
-    ? Math.max(...program.meals.map((meal) => meal.powderGrams))
-    : program.perHeadPerMealGrams * positive(input.modelInput.headCount, "INVALID_HEAD_COUNT");
-  const singlePowderGrams = timedMeals.length > 0
-    ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
-    : floorToPrecision(
-        Math.min(safeDailyTotal / referenceMealCount, modelSingleCapacity),
-        precision,
-      );
-  const status =
-    input.requestedStatus === "active" && risk.level !== "high"
-      ? "active"
-      : "draft";
+  const sopSingle = selected.perMeal != null
+    ? floorToPrecision(positive(selected.perMeal, "INVALID_SOP_MEAL_AMOUNT"), precision)
+    : undefined;
+  const singlePowderGrams = sopSingle ?? modelSinglePowder;
+  let timedMeals: TimedMeal[] = [];
+  if (mode === "timed_quantity") {
+    if (input.teachingProgram?.enabled || selected.source === "production_model" || sopSingle != null) {
+      // Model/SOP per-meal quantities are never reconstructed from a daily
+      // total.  Every device event receives the same deterministic amount.
+      timedMeals = times.map((timeLocal) => ({ timeLocal, powderGrams: singlePowderGrams }));
+    } else {
+      // A direct SOP daily total without a per-meal quantity is the sole case
+      // where the SOP itself requests allocation across its schedule.
+      timedMeals = allocate(safeDailyTotal, times, precision);
+    }
+  }
+  const programTotal = floorToPrecision(
+    singlePowderGrams * (mode === "timed_quantity" ? times.length : referenceMealCount),
+    precision,
+  );
+  const status = input.requestedStatus === "active" ? "active" : "draft";
   const creepGradeInput = input.creepFeedGradesLast3Days !== undefined
     ? input.creepFeedGradesLast3Days
     : input.creepFeedGramsLast3Days;
@@ -266,9 +354,12 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       ? "legacy_grams"
       : "not_recorded";
   const reasons = [selected.explanation];
-  if (selected.target > curveLimit) reasons.push("设置量已截断到模型标准曲线上限。 ");
-  if (forcedTimed) reasons.push("风险、腹泻或控奶条件触发定时定量模式。 ");
+  if (selected.target > curveLimit) reasons.push("SOP 目标量超过模型曲线，已生成现场人工确认处置。 ");
+  if (forcedTimed) reasons.push("异常或控奶条件触发定时定量模式。 ");
   if (input.teachingProgram?.enabled) reasons.push("教奶程序持续至次日 08:00（含 08:00 餐）。");
+  if (input.teachingProgram?.enabled && selected.source === "production_model") {
+    reasons.push("教奶单次下粉量采用生产模型单次量，按实际 6 个教奶时间点汇总程序量。");
+  }
 
   return {
     revision: input.revision,
@@ -277,15 +368,17 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     setting: {
       mode,
       dayAge: program.dayAge,
-      dailyPowderGrams: safeDailyTotal,
-      singlePowderGrams,
+      dailyPowderGrams: input.teachingProgram?.enabled || selected.source === "production_model"
+        ? programTotal
+        : safeDailyTotal,
+      singlePowderGrams: floorToPrecision(singlePowderGrams, precision),
       mealCount: mode === "timed_quantity" ? timedMeals.length : referenceMealCount,
       timedMeals,
       freeWindows: mode === "free_feeding" ? [...(input.freeWindows ?? [])] : [],
       precisionGrams: precision,
       source: selected.source,
     },
-    risk,
+    exceptionActions,
     evidence: {
       sopVersion: input.sopVersion,
       modelVersion: model.modelVersion,
@@ -299,6 +392,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
         creepFeedGradesLast3Days: [...(input.creepFeedGradesLast3Days ?? [])],
         creepFeedGramsLast3Days: [...(input.creepFeedGramsLast3Days ?? [])],
         diarrheaGrades: [...(input.diarrheaGrades ?? [])],
+        exceptionSignals: structuredClone(input.exceptionSignals ?? {}),
         milkControlActive: input.milkControlActive ?? false,
       },
       steps: [
@@ -310,22 +404,22 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
         {
           name: "production_curve_limit",
           value: curveLimit,
-          explanation: "同日 feeding-model + V5-Lite 标准曲线作为设备设置上限。",
+          explanation: "同日 feeding-model + V5-Lite 标准曲线，仅作为现场异常核对基准。",
         },
         {
           name: "safe_rounding",
           value: safeDailyTotal,
-          explanation: "向下按设备精度取整，且不超过权威目标量和模型曲线上限。",
+          explanation: "向下按设备精度取整；SOP 数量优先，不静默截断超曲线目标。",
         },
         {
-          name: "risk_classification",
-          value: risk,
-          explanation: "按截断前目标量相对标准曲线的比例保留真实风险。",
+          name: "exception_actions",
+          value: exceptionActions,
+          explanation: "仅生成确定性现场处置，不输出风险分数、等级或预测。",
         },
         {
           name: "creep_majority_grade",
           value: { grade: majorityGrade, inputSource: creepGradeInputSource },
-          explanation: "优先按现场最近三天记录的 none/low/medium/high 档位取多数；平票取最近一天，旧克数记录仅作兼容转换。",
+          explanation: "优先按现场最近三天记录的 none/low/medium/high/excellent 档位取多数；平票取最近一天。",
         },
         {
           name: "device_program",
@@ -333,11 +427,16 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
             mode,
             singlePowderGrams,
             referenceMealCount,
-            modelSingleCapacity,
+            modelSinglePowder,
             timedMeals,
             freeWindows: mode === "free_feeding" ? input.freeWindows ?? [] : [],
           },
-          explanation: "自由采食最多八时段，单次量按日总量/参考餐次向下取整且不超过模型单次胃容量；风险、腹泻和控奶均切换为定时定量。",
+          explanation: "自由采食最多八时段；模型单餐量直接来自 per-head-per-meal × 有效头数并按精度取整，程序总量再乘实际餐次。",
+        },
+        {
+          name: "control_start",
+          value: model.controlStartDay,
+          explanation: "首个非 none 教槽记录的次日开始控奶；此前保持 10 餐。",
         },
       ],
     },
@@ -387,8 +486,6 @@ export function previewDiarrheaAdjustment(
       .filter((time) => TIME_PATTERN.test(observedTime) && time > observedTime);
   remainingTimes.forEach(minuteOfDay);
   const timedMeals = allocate(remainingAllowance, remainingTimes, precision);
-  const previousRisk = input.decision.risk;
-  const riskLevel: RiskLevel = previousRisk.level === "high" ? "high" : "elevated";
   const adjustmentSteps = [
     {
       name: "diarrhea_grade",
@@ -426,12 +523,20 @@ export function previewDiarrheaAdjustment(
       timedMeals,
       freeWindows: [],
     },
-    risk: {
-      level: riskLevel,
-      score: Math.max(60, previousRisk.score),
-      overCurveRatio: previousRisk.overCurveRatio,
-      reasons: [...previousRisk.reasons, `腹泻调整预览：最严重档位 ${worstGrade}。`],
-    },
+    exceptionActions: [
+      ...input.decision.exceptionActions.filter((action) => action.type !== "diarrhea"),
+      {
+        type: "diarrhea",
+        severity: "urgent",
+        title: `腹泻调整预览：${worstGrade}`,
+        actions: [
+          "暂停常规增量。",
+          "按剩余额度设置定时定量餐。",
+          "现场检查并按兽医/场区 SOP 处置。",
+        ],
+        requiresHumanConfirmation: true,
+      },
+    ],
     evidence: {
       ...input.decision.evidence,
       reasons: [

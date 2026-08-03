@@ -14,11 +14,11 @@ const files = [
   "chart.umd.min.js",
   "feeding-model.min.js",
   "v5lite-model.js",
-  "supabase-client.js",
 ];
 
 await mkdir(targetRoot, { recursive: true });
 for (const file of files) {
   await cp(resolve(sourceRoot, file), resolve(targetRoot, file));
 }
+await cp(uiRoot, targetRoot, { recursive: true });
 await cp(resolve(uiRoot, "liquid-index.html"), resolve(targetRoot, "index.html"));

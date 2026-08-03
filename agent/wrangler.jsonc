@@ -13,7 +13,7 @@
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/", "/index.html", "/admin", "/admin.html", "/admin.js"],
+    "run_worker_first": ["/api/*", "/health", "/", "/index.html", "/admin", "/admin.html", "/admin.js"],
     "not_found_handling": "single-page-application"
   },
   "durable_objects": {
@@ -40,10 +40,8 @@
   "vars": {
     "AGENT_ENABLED": "false",
     "SOP_ENABLED": "true",
-    "LLM_PROVIDER": "anthropic",
-    "LLM_MODEL": "claude-sonnet-4-6",
-    "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
-    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+    "LLM_PROVIDER": "openai",
+    "LLM_MODEL": "gpt-5.6-luna"
   },
   "env": {
     "local": {
@@ -53,11 +51,9 @@
       "vars": {
         "AGENT_ENABLED": "false",
         "SOP_ENABLED": "true",
-        "LLM_PROVIDER": "anthropic",
-        "LLM_MODEL": "claude-sonnet-4-6",
-        "LOCAL_AGENT_URL": "http://127.0.0.1:8080",
-        "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+        "LLM_PROVIDER": "openai",
+        "LLM_MODEL": "gpt-5.6-luna",
+        "LOCAL_AGENT_URL": "http://127.0.0.1:8080"
       }
     },
     "staging": {
@@ -75,10 +71,9 @@
       "vars": {
         "AGENT_ENABLED": "false",
         "SOP_ENABLED": "true",
-        "LLM_PROVIDER": "anthropic",
-        "LLM_MODEL": "claude-sonnet-4-6",
-        "SUPABASE_URL": "https://fjkjhohbbnnjfofifzmg.supabase.co",
-        "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_SzGztxZD8kiZiIhtgKCYmg_HHbGhbuo"
+        "LLM_PROVIDER": "openai",
+        "LLM_MODEL": "gpt-5.6-luna",
+        "LOCAL_AGENT_URL": "http://127.0.0.1:8080"
       },
       "containers": [
         {

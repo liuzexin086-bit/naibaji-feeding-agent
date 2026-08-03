@@ -34,6 +34,13 @@ import {
   saveRuntimeAgentConfig,
   type RuntimeAgentConfig,
 } from "./runtime-config.js";
+import { classifyAgentRuntimeError } from "./runtime-errors.js";
+import { handleLocalApi } from "./local-api.js";
+import {
+  initializeLocalAdmin,
+  requireLocalAdmin,
+  resolveLocalAuth,
+} from "./local-auth.js";
 
 const SYSTEM_PROMPT = `你是奶爸机超早期断奶现场执行助手。
 你只能解释和组织任务；所有时间、奶量、餐次、缺口、状态和审批数字必须来自已注册的确定性工具。
@@ -41,11 +48,11 @@ const SYSTEM_PROMPT = `你是奶爸机超早期断奶现场执行助手。
 你绝不能成为数值计算器：禁止心算、估算、外推、合并或改写任何设备数字；缺少工具证据时必须先调用契约工具。
 每个批次拥有独立会话。回答配奶、曲线或设备设置问题前，必须先调用 get_batch_context 或 compute_production_plan，读取当前批次完整日龄曲线。
 设备支持定时定量与自由采食两种模式。设备操作建议只列日期或日龄、设备模式、下奶时间点、当日总粉量、餐次和单次下粉量；只能引用工具返回的 deviceOperation/setting，不得心算，不得把加水量或奶液量说成设备设置项。
-feeding-model + V5-Lite 模型曲线是所有设备设置的标准上限：超过曲线即为腹泻风险，超过 15% 为高风险并禁止自动激活。
-所有饲喂数字按三级权威顺序解析：SOP 直接给出的总量优先；SOP 未直接给总量但其参数可确定性推导总量时，使用 SOP 推导值；只有 SOP 不能直接或间接确定总量时，才使用 feeding-model + V5-Lite 计算总量。不得混合、平均或自行选择来源。
-教奶程序覆盖断奶首日和首夜：首次教奶后按 SOP 每 3 小时定时下奶，到次日 08:00 下奶并完成早间巡栏后结束。当前 SOP 的 35g/20头/次是可执行数量参数，应按有效头数、实际排定餐数和设备精度推导单餐与程序总量。正常饲喂阶段 SOP 未规定总量，因此使用生产模型完整曲线。
+feeding-model + V5-Lite 模型曲线是所有设备设置的硬上限。原始建议超过曲线时，必须输出确定性的 curve_cap_exceeded 处置并采用上限值，不输出风险分数、等级或预测。
+一般饲喂数字按三级权威顺序解析：SOP 直接给出的总量优先；SOP 未直接给总量但其参数可确定性推导总量时，使用 SOP 推导值；只有 SOP 不能直接或间接确定总量时，才使用 feeding-model + V5-Lite。模型设备量的计算方向固定为：模型单头单餐量 × 有效头数，向下取设备精度后得到整栏单餐下粉量；整栏单餐下粉量 × 实际餐次 = 程序总量。禁止用日总量反推单餐量。教奶单次量必须采用该整栏模型单餐量。
+教奶程序固定为断奶首日 17:00、20:00、23:00 和次日 02:00、05:00、08:00，共 6 次；08:00 下奶并完成早间巡栏后结束。正常饲喂初始为每天 10 次，00:00 与 12:00 不配奶，之后按模型控奶逻辑减少餐次。
 首夜教奶餐次在启动 SOP 时写入设备定时程序，不要求操作员逐餐确认；只需解释设备应在什么时间下多少粉。08:00 早间巡栏是人工步骤，修改设备程序仍需人工批准。
-教槽料现场只记录无/低/中/高四档；最近三日按多数档决策，平票采用最近一日，禁止模型自行换算档位。
+教槽料现场记录无/低/中/高/极好五档，内部固定为 0/10/45/80/130；最近三日按多数档决策，平票采用最近一日，禁止模型自行改写档位数值。
 当前场区给水规则是断奶入栏当天关闭水嘴，并保持到仔猪 12 日龄再恢复；不得提示每餐后恢复。
 出现腹泻时必须先调用 preview_diarrhea_adjustment，再引用其结果给出具体设备模式、剩余下奶时间和单次下粉量操作。严重腹泻、死亡异常、持续拒奶、明显腹部空瘪、设备堵塞或探头污染时，进入异常模式：先列现场检查和人工处置，不给常规增量建议；严重异常必须进入人工处置。
 不得进行兽医诊断，不得自动操作奶爸机或饮水设备。饮水规则只表述为当前场区策略。
@@ -117,6 +124,8 @@ interface ContainerEnv {
   OPENAI_API_KEY?: string;
   CONFIG_ENCRYPTION_KEY?: string;
   AGENT_CONFIG_PATH?: string;
+  LOCAL_ADMIN_EMAIL?: string;
+  LOCAL_ADMIN_PASSWORD?: string;
 }
 
 type ContainerStorage =
@@ -253,9 +262,17 @@ function runtimeEnv(): { env: ContainerEnv; storageConfig: AgentStorageConfig } 
   for (const name of required) {
     if (!process.env[name]) throw new Error(`Missing environment variable ${name}`);
   }
+  const storageEnv: Record<string, string | undefined> = {
+    ...process.env,
+    AGENT_STORAGE_BACKEND: process.env.AGENT_STORAGE_BACKEND ?? "local",
+    LOCAL_DB_PATH: process.env.LOCAL_DB_PATH ?? "./naibaji.sqlite",
+  };
+  if (storageEnv.AGENT_STORAGE_BACKEND === "supabase") {
+    throw new Error("NBJ_SUPABASE_RUNTIME_DISABLED");
+  }
   return {
-    env: process.env as unknown as ContainerEnv,
-    storageConfig: resolveAgentStorageConfig(process.env),
+    env: storageEnv as unknown as ContainerEnv,
+    storageConfig: resolveAgentStorageConfig(storageEnv),
   };
 }
 
@@ -281,8 +298,13 @@ async function handleChat(
     response.writeHead(403).end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
     return;
   }
-  const authorization = request.headers.authorization;
-  const userId = request.headers["x-auth-user"];
+  const localAuth = storage.backend === "local"
+    ? resolveLocalAuth(request, storage.store)
+    : null;
+  const authorization = localAuth
+    ? `Bearer ${localAuth.token}`
+    : request.headers.authorization;
+  const userId = localAuth?.user.id ?? request.headers["x-auth-user"];
   if (!authorization?.startsWith("Bearer ") || typeof userId !== "string") {
     response.writeHead(401).end(JSON.stringify({ code: "NBJ_AUTH_REQUIRED" }));
     return;
@@ -502,7 +524,9 @@ async function handleChat(
       }
     });
     await agent.prompt(body.message);
-    if (agent.state.errorMessage) throw new Error("NBJ_AGENT_UNAVAILABLE");
+    if (agent.state.errorMessage) {
+      throw new Error(classifyAgentRuntimeError(agent.state.errorMessage));
+    }
 
     await store.append({
       id: identity.messageId,
@@ -534,9 +558,13 @@ async function handleChat(
 function requireAdminGateway(
   request: import("node:http").IncomingMessage,
   env: ContainerEnv,
+  storage?: ContainerStorage,
 ): string {
   if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
     throw new Error("NBJ_AGENT_GATEWAY_REQUIRED");
+  }
+  if (storage?.backend === "local") {
+    return requireLocalAdmin(request, storage.store).user.id;
   }
   const userId = request.headers["x-auth-user"];
   if (
@@ -555,7 +583,7 @@ async function handleAdminConfig(
   env: ContainerEnv,
 ): Promise<void> {
   try {
-    const userId = requireAdminGateway(request, env);
+    const userId = requireAdminGateway(request, env, storage);
     const existing = await loadRuntimeAgentConfig(env);
     if (request.method === "GET") {
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
@@ -601,6 +629,13 @@ async function handleAdminConfig(
         updatedAt: new Date().toISOString(),
         updatedBy: userId,
       };
+      if (next.enabled) {
+        configuredModel(next.provider, next.model, next.baseUrl, next.apiMode);
+        const validation = await validateProviderConnection(next);
+        if (validation.modelListed === false) {
+          throw new Error("NBJ_AGENT_MODEL_NOT_FOUND");
+        }
+      }
       await saveRuntimeAgentConfig(env, next);
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify(publicRuntimeAgentConfig(next)));
@@ -619,6 +654,9 @@ async function handleAdminConfig(
         normalized.apiMode ?? "responses",
       );
       const validation = await validateProviderConnection(normalized);
+      if (validation.modelListed === false) {
+        throw new Error("NBJ_AGENT_MODEL_NOT_FOUND");
+      }
       response.writeHead(200, { "content-type": "application/json; charset=utf-8" });
       response.end(JSON.stringify({
         ok: true,
@@ -648,6 +686,9 @@ async function handleAdminConfig(
 const runtime = runtimeEnv();
 const env = runtime.env;
 const storage = initializeStorage(runtime.storageConfig);
+if (storage.backend === "local") {
+  initializeLocalAdmin(storage.store, env.LOCAL_ADMIN_EMAIL, env.LOCAL_ADMIN_PASSWORD);
+}
 const port = Number(process.env.PORT ?? 8080);
 const server = createServer(async (request, response) => {
   const url = new URL(request.url ?? "/", "http://container");
@@ -656,12 +697,23 @@ const server = createServer(async (request, response) => {
     response.end(JSON.stringify({ ok: true }));
     return;
   }
+  if (storage.backend === "local" && url.pathname.startsWith("/api/")) {
+    if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
+      response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
+      return;
+    }
+    const handled = await handleLocalApi(request, response, storage.store, env);
+    if (handled) return;
+  }
   if (request.method === "POST" && url.pathname === "/api/feeding-agent/chat") {
     await handleChat(request, response, env, storage);
     return;
   }
   if (
-    url.pathname === "/internal/admin/feeding-agent/config" &&
+    (url.pathname === "/internal/admin/feeding-agent/config" ||
+      url.pathname === "/api/admin/feeding-agent/config" ||
+      url.pathname === "/api/admin/feeding-agent/config/validate") &&
     ["GET", "PUT", "POST"].includes(request.method || "")
   ) {
     await handleAdminConfig(request, response, env);

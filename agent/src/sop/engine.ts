@@ -9,14 +9,14 @@ import type {
   SopTemplateSnapshot,
 } from "./types.js";
 
-export const PRODUCTION_MODEL_VERSION = "feeding-model+V5-Lite@2026-07-11";
+export const PRODUCTION_MODEL_VERSION = "feeding-model+V5-Lite@2026-08-03";
 export const PRODUCTION_MODEL_HASH =
-  "feeding-model:DF77624892EB7DFF1F069EE1DBDE62888ED6B46F11BBAD11AE967BA3DC64987B;" +
+  "feeding-model:A566B3A71B643A78610BCA0F30348A70DE87B0E59A782A9C40775BB35DA8842A;" +
   "v5lite:124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE";
 
 export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze({
   templateId: "naibaji-early-weaning",
-  version: "2026.07.31-v4-sop-priority",
+  version: "2026.08.03-v5-fixed-teaching-model-meal",
   timezone: "Asia/Shanghai",
   utcOffsetMinutes: 480,
   defaultAdmissionDeadlineLocal: "09:00",
@@ -32,7 +32,7 @@ export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze
   teachingDirectTotalPowderGrams: 0,
   quantityAuthorityOrder: ["sop_direct", "sop_indirect", "production_model"] as const,
   modelQuantityFallbackEnabled: true,
-  teachingQuantitySource: "sop",
+  teachingQuantitySource: "production_model",
   deviceConfigurationFields: ["powderGrams", "timeLocal"] as const,
   teachingLatestDay: 3,
   waterClosedBeforeAgeDays: 12,
@@ -44,7 +44,9 @@ export const DEFAULT_SOP_TEMPLATE: Readonly<SopTemplateSnapshot> = Object.freeze
   soakedFeedEnabled: true,
   transitionEnabled: true,
   maintenanceEnabled: true,
-  productionProgramStartLocal: "00:00",
+  productionProgramStartLocal: "02:00",
+  initialMealCount: 10,
+  excludedMealTimes: ["00:00", "12:00"] as const,
   customTasks: [],
   standardCleanEveryDays: 2,
   deepCleanEveryDays: 7,
@@ -94,28 +96,13 @@ export function computeFirstTeachingTime(
 
   const preferred = localTimeToUtc(
     localDateKey(admission, template.utcOffsetMinutes),
-    template.preferredFirstTeachingLocal,
+    "17:00",
     template.utcOffsetMinutes,
   );
-  const elapsedHours = (preferred.getTime() - admission.getTime()) / HOUR_MS;
-
-  if (
-    elapsedHours >= template.adaptationMinHours &&
-    elapsedHours <= template.adaptationMaxHours
-  ) {
-    return { firstTeachingAt: preferred.toISOString() };
+  if (preferred.getTime() < admission.getTime()) {
+    preferred.setUTCDate(preferred.getUTCDate() + 1);
   }
-
-  const fallback = new Date(admission.getTime() + template.adaptationMinHours * HOUR_MS);
-  return {
-    firstTeachingAt: fallback.toISOString(),
-    deviation: {
-      code: "NBJ_SOP_FIRST_TEACHING_DEVIATION",
-      message: `17:00 不在入栏后 ${template.adaptationMinHours}–${template.adaptationMaxHours} 小时窗口内，改为实际入栏后 ${template.adaptationMinHours} 小时`,
-      requiresConfirmation: true,
-      observedAt: new Date().toISOString(),
-    },
-  };
+  return { firstTeachingAt: preferred.toISOString() };
 }
 
 export function roundToDevicePrecision(value: number, precision: number): number {
@@ -158,7 +145,14 @@ export function computeSopMeal(
   let dailyPowderGrams: number;
   let quantityBasis: string;
 
-  if (Number(template.teachingDirectTotalPowderGrams) > 0) {
+  if (template.teachingQuantitySource === "production_model") {
+    assertFinitePositive(modelMeal.powderGrams, "model_meal_powder");
+    powderGrams = roundToDevicePrecision(modelMeal.powderGrams, precision);
+    dailyPowderGrams = powderGrams * scheduledMealCount;
+    amountSource = "production_model_fallback";
+    quantityAuthority = "production_model";
+    quantityBasis = `教奶单次下粉量采用模型 ${powderGrams}g/次，共 ${scheduledMealCount} 次`;
+  } else if (Number(template.teachingDirectTotalPowderGrams) > 0) {
     const resolvedTotal = roundToDevicePrecision(
       Number(template.teachingDirectTotalPowderGrams),
       precision,
@@ -213,19 +207,19 @@ export function computeSopMeal(
 }
 
 export function teachingProgramEndAt(
-  run: Pick<SopRun, "admittedAt" | "template">,
+  run: Pick<SopRun, "firstTeachingAt" | "admittedAt" | "template">,
 ): string {
-  const admittedAt = new Date(run.admittedAt);
-  if (!Number.isFinite(admittedAt.getTime())) {
-    throw new Error("NBJ_SOP_INVALID_ADMISSION_TIME");
+  const firstTeachingAt = new Date(run.firstTeachingAt);
+  if (!Number.isFinite(firstTeachingAt.getTime())) {
+    throw new Error("NBJ_SOP_INVALID_FIRST_TEACHING_TIME");
   }
-  const localDate = localDateKey(admittedAt, run.template.utcOffsetMinutes);
+  const localDate = localDateKey(firstTeachingAt, run.template.utcOffsetMinutes);
   const localStartPseudoUtc = Date.parse(`${localDate}T00:00:00.000Z`);
   const endDayOffset = Math.max(
     0,
-    Math.floor(run.template.teachingProgramEndDayOffset ?? 1),
+    Math.max(1, Math.floor(run.template.teachingProgramEndDayOffset ?? 1)),
   );
-  const endTime = run.template.teachingProgramEndLocal ?? "08:00";
+  const endTime = "08:00";
   const endTimeMatch = endTime.match(/^(\d{2}):(\d{2})$/);
   if (!endTimeMatch) throw new Error("NBJ_SOP_INVALID_TEACHING_END_TIME");
   const endMinutes = Number(endTimeMatch[1]) * 60 + Number(endTimeMatch[2]);
@@ -295,7 +289,14 @@ export function startSopRun(input: {
   template?: SopTemplateSnapshot;
   now?: string;
 }): { run: SopRun; initialTasks: SopTask[]; deviations: SopDeviation[] } {
-  const template = structuredClone(input.template ?? DEFAULT_SOP_TEMPLATE);
+  const template = {
+    ...structuredClone(input.template ?? DEFAULT_SOP_TEMPLATE),
+    preferredFirstTeachingLocal: "17:00",
+    teachingProgramEndDayOffset: 1,
+    teachingProgramEndLocal: "08:00",
+    teachingQuantitySource: "production_model" as const,
+    productionProgramStartLocal: "02:00",
+  };
   const first = computeFirstTeachingTime(input.admittedAt, template);
   const now = input.now ?? new Date().toISOString();
   const run: SopRun = {

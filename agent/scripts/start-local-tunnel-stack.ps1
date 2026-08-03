@@ -62,14 +62,96 @@ $tunnelProcess = Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" 
   Where-Object { $_.CommandLine -match "tunnel.*run" } |
   Select-Object -First 1
 if (-not $tunnelProcess) {
-  $env:TUNNEL_TOKEN = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
-  Start-Process -FilePath $cloudflaredPath `
-    -ArgumentList @("tunnel", "--no-autoupdate", "--protocol", "http2", "run") `
-    -WorkingDirectory $agentRoot `
-    -WindowStyle Hidden `
-    -RedirectStandardOutput (Join-Path $runtimeDir "cloudflared.out.log") `
-    -RedirectStandardError (Join-Path $runtimeDir "cloudflared.err.log")
-  Remove-Item Env:TUNNEL_TOKEN
+  # On the field workstation, the TUN/proxy may be the only route that can
+  # complete Cloudflare Tunnel's edge handshake. Pass the user's existing
+  # WinINET proxy to the child process without persisting or logging secrets.
+  $systemProxy = $null
+  try {
+    $internetSettings = Get-ItemProperty `
+      -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Internet Settings" `
+      -ErrorAction Stop
+    if ($internetSettings.ProxyEnable -eq 1 -and $internetSettings.ProxyServer) {
+      $systemProxy = [string]$internetSettings.ProxyServer
+      if ($systemProxy -match "(?i)(?:^|;)https?=([^;]+)") {
+        $systemProxy = $matches[1]
+      }
+      if ($systemProxy -notmatch "^[a-z][a-z0-9+.-]*://") {
+        $systemProxy = "http://$systemProxy"
+      }
+    }
+  } catch {
+    $systemProxy = $null
+  }
+
+  $previousTunnelToken = $env:TUNNEL_TOKEN
+  $previousHttpProxy = $env:HTTP_PROXY
+  $previousHttpsProxy = $env:HTTPS_PROXY
+  $previousEdgeBindAddress = $env:TUNNEL_EDGE_BIND_ADDRESS
+  try {
+    if ($systemProxy -and -not $env:HTTP_PROXY) {
+      $env:HTTP_PROXY = $systemProxy
+    }
+    if ($systemProxy -and -not $env:HTTPS_PROXY) {
+      $env:HTTPS_PROXY = $systemProxy
+    }
+    $env:TUNNEL_TOKEN = (Get-Content -LiteralPath $tokenPath -Raw).Trim()
+    $tunnelArguments = @("tunnel", "--no-autoupdate", "--protocol", "http2", "run")
+    $dnsResolver = $env:TUNNEL_DNS_RESOLVER_ADDRS
+    if (-not $dnsResolver) {
+      $dnsResolver = Get-DnsClientServerAddress -AddressFamily IPv4 `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.InterfaceAlias -notmatch "(?i)Meta|Loopback|WSL|Bluetooth" -and
+          $_.ServerAddresses
+        } |
+        ForEach-Object { $_.ServerAddresses } |
+        Where-Object { $_ -notmatch "^(0|127\.|169\.254\.|198\.18\.)" } |
+        Select-Object -First 1
+      if ($dnsResolver) {
+        $dnsResolver = "$dnsResolver`:53"
+      }
+    }
+    if ($dnsResolver) {
+      # Meta's fake-IP DNS answers (198.18.0.0/16) are not valid Tunnel
+      # edge addresses. Prefer the active physical adapter's resolver.
+      $tunnelArguments += @("--dns-resolver-addrs", $dnsResolver)
+    }
+    $metaAdapter = Get-NetAdapter -ErrorAction SilentlyContinue |
+      Where-Object {
+        $_.Status -eq "Up" -and
+        ($_.Name -match "(?i)Meta" -or $_.InterfaceDescription -match "(?i)Meta")
+      } |
+      Select-Object -First 1
+    if ($metaAdapter) {
+      $physicalEdgeIp = Get-NetIPAddress -AddressFamily IPv4 `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+          $_.InterfaceIndex -ne $metaAdapter.ifIndex -and
+          $_.IPAddress -notmatch "^(0|127\.|169\.254\.|198\.18\.)" -and
+          $_.PrefixOrigin -ne "WellKnown"
+        } |
+        Sort-Object InterfaceIndex |
+        Select-Object -ExpandProperty IPAddress -First 1
+      if ($physicalEdgeIp) {
+        # Bind the long-lived Tunnel socket to the physical NIC so the TUN
+        # adapter cannot route it back to a 198.18/16 fake-IP endpoint.
+        if (-not $env:TUNNEL_EDGE_BIND_ADDRESS) {
+          $env:TUNNEL_EDGE_BIND_ADDRESS = $physicalEdgeIp
+        }
+      }
+    }
+    Start-Process -FilePath $cloudflaredPath `
+      -ArgumentList $tunnelArguments `
+      -WorkingDirectory $agentRoot `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput (Join-Path $runtimeDir "cloudflared.out.log") `
+      -RedirectStandardError (Join-Path $runtimeDir "cloudflared.err.log")
+  } finally {
+    if ($null -eq $previousTunnelToken) { Remove-Item Env:TUNNEL_TOKEN -ErrorAction SilentlyContinue } else { $env:TUNNEL_TOKEN = $previousTunnelToken }
+    if ($null -eq $previousHttpProxy) { Remove-Item Env:HTTP_PROXY -ErrorAction SilentlyContinue } else { $env:HTTP_PROXY = $previousHttpProxy }
+    if ($null -eq $previousHttpsProxy) { Remove-Item Env:HTTPS_PROXY -ErrorAction SilentlyContinue } else { $env:HTTPS_PROXY = $previousHttpsProxy }
+    if ($null -eq $previousEdgeBindAddress) { Remove-Item Env:TUNNEL_EDGE_BIND_ADDRESS -ErrorAction SilentlyContinue } else { $env:TUNNEL_EDGE_BIND_ADDRESS = $previousEdgeBindAddress }
+  }
 }
 
 for ($attempt = 0; $attempt -lt 20; $attempt++) {

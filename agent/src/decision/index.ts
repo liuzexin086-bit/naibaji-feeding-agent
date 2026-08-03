@@ -7,6 +7,8 @@ export {
 
 export type {
   CreepGrade,
+  ExceptionAction,
+  ExceptionActionType,
   DayDecisionInput,
   DeviceSetting,
   DeviceWindow,
@@ -14,5 +16,6 @@ export type {
   DiarrheaGrade,
   FeedingDecision,
   FeedingMode,
-  RiskLevel,
 } from "../shared/agent-v2-contract.js";
+
+export { CREEP_GRADE_VALUES } from "../shared/agent-v2-contract.js";

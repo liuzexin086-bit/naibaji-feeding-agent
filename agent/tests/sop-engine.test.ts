@@ -18,12 +18,12 @@ import {
 } from "../src/sop/engine.js";
 
 const modelMeal = {
-  powderGrams: 58,
+  powderGrams: 70,
   dailyPowderGrams: 700,
-  mealCount: 12,
+  mealCount: 10,
   dayAge: 3,
   calculationDate: "2026-07-31",
-  modelVersion: "feeding-model+V5-Lite@2026-07-11",
+  modelVersion: "feeding-model+V5-Lite@2026-08-03",
 };
 
 function createRun(admittedAt = "2026-07-31T01:00:00.000Z") {
@@ -46,22 +46,28 @@ describe("first teaching window", () => {
     });
   });
 
-  it("uses admission + 8h with a confirmed deviation outside the window", () => {
+  it("keeps first teaching fixed at local 17:00 outside the old adaptation window", () => {
     const result = computeFirstTeachingTime("2026-07-31T03:30:00.000Z");
-    expect(result.firstTeachingAt).toBe("2026-07-31T11:30:00.000Z");
-    expect(result.deviation?.requiresConfirmation).toBe(true);
+    expect(result.firstTeachingAt).toBe("2026-07-31T09:00:00.000Z");
+    expect(result.deviation).toBeUndefined();
+  });
+
+  it("uses the next local 17:00 when admission is after the fixed start", () => {
+    expect(computeFirstTeachingTime("2026-07-31T10:00:00.000Z")).toEqual({
+      firstTeachingAt: "2026-08-01T09:00:00.000Z",
+    });
   });
 });
 
 describe("teaching meal", () => {
-  it.each([[10, 18], [20, 35], [17, 30]])("uses SOP-derived meal for %i active heads", (heads, powder) => {
+  it.each([10, 20, 17])("uses the model single-meal amount for %i active heads", (heads) => {
     expect(computeSopMeal(heads, modelMeal)).toMatchObject({
       activeHeadCount: heads,
-      powderGrams: powder,
-      dailyPowderGrams: powder,
+      powderGrams: 70,
+      dailyPowderGrams: 70,
       mealCount: 1,
-      amountSource: "sop_indirect_total",
-      quantityAuthority: "sop_indirect",
+      amountSource: "production_model_fallback",
+      quantityAuthority: "production_model",
       planSource: "sop_teaching",
     });
   });
@@ -74,21 +80,21 @@ describe("teaching meal", () => {
         { ...DEFAULT_SOP_TEMPLATE, devicePowderPrecisionGrams: 5 },
       )
         .powderGrams,
-    ).toBe(30);
+    ).toBe(70);
   });
 
   it("uses a direct SOP program total before indirect parameters", () => {
     const first = computeSopMeal(
       20,
       modelMeal,
-      { ...DEFAULT_SOP_TEMPLATE, teachingDirectTotalPowderGrams: 211 },
+      { ...DEFAULT_SOP_TEMPLATE, teachingQuantitySource: "sop", teachingDirectTotalPowderGrams: 211 },
       6,
       0,
     );
     const last = computeSopMeal(
       20,
       modelMeal,
-      { ...DEFAULT_SOP_TEMPLATE, teachingDirectTotalPowderGrams: 211 },
+      { ...DEFAULT_SOP_TEMPLATE, teachingQuantitySource: "sop", teachingDirectTotalPowderGrams: 211 },
       6,
       5,
     );
@@ -107,14 +113,15 @@ describe("teaching meal", () => {
       modelMeal,
       {
         ...DEFAULT_SOP_TEMPLATE,
+        teachingQuantitySource: "sop",
         teachingDirectTotalPowderGrams: 0,
         teachingPowderGramsPerTwenty: 0,
       },
       6,
       0,
     )).toMatchObject({
-      powderGrams: 58,
-      dailyPowderGrams: 348,
+      powderGrams: 70,
+      dailyPowderGrams: 420,
       mealCount: 6,
       amountSource: "production_model_fallback",
       quantityAuthority: "production_model",
@@ -181,9 +188,9 @@ describe("teaching timeline", () => {
     expect(meals.every((task) => task.requiresConfirmation === false)).toBe(true);
     expect(meals[0]?.metadata).toMatchObject({
       executionMode: "device_program",
-      amountSource: "sop_indirect_total",
-      quantityAuthority: "sop_indirect",
-      resolvedProgramTotalPowderGrams: 210,
+      amountSource: "production_model_fallback",
+      quantityAuthority: "production_model",
+      resolvedProgramTotalPowderGrams: 420,
       deviceConfigurationFields: ["powderGrams", "timeLocal"],
     });
     expect(meals[0]?.numericPlan).not.toHaveProperty("liquidMl");
@@ -208,17 +215,17 @@ describe("execution gap semantics", () => {
     expect(committed).toMatchObject({
       planSource: "sop_teaching",
       mealCount: 3,
-      plannedPowderGrams: 105,
+      plannedPowderGrams: 210,
     });
     expect(
       checkExecutionGap({
         planSource: "sop_teaching",
-        committedPlan: 105,
-        actual: 70,
+        committedPlan: 210,
+        actual: 140,
         submittedRevision: 4,
         currentRevision: 4,
       }),
-    ).toMatchObject({ gap: 35, stale: false });
+    ).toMatchObject({ gap: 70, stale: false });
   });
 
   it("rejects an old revision", () => {

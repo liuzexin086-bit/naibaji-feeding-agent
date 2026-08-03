@@ -1,9 +1,32 @@
 import type { ProductionPlanInput } from "../model/production-model.js";
 
 export type FeedingMode = "timed_quantity" | "free_feeding";
-export type CreepGrade = "none" | "low" | "medium" | "high";
-export type RiskLevel = "normal" | "elevated" | "high" | "exception";
+export type CreepGrade = "none" | "low" | "medium" | "high" | "excellent";
 export type DiarrheaGrade = "none" | "mild" | "moderate" | "severe";
+
+/** Fixed internal values for the five operator-facing creep grades. */
+export const CREEP_GRADE_VALUES: Readonly<Record<CreepGrade, number>> = {
+  none: 0,
+  low: 10,
+  medium: 45,
+  high: 80,
+  excellent: 130,
+};
+
+export type ExceptionActionType =
+  | "diarrhea"
+  | "refusal"
+  | "blockage"
+  | "probe_contamination"
+  | "curve_cap";
+
+export interface ExceptionAction {
+  type: ExceptionActionType;
+  severity: "notice" | "urgent";
+  title: string;
+  actions: string[];
+  requiresHumanConfirmation: boolean;
+}
 
 export interface DeviceWindow {
   startLocal: string;
@@ -41,12 +64,8 @@ export interface FeedingDecision {
   batchId: string;
   dateLocal: string;
   setting: DeviceSetting;
-  risk: {
-    level: RiskLevel;
-    score: number;
-    overCurveRatio: number;
-    reasons: string[];
-  };
+  /** Deterministic现场处置 only; this is not a predictive risk score. */
+  exceptionActions: ExceptionAction[];
   evidence: DecisionEvidence;
   status: "draft" | "active" | "superseded";
 }
@@ -85,11 +104,16 @@ export interface DayDecisionInput {
   freeWindows?: DeviceWindow[];
   timedMealTimes?: string[];
   teachingProgram?: TeachingProgramInput;
-  /** Preferred field: operators record only none/low/medium/high. */
+  /** Preferred field: operators record none/low/medium/high/excellent. */
   creepFeedGradesLast3Days?: CreepGrade[];
-  /** @deprecated Compatibility for callers that previously recorded grams. */
+  /** @deprecated Compatibility only for callers carrying fixed internal values. */
   creepFeedGramsLast3Days?: number[];
   diarrheaGrades?: DiarrheaGrade[];
+  exceptionSignals?: {
+    refusal?: boolean;
+    blockage?: boolean;
+    probeContaminated?: boolean;
+  };
   milkControlActive?: boolean;
 }
 

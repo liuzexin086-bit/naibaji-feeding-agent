@@ -15,14 +15,12 @@ services:
       AGENT_CONFIG_PATH: /data/runtime-config.enc.json
       CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?set CONFIG_ENCRYPTION_KEY}
       AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?set AGENT_GATEWAY_SECRET}
-      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
-      LLM_MODEL: ${LLM_MODEL:-claude-sonnet-4-6}
+      LOCAL_ADMIN_EMAIL: ${LOCAL_ADMIN_EMAIL:?set LOCAL_ADMIN_EMAIL}
+      LOCAL_ADMIN_PASSWORD: ${LOCAL_ADMIN_PASSWORD:?set LOCAL_ADMIN_PASSWORD}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai}
+      LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      # Set AGENT_STORAGE_BACKEND=supabase and provide both values to use the
-      # hosted backend explicitly.
-      SUPABASE_URL: ${SUPABASE_URL:-}
-      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
     ports:
       - "127.0.0.1:${AGENT_PORT:-8080}:8080"
     volumes:

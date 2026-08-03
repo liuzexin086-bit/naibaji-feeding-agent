@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>奶爸机管理员后台</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="supabase-client.js"></script>
 <script src="feeding-model.min.js"></script>
 <style>
   :root { --brand:#2563eb; --brand-dark:#1d4ed8; --ink:#172033; --muted:#64748b; --line:#dbe3ef; --bg:#f4f7fb; --card:#fff; --danger:#b42318; --ok:#067647; }
@@ -88,7 +86,7 @@
 
     <div id="apiAdminView" class="admin-view" role="tabpanel" aria-labelledby="apiAdminTab" hidden>
       <section class="panel" style="margin-top:0">
-        <div class="panel-head"><div><h2>Agent API 配置</h2><p class="panel-copy">配置当前本地 Container 使用的大模型。密钥只会提交到本机容器，并以 AES-256-GCM 加密保存；页面和 Supabase 都不会保存或回显明文。</p></div><div id="apiConfigNotice" class="notice" aria-live="polite"></div></div>
+        <div class="panel-head"><div><h2>Agent API 配置</h2><p class="panel-copy">配置当前本地 Container 使用的大模型。密钥只会提交到本机容器，并以 AES-256-GCM 加密保存；页面不会保存或回显明文。</p></div><div id="apiConfigNotice" class="notice" aria-live="polite"></div></div>
         <div class="config-layout">
           <form id="apiConfigForm" class="config-card">
             <div class="config-grid">

@@ -28,6 +28,33 @@ const INTERNAL = {
   ramp: { d1: 0.30, d2: 0.60, d3: 0.78, d4Plus: 0.85 },
 }
 
+// Operator-facing教槽档位 are deliberately discrete.  Keep these values in
+// the protected model so every caller (UI, Worker and local Agent) uses the
+// same deterministic mapping.
+const CREEP_GRADE_VALUES = Object.freeze({
+  none: 0,
+  low: 10,
+  medium: 45,
+  high: 80,
+  excellent: 130,
+})
+
+function creepValueFromRecord(record) {
+  const label = record && (record.creepGrade ?? record.creep_grade)
+  if (typeof label === 'string' && Object.prototype.hasOwnProperty.call(CREEP_GRADE_VALUES, label)) {
+    return CREEP_GRADE_VALUES[label]
+  }
+  if (record && record.creepValue != null && Number.isFinite(Number(record.creepValue))) {
+    const value = Number(record.creepValue)
+    if (Object.values(CREEP_GRADE_VALUES).includes(value)) return value
+  }
+  if (record && record.totalCreepG != null && Number(record.headCount) > 0) {
+    const value = Number(record.totalCreepG) / Number(record.headCount)
+    if (Number.isFinite(value)) return value
+  }
+  return null
+}
+
 // ──────────────────────────────────────────────
 // 输入验证
 // ──────────────────────────────────────────────
@@ -150,7 +177,7 @@ function generatePlan(opts) {
     feedingDays: totalDays,
     startAge, endAge, startWeight,
     standardWeight,
-    perFeedingMilkPlan: days.map(d => Math.round(d.totalMilkPlan / 12)),
+    perFeedingMilkPlan: days.map(d => Math.round(d.totalMilkPlan / 10)),
   }
 }
 
@@ -181,21 +208,23 @@ function generatePlan(opts) {
  *
  * @param {object} plan - generatePlan() 输出
  * @param {Array} records - 每日实际记录
- * @param {number} controlStartDay - 控奶开启的天索引
- * @returns {{ planMilkPPControl, planMilkTotalControl, feedTimes, perFeed }}
+ * @param {number|undefined} controlStartDay - 控奶开启的天索引；省略时由首个非 none 教槽记录决定
+ * @returns {{ planMilkPPControl, planMilkTotalControl, feedTimes, perFeed, controlStartDay }}
  */
 function computeControlPlan(plan, records, controlStartDay) {
   const nDays = plan.days.length
   const headCount = plan.headCount
   const planPPControl = plan.planMilkPP.slice()
   const planTotalControl = plan.planMilkTotal.slice()
-  const feedTimes = new Array(nDays).fill(12)
+  const feedTimes = new Array(nDays).fill(10)
   const perFeed = new Array(nDays).fill(null)
 
-  // 构建教槽映射 & 已录天计划值
+  // 构建教槽映射 & 已录天计划值。新合同只允许五个固定教槽档位；
+  // totalCreepG 仍可被旧记录读取，但不能改变档位映射。
   const creepMap = {}
   const committed = new Set()
   const committedPlans = {}
+  let firstNonNoneDayAge = null
   for (let i = 0; i < records.length; i++) {
     const r = records[i]
     committed.add(r.dayAge)
@@ -203,17 +232,35 @@ function computeControlPlan(plan, records, controlStartDay) {
       committedPlans[r.dayAge] = {
         perPig: r.planPerPigAtCommit,
         total: r.planTotalAtCommit,
-        feedTimes: r.feedTimesAtCommit || 12,
+        feedTimes: r.feedTimesAtCommit || 10,
       }
     }
-    if (r.totalCreepG != null && r.headCount > 0) {
-      creepMap[r.dayAge] = r.totalCreepG / r.headCount  // 转头均
+    const creepValue = creepValueFromRecord(r)
+    if (creepValue != null) {
+      creepMap[r.dayAge] = creepValue  // 转头均（固定档位值）
+      const label = r.creepGrade ?? r.creep_grade
+      const nonNone = label
+        ? label !== "none"
+        : creepValue > CREEP_GRADE_VALUES.none
+      if (nonNone && (firstNonNoneDayAge == null || r.dayAge < firstNonNoneDayAge)) {
+        firstNonNoneDayAge = Number(r.dayAge)
+      }
     }
   }
 
+  // The first non-none observation fixes the start permanently at the next
+  // batch day.  An explicit non-negative value is used only for replay of a
+  // previously committed schedule.
+  const automaticStart = firstNonNoneDayAge == null
+    ? nDays
+    : Math.max(0, Math.min(nDays, firstNonNoneDayAge + 1 - plan.startAge))
+  const resolvedControlStartDay = Number.isFinite(Number(controlStartDay)) && Number(controlStartDay) >= 0
+    ? Math.max(0, Math.min(nDays, Number(controlStartDay)))
+    : automaticStart
+
   const creepRolling = []
   let started = false
-  let currentCount = 12
+  let currentCount = 10
   let interval = 3   // 无教槽时默认每3天减1次（低教槽）
   let lastReductionDay = -1
   let latestCreep = 0  // 最新录入的教槽值，用于补充日增重
@@ -232,16 +279,17 @@ function computeControlPlan(plan, records, controlStartDay) {
       const p = getStartParams(avg)
       currentCount = p.start
       interval = p.intv
-    } else if (interval === 3 && currentCount === 12) {
-      // 无教槽时按低教槽默认值（仅首次设置）
-      currentCount = 11
+    } else {
+      // No non-none grade means normal 10-meal feeding.  Automatic control
+      // does not start until an observation provides a real signal.
+      currentCount = 10
     }
   }
 
   // 检查是否可以减少到 targetCount
   function canReduceTo(targetCount, dailyCap, originalPlan, dayAge) {
     if (targetCount < 2) return false
-    const perFeedCap = dailyCap / 12
+    const perFeedCap = dailyCap / 10
     const totalFromFormula = perFeedCap * targetCount
     const effectiveTotal = Math.min(originalPlan, totalFromFormula)
     // 预计日增重 = (奶粉 + 教槽×0.7) / FCR
@@ -262,9 +310,9 @@ function computeControlPlan(plan, records, controlStartDay) {
       latestCreep = creepMap[d.dayAge]  // 保存最新教槽值
     }
 
-    // 控奶前：12次，单次 = 原计划/12
-    if (i < controlStartDay) {
-      perFeed[i] = Math.round(d.perPigMilkPlan / 12 * 10) / 10
+    // 控奶前：10次，单次 = 原计划/10
+    if (i < resolvedControlStartDay) {
+      perFeed[i] = Math.round(d.perPigMilkPlan / 10 * 10) / 10
       continue
     }
 
@@ -304,13 +352,13 @@ function computeControlPlan(plan, records, controlStartDay) {
         perFeed[i] = Math.round(cp.perPig / cp.feedTimes * 100) / 100
       } else {
         // 旧记录没有提交值时的 fallback
-        perFeed[i] = Math.round(d.perPigMilkPlan / 12 * 10) / 10
+        perFeed[i] = Math.round(d.perPigMilkPlan / 10 * 10) / 10
       }
       continue
     }
 
     // 计划头均 = min(原计划, 单次上限 × 配奶次数)
-    const perFeedCap = d.dailyCapacity / 12
+    const perFeedCap = d.dailyCapacity / 10
     const adjustedPerPig = Math.round(perFeedCap * currentCount * 10) / 10
     const finalPerPig = Math.min(d.perPigMilkPlan, adjustedPerPig)
     planPPControl[i] = finalPerPig
@@ -344,7 +392,14 @@ function computeControlPlan(plan, records, controlStartDay) {
     ctrlW += gain
   }
 
-  return { planMilkPPControl: planPPControl, planMilkTotalControl: planTotalControl, feedTimes, perFeed, days: ctrlDays }
+  return {
+    planMilkPPControl: planPPControl,
+    planMilkTotalControl: planTotalControl,
+    feedTimes,
+    perFeed,
+    days: ctrlDays,
+    controlStartDay: resolvedControlStartDay,
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -488,7 +543,7 @@ function exportTrainingData(batchInfo) {
 // ──────────────────────────────────────────────
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    WEIGHT_STANDARD, INTERNAL,
+    WEIGHT_STANDARD, INTERNAL, CREEP_GRADE_VALUES,
     validateBatchConfig,
     getDailyCapacity, getRampFactor, milkToGain,
     generatePlan, computeControlPlan, computeDailyStats, exportTrainingData,

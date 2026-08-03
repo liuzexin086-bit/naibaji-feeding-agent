@@ -34,14 +34,15 @@ describe("agent storage selection", () => {
     })).toMatchObject({ backend: "supabase" });
   });
 
-  it("makes the local compose profile local-first with an explicit Supabase override", () => {
+  it("makes the local compose profile fully local", () => {
     const compose = readFileSync(
       resolve(import.meta.dirname, "../../docker/compose.local.yaml"),
       "utf8",
     );
     expect(compose).toContain("AGENT_STORAGE_BACKEND: ${AGENT_STORAGE_BACKEND:-local}");
     expect(compose).toContain("LOCAL_DB_PATH: ${LOCAL_DB_PATH:-/data/naibaji.db}");
-    expect(compose).toContain("SUPABASE_URL: ${SUPABASE_URL:-}");
-    expect(compose).not.toContain("SUPABASE_URL: ${SUPABASE_URL:?");
+    expect(compose).toContain("LOCAL_ADMIN_EMAIL:");
+    expect(compose).toContain("LOCAL_ADMIN_PASSWORD:");
+    expect(compose).not.toContain("SUPABASE_URL:");
   });
 });
