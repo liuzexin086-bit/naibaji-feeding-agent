@@ -13,7 +13,7 @@ function sha256(path: string): string {
 describe("protected production model parity", () => {
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "5378C5AAB45E1A4EFCEDEE8A258A6AC044824B69AD024553BA0FACFA72B8B94F",
+      "84A9B8A2AD0A5F5163A8070EBF2A7ED7271F4525FD986BD5A057EDCCC1F9C038",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -129,6 +129,19 @@ describe("protected production model parity", () => {
     expect(output.controlStartDay).toBe(6);
     expect(output.control.feedTimes.every((count) => count === 10)).toBe(true);
     expect(output.deviceOperation.curve[0]?.meals).toHaveLength(10);
+  });
+
+  it("does not let a legacy frozen start bypass the sustained-grade condition", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 8,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [{ dayAge: 4, creepGrade: "high", headCount: 20 }],
+    });
+    expect(output.controlStartDay).toBe(6);
+    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 10, 10]);
   });
 
   it.each([

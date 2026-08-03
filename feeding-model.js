@@ -273,9 +273,12 @@ function computeControlPlan(plan, records, controlStartDay) {
       break
     }
   }
-  const resolvedControlStartDay = Number.isFinite(Number(controlStartDay)) && Number(controlStartDay) >= 0
+  const requestedControlStart = Number.isFinite(Number(controlStartDay)) && Number(controlStartDay) >= 0
     ? Math.max(0, Math.min(nDays, Number(controlStartDay)))
     : automaticStart
+  // 旧批次可能冻结在第一次非 none 观察的次日；新规则不允许该旧值
+  // 早于持续教槽实际成立的次日。
+  const resolvedControlStartDay = Math.max(requestedControlStart, automaticStart)
 
   const creepGradeRolling = []
   let currentCount = 10
