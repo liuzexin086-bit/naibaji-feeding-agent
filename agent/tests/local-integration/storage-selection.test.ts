@@ -42,7 +42,8 @@ describe("agent storage selection", () => {
     expect(compose).toContain("AGENT_STORAGE_BACKEND: ${AGENT_STORAGE_BACKEND:-local}");
     expect(compose).toContain("LOCAL_DB_PATH: ${LOCAL_DB_PATH:-/data/naibaji.db}");
     expect(compose).toContain("LOCAL_ADMIN_EMAIL:");
-    expect(compose).toContain("LOCAL_ADMIN_PASSWORD:");
+    expect(compose).toContain("local_admin_password:");
+    expect(compose).toContain("environment: LOCAL_ADMIN_PASSWORD");
     expect(compose).not.toContain("SUPABASE_URL:");
   });
 });

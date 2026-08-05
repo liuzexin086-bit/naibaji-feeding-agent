@@ -53,6 +53,7 @@ describe("local execution API", () => {
       body: JSON.stringify({ email: "ADMIN@example.com", password: "correct-horse-battery" }),
     });
     expect(login.status).toBe(200);
+    expect(login.headers.get("set-cookie")).not.toContain("Secure");
     const cookie = cookieOf(login);
     expect((await request(base, "/api/auth/session", { headers: { cookie } })).status).toBe(200);
     const created = await request(base, "/api/batches", {
@@ -145,6 +146,32 @@ describe("local execution API", () => {
     expect(anchoredAdvance.status).toBe(200);
     const anchoredBody = await anchoredAdvance.json() as { today: { mealCount: number } };
     expect(anchoredBody.today.mealCount).toBe(9);
+  });
+
+  it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      headers: { "x-forwarded-proto": "https" },
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    expect(login.status).toBe(200);
+    expect(login.headers.get("set-cookie")).toContain("Secure");
+  });
+
+  it("rejects a batch window outside the feeding model contract before persistence", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const rejected = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie: cookieOf(login) },
+      body: JSON.stringify({ name: "无效窗口", startAge: 21, endAge: 35, headCount: 12 }),
+    });
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toEqual({ code: "NBJ_END_AGE_INVALID" });
   });
 
   it("keeps SOP template versions immutable and requires admin", async () => {

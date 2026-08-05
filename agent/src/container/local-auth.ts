@@ -55,6 +55,10 @@ export function initializeLocalAdmin(
 ): LocalUser | null {
   if (!email || !password) return null;
   const normalized = normalizeEmail(email);
+  // Container seed credentials are bootstrap-only. Reapplying Compose must
+  // never rotate or re-enable an existing administrator implicitly.
+  const existing = store.getUserByEmail(normalized);
+  if (existing) return existing;
   const secret = validatePassword(password);
   const { hash, salt } = hashPassword(secret);
   return store.ensureUser({
@@ -149,16 +153,23 @@ export function authenticateLocalUser(
   return { user: credential.user, token, sessionId: session.id, expiresAt };
 }
 
-export function setSessionCookie(response: ServerResponse, token: string, maxAgeSeconds = SESSION_TTL_MS / 1_000): void {
+export function setSessionCookie(
+  response: ServerResponse,
+  token: string,
+  maxAgeSeconds = SESSION_TTL_MS / 1_000,
+  secure = true,
+): void {
+  const secureAttribute = secure ? "; Secure" : "";
   response.setHeader(
     "set-cookie",
-    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${Math.floor(maxAgeSeconds)}`,
+    `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly${secureAttribute}; SameSite=Lax; Max-Age=${Math.floor(maxAgeSeconds)}`,
   );
 }
 
-export function clearSessionCookie(response: ServerResponse): void {
+export function clearSessionCookie(response: ServerResponse, secure = true): void {
+  const secureAttribute = secure ? "; Secure" : "";
   response.setHeader(
     "set-cookie",
-    `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`,
+    `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly${secureAttribute}; SameSite=Lax; Max-Age=0`,
   );
 }

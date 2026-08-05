@@ -1,4 +1,9 @@
 import { computeProductionPlan } from "../model/production-model.js";
+import {
+  assertNonOverlappingBusinessDayWindows,
+  localMinute,
+  remainingBusinessDayTimes,
+} from "./business-day.js";
 import type {
   CreepGrade,
   DayDecisionInput,
@@ -27,6 +32,7 @@ const FIXED_TEACHING_TIMES = [
   "05:00",
   "08:00",
 ] as const;
+export const FREE_FEEDING_SUGGESTED_MEAL_COUNT = 12;
 
 function fail(code: string): never {
   throw new Error(`NBJ_DECISION_${code}`);
@@ -48,16 +54,7 @@ function floorToPrecision(value: number, precision: number): number {
 }
 
 function minuteOfDay(value: string): number {
-  if (!TIME_PATTERN.test(value)) fail("INVALID_LOCAL_TIME");
-  const [hour, minute] = value.split(":").map(Number);
-  return hour * 60 + minute;
-}
-
-function minuteLabel(minutes: number): string {
-  const normalized = ((minutes % 1440) + 1440) % 1440;
-  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(
-    normalized % 60,
-  ).padStart(2, "0")}`;
+  return localMinute(value);
 }
 
 function defaultMealTimes(mealCount: number): string[] {
@@ -258,10 +255,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     "INVALID_PRECISION",
   );
   if ((input.freeWindows?.length ?? 0) > 8) fail("FREE_WINDOWS_LIMIT");
-  input.freeWindows?.forEach((window) => {
-    minuteOfDay(window.startLocal);
-    minuteOfDay(window.endLocal);
-  });
+  if (input.freeWindows?.length) assertNonOverlappingBusinessDayWindows(input.freeWindows);
 
   const currentDayAge = input.modelInput.dayAge ?? input.modelInput.startAge;
   const recordedGrades = input.creepFeedGradesLast3Days;
@@ -347,6 +341,13 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       : singlePowderGrams * referenceMealCount,
     precision,
   );
+  const suggestedFreeFeedingDailyPowderGrams = mode === "free_feeding"
+    ? floorToPrecision(
+      floorToPrecision(curveLimit / FREE_FEEDING_SUGGESTED_MEAL_COUNT, precision) *
+        FREE_FEEDING_SUGGESTED_MEAL_COUNT,
+      precision,
+    )
+    : undefined;
   const status = input.requestedStatus === "active" ? "active" : "draft";
   const creepGradeInput = input.creepFeedGradesLast3Days !== undefined
     ? input.creepFeedGradesLast3Days
@@ -379,6 +380,10 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
         : safeDailyTotal,
       singlePowderGrams: floorToPrecision(singlePowderGrams, precision),
       mealCount: mode === "timed_quantity" ? timedMeals.length : referenceMealCount,
+      ...(suggestedFreeFeedingDailyPowderGrams !== undefined ? {
+        suggestedDailyPowderGrams: suggestedFreeFeedingDailyPowderGrams,
+        suggestedDailyMealCount: FREE_FEEDING_SUGGESTED_MEAL_COUNT,
+      } : {}),
       timedMeals,
       freeWindows: mode === "free_feeding" ? [...(input.freeWindows ?? [])] : [],
       precisionGrams: precision,
@@ -497,9 +502,10 @@ export function previewDiarrheaAdjustment(
   );
   const observedTime = input.observedAt.slice(11, 16);
   const remainingTimes = input.remainingMealTimes ??
-    input.decision.setting.timedMeals
-      .map((meal) => meal.timeLocal)
-      .filter((time) => TIME_PATTERN.test(observedTime) && time > observedTime);
+    remainingBusinessDayTimes(
+      input.decision.setting.timedMeals.map((meal) => meal.timeLocal),
+      observedTime,
+    );
   remainingTimes.forEach(minuteOfDay);
   const timedMeals = allocate(remainingAllowance, remainingTimes, precision);
   const adjustmentSteps = [

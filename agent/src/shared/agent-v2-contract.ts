@@ -44,6 +44,9 @@ export interface DeviceSetting {
   dailyPowderGrams: number;
   singlePowderGrams: number;
   mealCount: number;
+  /** Free-feeding display-only recommendation; it never changes a device program. */
+  suggestedDailyPowderGrams?: number;
+  suggestedDailyMealCount?: number;
   timedMeals: TimedMeal[];
   freeWindows: DeviceWindow[];
   precisionGrams: number;

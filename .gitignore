@@ -39,5 +39,6 @@ agent/.agent-config-key
 # Generated archives, backups and Python bytecode
 *.zip
 *.bak.*
+agent/backups/
 **/__pycache__/
 *.pyc

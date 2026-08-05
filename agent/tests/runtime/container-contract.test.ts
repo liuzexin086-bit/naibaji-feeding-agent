@@ -18,19 +18,24 @@ describe("local container contract", () => {
 
   it("keeps database ports private and binds local ingress to loopback", async () => {
     const compose = await readFile(join(root, "docker", "compose.local.yaml"), "utf8");
-    const caddy = await readFile(join(root, "docker", "Caddyfile"), "utf8");
+    const nginx = await readFile(join(root, "docker", "nginx.conf.template"), "utf8");
 
-    expect(compose).toContain('"127.0.0.1:${AGENT_PORT:-8080}:8080"');
-    expect(compose).toContain('"127.0.0.1:${CADDY_PORT:-8788}:8080"');
+    expect(compose).toContain('"127.0.0.1:${INGRESS_PORT:-8788}:8080"');
+    expect(compose).toContain("internal: true");
+    expect(compose).toContain("CHROMA_URL: http://chroma:8000");
     expect(compose).not.toMatch(/\b5432:/);
-    expect(caddy).toContain("respond @internal 404");
+    expect(nginx).toContain("location ^~ /internal/");
+    expect(nginx).toContain("return 404");
+    expect(nginx).toContain("proxy_buffering off");
   });
 
-  it("preserves staging and provides an explicit Wrangler local profile", async () => {
-    const wrangler = await readFile(join(root, "wrangler.jsonc"), "utf8");
+  it("uses Nginx as the static/API edge and keeps Cloudflare Tunnel optional", async () => {
+    const compose = await readFile(join(root, "docker", "compose.local.yaml"), "utf8");
+    const nginx = await readFile(join(root, "docker", "nginx.conf.template"), "utf8");
 
-    expect(wrangler).toContain('"local"');
-    expect(wrangler).toContain('"LOCAL_AGENT_URL": "http://127.0.0.1:8080"');
-    expect(wrangler).toContain('"staging"');
+    expect(compose).toContain('profiles: ["tunnel"]');
+    expect(compose).toContain("cloudflare/cloudflared:");
+    expect(nginx).toContain("root /usr/share/nginx/html");
+    expect(nginx).toContain("proxy_pass http://agent:8080");
   });
 });

@@ -5,6 +5,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      target: agent
     image: naibaji-feeding-agent:local
     restart: unless-stopped
     init: true
@@ -13,55 +14,156 @@ services:
       AGENT_STORAGE_BACKEND: ${AGENT_STORAGE_BACKEND:-local}
       LOCAL_DB_PATH: ${LOCAL_DB_PATH:-/data/naibaji.db}
       AGENT_CONFIG_PATH: /data/runtime-config.enc.json
-      CONFIG_ENCRYPTION_KEY: ${CONFIG_ENCRYPTION_KEY:?set CONFIG_ENCRYPTION_KEY}
-      AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?set AGENT_GATEWAY_SECRET}
+      AGENT_CHECKPOINT_DB_PATH: /checkpoints/agent-checkpoints.db
       LOCAL_ADMIN_EMAIL: ${LOCAL_ADMIN_EMAIL:?set LOCAL_ADMIN_EMAIL}
-      LOCAL_ADMIN_PASSWORD: ${LOCAL_ADMIN_PASSWORD:?set LOCAL_ADMIN_PASSWORD}
       LLM_PROVIDER: ${LLM_PROVIDER:-openai}
       LLM_MODEL: ${LLM_MODEL:-gpt-5.6-luna}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-    ports:
-      - "127.0.0.1:${AGENT_PORT:-8080}:8080"
+      CHROMA_URL: http://chroma:8000
+      EMBEDDING_BASE_URL: http://embedding:80
+      EMBEDDING_MODEL: BAAI/bge-small-zh-v1.5
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_ENDPOINT: ${LANGSMITH_ENDPOINT:-https://api.smith.langchain.com}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-naibaji-feeding-agent}
+      LANGSMITH_METADATA_ONLY: "true"
+    secrets:
+      - agent_gateway_secret
+      - config_encryption_key
+      - local_admin_password
+      - langsmith_api_key
     volumes:
-      - agent-config:/data
+      - agent-data:/data
+      - agent-checkpoints:/checkpoints
+    expose:
+      - "8080"
     networks:
-      - edge
+      - backend
+      - egress
+    depends_on:
+      chroma:
+        condition: service_healthy
+      embedding:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
       timeout: 3s
       retries: 5
-      start_period: 10s
+      start_period: 15s
 
-  caddy:
-    image: caddy:2.10.2-alpine
-    profiles: ["proxy", "tunnel"]
+  nginx:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+    image: naibaji-feeding-web:local
     restart: unless-stopped
+    init: true
+    secrets:
+      - agent_gateway_secret
+    ports:
+      - "127.0.0.1:${INGRESS_PORT:-8788}:8080"
+    networks:
+      - edge
+      - backend
     depends_on:
       agent:
         condition: service_healthy
-    environment:
-      AGENT_GATEWAY_SECRET: ${AGENT_GATEWAY_SECRET:?set AGENT_GATEWAY_SECRET}
-    ports:
-      - "127.0.0.1:${CADDY_PORT:-8788}:8080"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    networks:
-      - edge
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
 
   cloudflared:
     image: cloudflare/cloudflared:2026.7.0
     profiles: ["tunnel"]
     restart: unless-stopped
+    init: true
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/cloudflared_token
+    secrets:
+      - cloudflared_token
+    # Remotely managed tunnels may retain the legacy loopback origin
+    # http://127.0.0.1:8787. Sharing Nginx's network namespace makes that
+    # origin terminate at Nginx without exposing another host port.
+    network_mode: "service:nginx"
     depends_on:
-      - caddy
-    command: ["tunnel", "--no-autoupdate", "run", "--token", "${CLOUDFLARED_TOKEN:?set CLOUDFLARED_TOKEN}"]
+      nginx:
+        condition: service_healthy
+
+  chroma:
+    image: chromadb/chroma:1.5.9
+    restart: unless-stopped
+    volumes:
+      - chroma-data:/data
+    expose:
+      - "8000"
     networks:
-      - edge
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000'"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.3
+    restart: unless-stopped
+    command:
+      - --model-id
+      - BAAI/bge-small-zh-v1.5
+      - --revision
+      - 534b6bfaaf500e70bcb9f3771cebc940c23b219d
+      - --port
+      - "80"
+      - --max-client-batch-size
+      - "32"
+      - --auto-truncate
+      - --json-output
+    volumes:
+      - embedding-cache:/data
+    expose:
+      - "80"
+    networks:
+      - backend
+      - egress
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/health >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 90s
 
 volumes:
-  agent-config:
+  agent-data:
+    name: naibaji-agent-config
+  agent-checkpoints:
+    name: naibaji-agent-checkpoints
+  chroma-data:
+    name: naibaji-chroma-data
+  embedding-cache:
+    name: naibaji-embedding-cache
 
 networks:
   edge:
+  backend:
+    internal: true
+  egress:
+
+secrets:
+  agent_gateway_secret:
+    environment: AGENT_GATEWAY_SECRET
+  config_encryption_key:
+    environment: CONFIG_ENCRYPTION_KEY
+  local_admin_password:
+    environment: LOCAL_ADMIN_PASSWORD
+  langsmith_api_key:
+    environment: LANGSMITH_API_KEY
+  cloudflared_token:
+    environment: CLOUDFLARED_TOKEN

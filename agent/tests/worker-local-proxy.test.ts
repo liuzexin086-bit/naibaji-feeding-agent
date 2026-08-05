@@ -3,31 +3,30 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
-const worker = readFileSync(resolve(root, "src/worker/index.ts"), "utf8");
-const wrangler = readFileSync(resolve(root, "wrangler.jsonc"), "utf8");
 const compose = readFileSync(resolve(root, "docker/compose.local.yaml"), "utf8");
+const nginx = readFileSync(resolve(root, "docker/nginx.conf.template"), "utf8");
 
-describe("local frontend/backend boundary", () => {
-  it("keeps the Worker as a same-origin static host and API proxy", () => {
-    expect(worker).toContain('url.pathname.startsWith("/api/")');
-    expect(worker).toContain("proxyToLocalBackend");
-    expect(worker).toContain('headers.set("x-agent-gateway-secret"');
-    expect(worker).toContain("env.ASSETS.fetch(request)");
-    expect(worker).not.toContain("verifySupabaseJwt");
-    expect(worker).not.toContain("supabaseRest");
+describe("local Nginx frontend/backend boundary", () => {
+  it("keeps Nginx as a same-origin static host and API proxy", () => {
+    expect(nginx).toContain("root /usr/share/nginx/html");
+    expect(nginx).toContain("location ^~ /api/");
+    expect(nginx).toContain("proxy_pass http://agent:8080");
+    expect(nginx).toContain("proxy_set_header X-Agent-Gateway-Secret");
+    expect(nginx).toContain("proxy_buffering off");
   });
 
-  it("routes the tunnel-facing local Worker to the local container", () => {
-    expect(wrangler).toContain('"LOCAL_AGENT_URL": "http://127.0.0.1:8080"');
-    expect(wrangler).not.toContain("SUPABASE_URL");
-    expect(wrangler).not.toContain("SUPABASE_PUBLISHABLE_KEY");
+  it("routes the optional tunnel to Nginx without publishing private services", () => {
+    expect(compose).toContain('profiles: ["tunnel"]');
+    expect(compose).toContain('"127.0.0.1:${INGRESS_PORT:-8788}:8080"');
+    expect(compose).toContain("internal: true");
+    expect(compose).not.toContain("SUPABASE_URL");
   });
 
   it("starts the container with local storage and local administrator seeding", () => {
     expect(compose).toContain("AGENT_STORAGE_BACKEND: ${AGENT_STORAGE_BACKEND:-local}");
     expect(compose).toContain("LOCAL_DB_PATH: ${LOCAL_DB_PATH:-/data/naibaji.db}");
     expect(compose).toContain("LOCAL_ADMIN_EMAIL:");
-    expect(compose).toContain("LOCAL_ADMIN_PASSWORD:");
+    expect(compose).toContain("local_admin_password:");
     expect(compose).not.toContain("SUPABASE_URL:");
   });
 });

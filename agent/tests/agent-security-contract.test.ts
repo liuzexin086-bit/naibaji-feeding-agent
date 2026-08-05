@@ -4,13 +4,17 @@ import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
 const tools = readFileSync(resolve(root, "src/container/tools.ts"), "utf8");
+const decisionService = readFileSync(resolve(root, "src/decision/batch-decision-service.ts"), "utf8");
 const server = readFileSync(resolve(root, "src/container/server.ts"), "utf8");
-const worker = readFileSync(resolve(root, "src/worker/index.ts"), "utf8");
+const graphRuntime = readFileSync(resolve(root, "src/agent/langgraph/runtime.ts"), "utf8");
+const models = readFileSync(resolve(root, "src/agent/langgraph/models.ts"), "utf8");
+const nginx = readFileSync(resolve(root, "docker/nginx.conf.template"), "utf8");
+const compose = readFileSync(resolve(root, "docker/compose.local.yaml"), "utf8");
 const runtimeConfig = readFileSync(resolve(root, "src/container/runtime-config.ts"), "utf8");
 const localAuth = readFileSync(resolve(root, "src/container/local-auth.ts"), "utf8");
 const localApi = readFileSync(resolve(root, "src/container/local-api.ts"), "utf8");
-const wrangler = readFileSync(resolve(root, "wrangler.jsonc"), "utf8");
 const page = readFileSync(resolve(root, "../index.html"), "utf8");
+const onsitePage = readFileSync(resolve(root, "ui/liquid-index.html"), "utf8");
 const adminPage = readFileSync(resolve(root, "../admin.html"), "utf8");
 const adminScript = readFileSync(resolve(root, "../admin.js"), "utf8");
 
@@ -47,17 +51,15 @@ describe("Agent security boundary", () => {
     expect(localAuth).toContain('SESSION_COOKIE_NAME = "nbj_session"');
     expect(localAuth).toContain('role !== "admin"');
     expect(localApi).toContain("requireLocalAuth");
-    expect(worker).toContain('headers.set("x-agent-gateway-secret"');
-    expect(worker).not.toContain("verifySupabaseJwt");
+    expect(nginx).toContain("proxy_set_header X-Agent-Gateway-Secret");
     expect(tools).not.toContain("service_role");
-    expect(worker).not.toContain("service_role");
+    expect(nginx).not.toContain("service_role");
   });
 
-  it("keeps the public Worker outside authentication and business-data concerns", () => {
-    expect(worker).toContain("proxyToLocalBackend");
-    expect(worker).toContain("NBJ_LOCAL_BACKEND_UNAVAILABLE");
-    expect(worker).not.toContain("supabaseRest");
-    expect(wrangler).toContain('"LOCAL_AGENT_URL": "http://127.0.0.1:8080"');
+  it("keeps the public Nginx edge outside authentication and business-data concerns", () => {
+    expect(nginx).toContain("proxy_pass http://agent:8080");
+    expect(nginx).not.toContain("supabaseRest");
+    expect(compose).toContain("CHROMA_URL: http://chroma:8000");
   });
 
   it("keeps Agent controls hidden outside an authenticated application", () => {
@@ -89,12 +91,14 @@ describe("Agent security boundary", () => {
     expect(page).toContain("feeding_agent_messages");
     expect(server).toContain("NBJ_AGENT_SESSION_BATCH_MISMATCH");
     expect(server).toContain("storedRows.reverse()");
-    expect(server).toContain("messages: history");
+    expect(server).toContain("history,");
+    expect(graphRuntime).toContain("...input.history");
   });
 
   it("uses deterministic complete curves for concrete device advice", () => {
     expect(tools).toContain("fullFeedingCurve");
-    expect(tools).toContain("devicePowderPrecisionGrams");
+    expect(tools).toContain("loadFrozenBatchDecisionContext");
+    expect(decisionService).toContain("devicePowderPrecisionGrams");
     expect(server).toContain("常规日计划回复只输出三行");
     expect(server).toContain("单次配奶粉量、程序总奶粉量、配奶时间点");
     expect(server).toContain("不得把加水量或奶液量说成设备设置项");
@@ -135,7 +139,7 @@ describe("Agent security boundary", () => {
     expect(localAuth).toContain("requireLocalAdmin");
     expect(localApi).toContain('"/api/admin/feeding-agent/config"');
     expect(server).toContain("handleAdminConfig");
-    expect(worker).not.toContain("is_admin");
+    expect(nginx).not.toContain("is_admin");
   });
 
   it("encrypts runtime credentials and never stores them in Supabase", () => {
@@ -150,19 +154,33 @@ describe("Agent security boundary", () => {
     expect(adminPage).toContain('data-admin-view="apiAdminView"');
     expect(adminPage).toContain('data-admin-view="sopAdminView"');
     expect(adminScript).toContain("/api/admin/sop/templates");
+    expect(adminPage).toContain('id="sopSourceMarkdown"');
+    expect(adminScript).toContain("sourceMarkdown: sourceMarkdown");
+    expect(adminScript).toContain("template.sourceSha256");
+    expect(adminScript).toContain("template.collectionRevision");
+  });
+
+  it("keeps operator mode switching revision-safe and template-immutable", () => {
+    expect(onsitePage).toContain("'/mode'");
+    expect(onsitePage).toContain("expectedRevision: expectedRevision");
+    expect(onsitePage).toContain("idempotencyKey: uuid()");
+    expect(onsitePage).toContain("NBJ_BATCH_MODE_FIRST_DAY_LOCKED");
+    expect(onsitePage).toContain("NBJ_BATCH_STALE");
+    expect(onsitePage).not.toContain("只切换本批次采用的模板，不修改任何模板参数");
+    expect(onsitePage).not.toMatch(/\/mode[^\n]+(?:config|template)\s*:/);
   });
 
   it("supports custom HTTPS provider endpoints and OpenAI-compatible API modes", () => {
     expect(adminPage).toContain('id="apiBaseUrl"');
     expect(adminPage).toContain('id="apiMode"');
     expect(server).toContain("normalizeBaseUrl");
-    expect(server).toContain("openAICompletionsApi");
+    expect(models).toContain("ChatOpenAI");
+    expect(models).toContain("useResponsesApi");
     expect(server).toContain("validateProviderConnection");
   });
 
   it("prevents stale public admin bundles after a configuration rollout", () => {
-    expect(wrangler).toContain('"/admin.js"');
-    expect(worker).toContain('headers.set("cache-control", "no-store, max-age=0")');
-    expect(adminPage).toContain("admin.js?v=20260731-4");
+    expect(nginx).toContain('add_header Cache-Control "no-store" always');
+    expect(adminPage).toContain("admin.js?v=20260804-1");
   });
 });

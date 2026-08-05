@@ -88,7 +88,7 @@
     .batch-menu-item small { color: var(--muted); white-space: nowrap; }
     .page { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gap); }
     .page > * { width: 100%; min-width: 0; max-width: 100%; }
-    .device-program, .record-form, .history-panel, .exception-panel { border-radius: var(--r-lg); }
+    .device-program, .mode-panel, .operations-panel, .record-form, .history-panel, .exception-panel { border-radius: var(--r-lg); }
     .device-program { padding: clamp(18px, 3vw, 28px); }
     .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
     .section-head h1, .section-head h2, .section-head h3 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.025em; }
@@ -106,6 +106,31 @@
     .timeline { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
     .timeline-item { min-width: 72px; min-height: 44px; display: grid; place-items: center; padding: 0 12px; background: var(--surface-secondary); border: 1px solid var(--line); border-radius: 12px; }
     .timeline-time { font-variant-numeric: tabular-nums; font-weight: 700; }
+    .mode-panel { padding: clamp(18px, 3vw, 24px); }
+    .mode-panel .section-head { margin-bottom: 14px; }
+    .mode-current { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .mode-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+    .mode-option { min-height: 82px; display: grid; gap: 3px; padding: 13px 14px; color: var(--ink); background: #fff; border: 1px solid var(--line-strong); border-radius: 14px; text-align: left; }
+    .mode-option:hover:not(:disabled) { border-color: rgba(0, 122, 255, .46); background: var(--blue-soft); }
+    .mode-option[aria-pressed="true"] { color: #075eb8; border-color: rgba(0, 122, 255, .48); background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(0, 122, 255, .12); }
+    .mode-option strong { font-size: 15px; }
+    .mode-option span { color: var(--muted); font-size: 12px; font-weight: 500; }
+    .mode-option[aria-pressed="true"] span { color: #3c6f9f; }
+    .mode-message { min-height: 20px; margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+    .mode-message.warning { color: var(--amber); }
+    .operations-panel { padding: clamp(18px, 3vw, 24px); }
+    .operations-panel .section-head { margin-bottom: 12px; }
+    .operation-meta { margin: -4px 0 14px; color: var(--muted); font-size: 13px; }
+    .operation-list { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+    .operation-row { display: grid; grid-template-columns: minmax(68px, auto) minmax(0, 1fr); gap: 10px; align-items: start; padding: 12px; background: var(--surface-secondary); border: 1px solid var(--line); border-radius: 13px; }
+    .operation-window { padding-top: 2px; color: #075eb8; font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .operation-copy { display: grid; gap: 3px; min-width: 0; }
+    .operation-copy strong { font-size: 14px; }
+    .operation-copy span { color: var(--muted); font-size: 12px; }
+    .operation-safety { color: var(--amber) !important; }
+    .operation-confirm { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); }
+    .operation-confirm-status { color: var(--muted); font-size: 13px; }
+    .operation-confirm-status.confirmed { color: var(--green); font-weight: 700; }
     .record-form { padding: clamp(18px, 3vw, 28px); }
     .record-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
     .field { display: grid; gap: 7px; min-width: 0; }
@@ -216,12 +241,16 @@
       .batch-current { min-height: 46px; }
       .context-bar > .secondary-btn { min-height: 46px; padding: 0 13px; }
       .page { margin-top: 12px; gap: 12px; }
-      .device-program, .record-form, .history-panel { border-radius: 19px; padding: 17px 15px; }
+      .device-program, .mode-panel, .operations-panel, .record-form, .history-panel { border-radius: 19px; padding: 17px 15px; }
       .section-head { margin-bottom: 17px; }
       .section-head h1, .section-head h2 { font-size: 19px; }
       .program-grid { gap: 17px 12px; }
       .program-stat strong { font-size: 29px; }
       .record-grid { grid-template-columns: 1fr; gap: 12px; }
+      .mode-options { grid-template-columns: 1fr; }
+      .operation-row { grid-template-columns: 1fr; gap: 4px; }
+      .operation-confirm { align-items: stretch; flex-direction: column; }
+      .operation-confirm .primary-btn { width: 100%; }
       .record-footer, .advance-bar { align-items: stretch; flex-direction: column; }
       .record-footer .secondary-btn, .advance-actions, .advance-actions button { width: 100%; }
       .advance-actions { display: grid; gap: 8px; }
@@ -278,17 +307,33 @@
       <section class="device-program surface-content" aria-labelledby="deviceHeading">
         <header class="section-head"><div><h1 id="deviceHeading">今日设备设定</h1></div></header>
         <div class="program-grid">
-          <div class="program-stat"><span class="label">单次下粉</span><strong id="singlePowder">—</strong><span class="unit">g / 次</span></div>
-          <div class="program-stat"><span class="label">程序总量</span><strong id="dailyPowder">—</strong><span class="unit">g</span></div>
+          <div id="singlePowderStat" class="program-stat"><span class="label">单次下粉</span><strong id="singlePowder">—</strong><span class="unit">g / 次</span></div>
+          <div class="program-stat"><span id="dailyPowderLabel" class="label">程序总量</span><strong id="dailyPowder">—</strong><span class="unit">g</span></div>
         </div>
-        <div class="program-time-label">配奶时间点</div>
+        <div class="program-time-label" id="programTimeLabel">配奶时间点</div>
         <div class="timeline" id="timeline"><div class="empty">暂无设备程序</div></div>
         <div hidden aria-hidden="true"><span id="mealCount">—</span><span id="nextMeal">—</span><span id="modePill">—</span><span id="programVersion">—</span><span id="programBasis">—</span><span id="deviceSource">—</span></div>
         <div style="display:flex;justify-content:flex-end;margin-top:14px"><button id="copySettingBtn" class="secondary-btn" type="button">复制设备设定</button></div>
       </section>
 
+      <section id="modePanel" class="mode-panel surface-content" aria-labelledby="modeHeading">
+        <header class="section-head"><div><h2 id="modeHeading">饲喂模式模板</h2></div><div class="mode-current"><strong id="selectedModeLabel" class="tag tag-blue">等待批次</strong><span id="effectiveModeLabel" class="tag tag-green" hidden></span></div></header>
+        <div class="mode-options" role="group" aria-label="选择饲喂模式模板">
+          <button id="timedModeButton" class="mode-option" type="button" data-mode="timed_quantity" aria-pressed="false"><strong>定时定量</strong><span>保留既有时间点、排除时段、精度和减餐优先级</span></button>
+          <button id="freeModeButton" class="mode-option" type="button" data-mode="free_feeding" aria-pressed="false"><strong>自由采食</strong><span>采用批次冻结 SOP 的窗口、阶段条件与异常阻断</span></button>
+        </div>
+        <p id="modeMessage" class="mode-message" role="status" aria-live="polite" hidden></p>
+      </section>
+
+      <section id="todayOperationsPanel" class="operations-panel surface-content" aria-labelledby="todayOperationsHeading">
+        <header class="section-head"><div><h2 id="todayOperationsHeading">今日操作</h2></div><span id="todayOperationsPill" class="tag tag-blue">待载入</span></header>
+        <p id="todayOperationsMeta" class="operation-meta" role="status" aria-live="polite" hidden></p>
+        <ol id="todayOperationsList" class="operation-list"><li class="empty">暂无当日操作</li></ol>
+        <div class="operation-confirm"><span id="todayOperationsStatus" class="operation-confirm-status" hidden></span><button id="confirmTodayOperationsBtn" class="primary-btn" type="button" disabled>确认今日全部操作</button></div>
+      </section>
+
       <section class="record-form surface-content" aria-labelledby="recordHeading">
-        <header class="section-head"><div><h2 id="recordHeading">今日数据</h2><p>完成当日巡栏后录入，次日 09:00 推进</p></div></header>
+        <header class="section-head"><div><h2 id="recordHeading">今日数据</h2></div></header>
         <form id="quickForm">
           <div class="record-grid">
             <label class="field"><span>实际奶粉</span><div class="input-shell"><input id="actualPowder" name="actualPowder" type="number" min="0" step="1" inputmode="decimal" placeholder="140" aria-describedby="actualPowderHelp"><span aria-hidden="true">g</span></div><small id="actualPowderHelp" class="field-help">整日实际总量</small></label>
@@ -298,7 +343,7 @@
             <label class="field"><span>饮水状态</span><select id="waterState" name="waterState"><option value="closed" selected>关闭</option><option value="open">开启</option><option value="exception">异常待处理</option></select><small class="field-help">按场区 SOP 记录</small></label>
           </div>
           <div class="record-footer"><span id="quickMessage" class="quick-message" role="status" aria-live="polite">未保存草稿</span><button id="saveQuickBtn" class="secondary-btn" type="submit">保存草稿</button></div>
-          <div class="advance-bar"><div class="advance-copy"><span id="advanceHint">按批次进度推进，不读取系统日期</span><strong id="executedText">当前日龄 —</strong></div><div class="advance-actions"><button id="nextDayBtn" class="secondary-btn" type="button">看次日设定</button><button id="advanceDayBtn" class="primary-btn" type="button">记录并进入下一日</button></div></div>
+          <div class="advance-bar"><div class="advance-copy"><strong id="executedText">当前日龄 —</strong></div><div class="advance-actions"><button id="nextDayBtn" class="secondary-btn" type="button">看次日设定</button><button id="advanceDayBtn" class="primary-btn" type="button">记录并进入下一日</button></div></div>
         </form>
       </section>
 
@@ -323,7 +368,7 @@
 
   <section id="batchSurface" class="sheet batch-sheet" role="dialog" aria-modal="true" aria-labelledby="batchSurfaceTitle" aria-hidden="true" hidden>
     <header class="sheet-head"><div><h2 id="batchSurfaceTitle">新建批次</h2><p>创建后立即切换到新批次</p></div><button id="closeBatchBtn" class="icon-btn" type="button" aria-label="关闭新建批次"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 6 12 12M18 6 6 18"></path></svg></button></header>
-    <form id="newBatchView" class="batch-form"><div class="batch-form-grid"><label class="field"><span>批次名称</span><input id="newBatchName" name="name" required maxlength="120"></label><label class="field"><span>栏位</span><input id="newBatchRoom" name="room" maxlength="80"></label><label class="field"><span>起始日龄</span><input id="newBatchStartAge" name="startAge" type="number" min="1" max="60" step="1" required></label><label class="field"><span>结束日龄</span><input id="newBatchEndAge" name="endAge" type="number" min="1" max="90" step="1" value="30" required></label><label class="field"><span>有效头数</span><input id="newBatchHeads" name="headCount" type="number" min="1" step="1" required></label></div><div id="newBatchError" class="form-error" role="alert"></div><button id="createBatchBtn" class="primary-btn" type="submit">创建并切换</button></form>
+    <form id="newBatchView" class="batch-form"><div class="batch-form-grid"><label class="field"><span>批次名称</span><input id="newBatchName" name="name" required maxlength="120"></label><label class="field"><span>栏位</span><input id="newBatchRoom" name="room" maxlength="80"></label><label class="field"><span>起始日龄</span><input id="newBatchStartAge" name="startAge" type="number" min="1" max="29" step="1" required></label><label class="field"><span>结束日龄</span><input id="newBatchEndAge" name="endAge" type="number" min="2" max="30" step="1" value="30" required></label><label class="field"><span>有效头数</span><input id="newBatchHeads" name="headCount" type="number" min="1" step="1" required></label></div><div id="newBatchError" class="form-error" role="alert"></div><button id="createBatchBtn" class="primary-btn" type="submit">创建并切换</button></form>
   </section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -331,7 +376,7 @@
     (function () {
       'use strict';
       var $ = function (id) { return document.getElementById(id); };
-      var state = { user: null, batches: [], currentBatchId: null, batch: null, today: null, records: [], agentSession: null, agentMessages: [], agentHistoryLoaded: false, agentBusy: false, dialog: null, dialogCloseTimer: null, batchMenuTimer: null, longPressTimer: null, longPressStart: null, toastTimer: null };
+      var state = { user: null, batches: [], currentBatchId: null, batch: null, today: null, todayOperations: null, todayOperationsConfirmation: null, records: [], agentSession: null, agentMessages: [], agentHistoryLoaded: false, agentBusy: false, modeBusy: false, operationsBusy: false, dialog: null, dialogCloseTimer: null, batchMenuTimer: null, longPressTimer: null, longPressStart: null, toastTimer: null };
       var creepLabels = { none: '无', low: '低', medium: '中', high: '高', excellent: '极好' };
       var diarrheaLabels = { none: '无', mild: '轻', moderate: '中', severe: '重' };
       var waterLabels = { closed: '关闭', open: '开启', exception: '异常' };
@@ -345,6 +390,9 @@
       function batchLabel(batch) { return String(value(batch, 'name', 'name', '未命名批次') || '未命名批次'); }
       function age() { return number(value(state.batch, 'currentDayIndex', 'current_day_index', 0), 0) + number(value(state.batch, 'startAge', 'start_age', 1), 1); }
       function currentHeads() { return number(value(state.batch, 'effectiveHeads', 'effective_heads', first(value(state.batch, 'initialHeads', 'initial_heads', 0), 0)), 0); }
+      function selectedMode() { var snapshot = value(state.batch, 'devicePlanSnapshot', 'device_plan_snapshot', null) || {}; return value(state.batch, 'selectedMode', 'selected_mode', first(value(snapshot, 'selectedMode', 'selected_mode', null), value(snapshot, 'mode', 'mode', null), 'timed_quantity')); }
+      function effectiveMode() { var setting = value(state.today, 'setting', 'setting', null) || {}; return value(setting, 'mode', 'mode', value(state.today, 'deviceMode', 'device_mode', selectedMode())); }
+      function isFirstBatchDay() { return !!state.batch && number(value(state.batch, 'currentDayIndex', 'current_day_index', 0), 0) === 0; }
       function eventText(event) { return typeof event === 'string' ? event : first(event && event.instruction, event && event.action, event && event.title, event && event.message, '请按现场 SOP 处置'); }
       function showToast(message) { var toast = $('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
 
@@ -363,6 +411,7 @@
       function setLoggedIn(visible) { $('loginLayer').hidden = visible; $('appShell').hidden = !visible; }
       function setOnline(online) { var pill = $('batchPill'); pill.classList.toggle('offline', !online); pill.innerHTML = '<i class="status-dot"></i><span>' + (online ? '在线' : '离线') + '</span>'; }
       function draftKey() { return state.batch ? 'nbj-cockpit-draft:' + value(state.batch, 'id', 'id', '') : ''; }
+      function dailyOperationConfirmKey(plan) { var key = 'nbj-daily-operation-confirm:' + value(state.batch, 'id', 'id', '') + ':' + String(plan.id || ''); var existing = localStorage.getItem(key); if (existing) return existing; var created = uuid(); localStorage.setItem(key, created); return created; }
       function observationPayload() {
         return { dayIndex: number(value(state.batch, 'currentDayIndex', 'current_day_index', 0), 0), dayAge: age(), effectiveHeads: number($('heads').value || currentHeads(), currentHeads()), actualPowderGrams: $('actualPowder').value === '' ? null : number($('actualPowder').value, 0), creepGrade: $('creepGrade').value || 'none', creepValue: creepValue($('creepGrade').value || 'none'), diarrheaGrade: $('diarrhea').value || 'none', waterState: $('waterState').value || 'closed' };
       }
@@ -389,28 +438,92 @@
       function closeDialog() { var active = state.dialog; if (!active) return; var scrim = $('scrim'); active.element.classList.remove('open'); active.element.setAttribute('aria-hidden', 'true'); scrim.classList.remove('open'); document.body.classList.remove('modal-open'); state.dialog = null; clearTimeout(state.dialogCloseTimer); state.dialogCloseTimer = setTimeout(function () { if (!state.dialog || state.dialog.element !== active.element) active.element.hidden = true; if (!state.dialog) scrim.hidden = true; }, 320); if (active.trigger && typeof active.trigger.focus === 'function') active.trigger.focus({ preventScroll: true }); }
       function trapFocus(event, dialog) { if (event.key !== 'Tab') return; var nodes = Array.from(dialog.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[href],[tabindex="0"]')); if (!nodes.length) return; var firstNode = nodes[0]; var lastNode = nodes[nodes.length - 1]; if (event.shiftKey && document.activeElement === firstNode) { event.preventDefault(); lastNode.focus(); } else if (!event.shiftKey && document.activeElement === lastNode) { event.preventDefault(); firstNode.focus(); } }
 
+      function deviceMode(today) { var source = today || {}; var setting = value(source, 'setting', 'setting', {}) || {}; return value(source, 'deviceMode', 'device_mode', value(source, 'effectiveMode', 'effective_mode', value(setting, 'mode', 'mode', ''))); }
+      function deviceSchedule(today) {
+        var source = today || {}; var mode = deviceMode(source); var windows = first(source.freeWindows, source.free_windows, value(source.setting || {}, 'freeWindows', 'free_windows', [])); if (mode === 'free_feeding' && Array.isArray(windows)) { var labels = windows.map(function (window) { var start = value(window || {}, 'startLocal', 'start_local', ''); var end = value(window || {}, 'endLocal', 'end_local', ''); return start && end ? String(start) + '–' + String(end) : ''; }).filter(Boolean); return { label: '自由采食时间段', entries: labels }; } var times = first(source.mealTimes, source.meal_times, []); return { label: '配奶时间点', entries: Array.isArray(times) ? times : [] }; }
       function renderTimeline() {
-        var timeline = $('timeline'); var times = state.today && (state.today.mealTimes || state.today.meal_times); if (!Array.isArray(times) || !times.length) { timeline.innerHTML = '<div class="empty">暂无设备程序</div>'; return; }
-        timeline.innerHTML = times.map(function (time) { return '<div class="timeline-item"><span class="timeline-time">' + escapeHtml(time) + '</span></div>'; }).join('');
+        var timeline = $('timeline'); var schedule = deviceSchedule(state.today); $('programTimeLabel').textContent = schedule.label; if (!schedule.entries.length) { timeline.innerHTML = '<div class="empty">暂无设备程序</div>'; return; }
+        timeline.innerHTML = schedule.entries.map(function (entry) { return '<div class="timeline-item"><span class="timeline-time">' + escapeHtml(entry) + '</span></div>'; }).join('');
       }
       function renderExceptions() {
         var actions = state.today && (state.today.exceptionActions || state.today.exception_actions); var panel = $('exceptionPanel'); if (!Array.isArray(actions) || !actions.length) { panel.hidden = true; return; } panel.hidden = false; $('exceptionList').innerHTML = actions.map(function (action) { return '<li>' + escapeHtml(eventText(action)) + '</li>'; }).join('');
       }
       function renderDevice() {
-        var today = state.today || {}; var single = value(today, 'singlePowderGrams', 'single_powder_grams', null); var count = value(today, 'mealCount', 'meal_count', null); var total = value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', null); var mode = value(today, 'deviceMode', 'device_mode', null); $('singlePowder').textContent = single == null ? '—' : number(single, 0); $('mealCount').textContent = count == null ? '—' : number(count, 0); $('dailyPowder').textContent = total == null ? '—' : number(total, 0); $('nextMeal').textContent = value(today, 'nextMealTime', 'next_meal_time', first(today.mealTimes, today.meal_times, [])[0]) || '—'; $('modePill').textContent = modeLabels[mode] || mode || '—'; $('programVersion').textContent = [value(today, 'modelVersion', 'model_version', ''), value(today, 'sopVersion', 'sop_version', '')].filter(Boolean).join(' · ') || '版本未返回'; $('programBasis').textContent = '程序总量 = 单次量 × 实际餐次'; $('deviceSource').textContent = value(today, 'planSource', 'plan_source', '模型程序'); renderTimeline(); renderExceptions(); }
+        var today = state.today || {}; var single = value(today, 'singlePowderGrams', 'single_powder_grams', null); var count = value(today, 'mealCount', 'meal_count', null); var total = value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', null); var suggestedTotal = value(today, 'suggestedDailyPowderGrams', 'suggested_daily_powder_grams', total); var suggestedCount = value(today, 'suggestedDailyMealCount', 'suggested_daily_meal_count', 12); var mode = deviceMode(today); var freeFeeding = mode === 'free_feeding'; $('singlePowderStat').hidden = freeFeeding; $('dailyPowderLabel').textContent = freeFeeding ? '建议单日下粉总量（' + number(suggestedCount, 12) + '次）' : '程序总量'; $('singlePowder').textContent = single == null ? '—' : number(single, 0); $('mealCount').textContent = count == null ? '—' : number(count, 0); $('dailyPowder').textContent = (freeFeeding ? suggestedTotal : total) == null ? '—' : number(freeFeeding ? suggestedTotal : total, 0); $('nextMeal').textContent = value(today, 'nextMealTime', 'next_meal_time', first(today.mealTimes, today.meal_times, [])[0]) || '—'; $('modePill').textContent = modeLabels[mode] || mode || '—'; $('programVersion').textContent = [value(today, 'modelVersion', 'model_version', ''), value(today, 'sopVersion', 'sop_version', '')].filter(Boolean).join(' · ') || '版本未返回'; $('programBasis').textContent = freeFeeding ? '建议总量按冻结模型日总量归一化' : '程序总量 = 单次量 × 实际餐次'; $('deviceSource').textContent = value(today, 'planSource', 'plan_source', '模型程序'); renderTimeline(); renderExceptions(); }
       function renderRows() {
         var body = $('dailyRows'); var rows = Array.isArray(state.records) ? state.records : []; if (!rows.length) { body.innerHTML = '<tr><td colspan="13" class="empty">暂无日记录</td></tr>'; return; }
         body.innerHTML = rows.slice().sort(function (a, b) { return number(value(a, 'dayIndex', 'day_index', 0), 0) - number(value(b, 'dayIndex', 'day_index', 0), 0); }).map(function (row) { var times = first(value(row, 'mealTimes', 'meal_times', null), []); var timeText = Array.isArray(times) ? times.join('、') : String(times || '—'); var mode = modeLabels[value(row, 'deviceMode', 'device_mode', '')] || value(row, 'deviceMode', 'device_mode', '—'); var estimatedWeight = value(row, 'estimatedAverageWeightKg', 'estimated_average_weight_kg', null); return '<tr><td>第' + (number(value(row, 'dayIndex', 'day_index', 0), 0) + 1) + '天</td><td><strong>' + escapeHtml(value(row, 'dayAge', 'day_age', '—')) + '</strong></td><td>' + (estimatedWeight == null ? '—' : escapeHtml(number(estimatedWeight, 0).toFixed(3)) + ' kg') + '</td><td>' + escapeHtml(value(row, 'effectiveHeads', 'effective_heads', '—')) + '</td><td>' + escapeHtml(mode) + '</td><td>' + escapeHtml(value(row, 'singlePowderGrams', 'single_powder_grams', '—')) + ' g</td><td>' + escapeHtml(value(row, 'mealCount', 'meal_count', '—')) + '</td><td>' + escapeHtml(timeText) + '</td><td>' + escapeHtml(value(row, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')) + ' g</td><td>' + escapeHtml(value(row, 'actualPowderGrams', 'actual_powder_grams', '—')) + ' g</td><td>' + escapeHtml(creepLabels[value(row, 'creepGrade', 'creep_grade', 'none')] || '无') + '</td><td>' + escapeHtml(diarrheaLabels[value(row, 'diarrheaGrade', 'diarrhea_grade', 'none')] || '无') + '</td><td>' + escapeHtml(waterLabels[value(row, 'waterState', 'water_state', 'closed')] || value(row, 'waterState', 'water_state', '—')) + '</td></tr>'; }).join('');
       }
+      function renderMode() {
+        var timedButton = $('timedModeButton'); var freeButton = $('freeModeButton'); var message = $('modeMessage'); var selectedLabel = $('selectedModeLabel'); var effectiveLabel = $('effectiveModeLabel');
+        if (!state.batch) { selectedLabel.textContent = '等待批次'; effectiveLabel.hidden = true; timedButton.setAttribute('aria-pressed', 'false'); freeButton.setAttribute('aria-pressed', 'false'); timedButton.disabled = true; freeButton.disabled = true; message.className = 'mode-message'; message.hidden = true; message.textContent = ''; return; }
+        var selected = selectedMode(); var effective = effectiveMode(); var firstDayLocked = isFirstBatchDay(); var completed = value(state.batch, 'status', 'status', 'active') === 'completed'; var available = value(state.batch, 'availableModes', 'available_modes', ['timed_quantity', 'free_feeding']); if (!Array.isArray(available) || !available.length) available = ['timed_quantity', 'free_feeding'];
+        selectedLabel.textContent = modeLabels[selected] || '未选择'; timedButton.setAttribute('aria-pressed', selected === 'timed_quantity' ? 'true' : 'false'); freeButton.setAttribute('aria-pressed', selected === 'free_feeding' ? 'true' : 'false'); timedButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('timed_quantity') < 0; freeButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('free_feeding') < 0;
+        effectiveLabel.hidden = effective === selected; effectiveLabel.textContent = '今日执行：' + (modeLabels[effective] || effective);
+        message.className = 'mode-message'; message.hidden = false;
+        if (state.modeBusy) message.textContent = '正在切换并重新读取批次状态……';
+        else if (firstDayLocked) { message.className += ' warning'; message.textContent = '首日固定执行 17:00 / 20:00 / 23:00 / 02:00 / 05:00 / 08:00 六次定时定量程序，不可切换。'; }
+        else if (completed) message.textContent = '批次已结束，模式只读。';
+        else if (effective !== selected) { message.className += ' warning'; message.textContent = '已选择' + (modeLabels[selected] || selected) + '，今日因控奶或异常阻断按' + (modeLabels[effective] || effective) + '执行；存储的两套模板均未改动。'; }
+        else { message.hidden = true; message.textContent = ''; }
+      }
+      function operationWindowText(window) {
+        if (!window) return '—';
+        var suffix = number(window.endDayOffset, 0) === 1 ? ' 次日' : '';
+        return String(window.startLocal || '—') + '–' + String(window.endLocal || '—') + suffix;
+      }
+      function renderTodayOperations() {
+        var plan = state.todayOperations;
+        var confirmation = state.todayOperationsConfirmation;
+        var list = $('todayOperationsList');
+        var meta = $('todayOperationsMeta');
+        var pill = $('todayOperationsPill');
+        var status = $('todayOperationsStatus');
+        var confirmButton = $('confirmTodayOperationsBtn');
+        meta.hidden = true; meta.textContent = ''; status.hidden = true; status.textContent = '';
+        if (!state.batch) {
+          pill.textContent = '待载入'; pill.className = 'tag tag-blue';
+          list.innerHTML = '<li class="empty">暂无当日操作</li>';
+          status.className = 'operation-confirm-status';
+          confirmButton.hidden = false; confirmButton.disabled = true; confirmButton.textContent = '确认今日操作已完成';
+          return;
+        }
+        if (!plan) {
+          pill.textContent = '载入中'; pill.className = 'tag tag-blue';
+          list.innerHTML = '<li class="empty">当日操作尚未载入</li>';
+          status.className = 'operation-confirm-status';
+          confirmButton.hidden = false; confirmButton.disabled = true; confirmButton.textContent = '确认今日操作已完成';
+          return;
+        }
+        var operations = Array.isArray(plan.operations) ? plan.operations : [];
+        pill.textContent = plan.status === 'confirmed' ? '已确认' : '待确认';
+        pill.className = 'tag ' + (plan.status === 'confirmed' ? 'tag-green' : 'tag-amber');
+        list.innerHTML = operations.length ? operations.map(function (item) {
+          var notes = Array.isArray(item.safetyNotes) && item.safetyNotes.length ? item.safetyNotes[0] : '';
+          return '<li class="operation-row"><span class="operation-window">' + escapeHtml(operationWindowText(item.dueWindow)) + '</span><span class="operation-copy"><strong>' + escapeHtml(item.title || item.code || 'SOP 操作') + '</strong><span>' + escapeHtml(item.sopSection || '冻结 SOP') + '</span>' + (notes ? '<span class="operation-safety">' + escapeHtml(notes) + '</span>' : '') + '</span></li>';
+        }).join('') : '<li class="empty">该业务日没有待执行操作</li>';
+        if (plan.status === 'confirmed') {
+          var confirmer = confirmation && confirmation.confirmedBy === (state.user && state.user.id) ? (state.user.email || confirmation.confirmedBy) : (confirmation && confirmation.confirmedBy);
+          var confirmedAt = confirmation && confirmation.confirmedAt ? new Date(confirmation.confirmedAt).toLocaleString('zh-CN', { hour12: false }) : '';
+          status.className = 'operation-confirm-status confirmed';
+          confirmButton.hidden = true; confirmButton.disabled = true; confirmButton.textContent = '确认今日操作已完成';
+        } else {
+          status.className = 'operation-confirm-status';
+          confirmButton.hidden = false;
+          confirmButton.disabled = state.operationsBusy || !operations.length || value(state.batch, 'status', 'status', 'active') !== 'active';
+          confirmButton.textContent = state.operationsBusy ? '确认中…' : '确认今日操作已完成';
+        }
+      }
       function render() {
-        $('currentBatchLabel').textContent = state.batch ? batchLabel(state.batch) : '等待批次'; $('executedText').textContent = state.batch ? '当前日龄 ' + age() : '当前日龄 —'; $('advanceDayBtn').disabled = !state.batch || state.agentBusy; $('advanceDayBtn').textContent = state.batch ? '记录并进入下一日' : '请先选择批次'; $('dailySource').textContent = state.batch ? batchLabel(state.batch) + ' · ' + state.records.length + ' 天' : '批次记录'; renderDevice(); renderRows(); }
+        $('currentBatchLabel').textContent = state.batch ? batchLabel(state.batch) : '等待批次'; $('executedText').textContent = state.batch ? '当前日龄 ' + age() : '当前日龄 —'; $('advanceDayBtn').disabled = !state.batch || state.agentBusy || state.modeBusy || state.operationsBusy; $('advanceDayBtn').textContent = state.batch ? '记录并进入下一日' : '请先选择批次'; $('dailySource').textContent = state.batch ? batchLabel(state.batch) + ' · ' + state.records.length + ' 天' : '批次记录'; renderDevice(); renderMode(); renderTodayOperations(); renderRows(); }
 
       function replayContentTransition() { var page = document.querySelector('.page'); if (!page) return; page.classList.remove('content-refresh'); void page.offsetWidth; page.classList.add('content-refresh'); }
-      function applyBatchResponse(response) { state.batch = response.batch || state.batch; state.today = response.today || null; state.records = Array.isArray(response.records) ? response.records : []; if (response.agentSession) { state.agentSession = response.agentSession; if (Array.isArray(response.agentSession.messages)) { state.agentMessages = response.agentSession.messages; state.agentHistoryLoaded = true; } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } else { state.agentMessages = []; state.agentHistoryLoaded = false; } } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } state.currentBatchId = state.batch && value(state.batch, 'id', 'id', state.currentBatchId); state.batches = state.batches.map(function (batch) { return value(batch, 'id', 'id', '') === value(state.batch, 'id', 'id', '') ? state.batch : batch; }); renderAgentMessages(); render(); replayContentTransition(); }
-      async function loadBatch(batchId) { var response = await api('/api/batches/' + encodeURIComponent(batchId)); if (String(batchId) !== String(state.currentBatchId)) return false; applyBatchResponse(response); restoreDraft(); return true; }
-      async function loadBatches() { var response = await api('/api/batches'); state.batches = Array.isArray(response.batches) ? response.batches : []; state.currentBatchId = response.currentBatchId || (state.batches[0] && value(state.batches[0], 'id', 'id', null)); if (state.currentBatchId) await loadBatch(state.currentBatchId); else { state.batch = null; state.today = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); } renderBatchMenu(); }
-      async function selectBatch(batchId) { closeBatchMenu(); if (!batchId || String(batchId) === String(state.currentBatchId)) return; state.currentBatchId = batchId; state.batch = null; state.today = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); try { var loaded = await loadBatch(batchId); if (loaded && String(batchId) === String(state.currentBatchId)) showToast('已切换批次'); } catch (error) { if (String(batchId) === String(state.currentBatchId)) showToast(error.message || '批次载入失败'); } }
-      async function createBatch(event) { event.preventDefault(); var button = $('createBatchBtn'); var error = $('newBatchError'); error.textContent = ''; button.disabled = true; button.setAttribute('aria-busy', 'true'); try { var payload = { name: $('newBatchName').value.trim(), room: $('newBatchRoom').value.trim(), startAge: number($('newBatchStartAge').value, 1), endAge: number($('newBatchEndAge').value, 30), headCount: number($('newBatchHeads').value, 1) }; var response = await api('/api/batches', { method: 'POST', body: payload }); state.currentBatchId = value(response.batch, 'id', 'id', null); state.batches = [response.batch].concat(state.batches.filter(function (batch) { return value(batch, 'id', 'id', '') !== state.currentBatchId; })); applyBatchResponse(response); closeDialog(); renderBatchMenu(); showToast('批次已创建'); } catch (err) { error.textContent = err.message || '创建失败'; } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }
+      function applyBatchResponse(response) { var previousBatchId = state.batch && value(state.batch, 'id', 'id', null); var previousDay = state.batch && value(state.batch, 'currentDayIndex', 'current_day_index', null); state.batch = response.batch || state.batch; if (!state.todayOperations || previousBatchId !== value(state.batch, 'id', 'id', null) || previousDay !== value(state.batch, 'currentDayIndex', 'current_day_index', null)) { state.todayOperations = null; state.todayOperationsConfirmation = null; } state.today = response.today || null; state.records = Array.isArray(response.records) ? response.records : []; if (response.agentSession) { state.agentSession = response.agentSession; if (Array.isArray(response.agentSession.messages)) { state.agentMessages = response.agentSession.messages; state.agentHistoryLoaded = true; } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } else { state.agentMessages = []; state.agentHistoryLoaded = false; } } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } state.currentBatchId = state.batch && value(state.batch, 'id', 'id', state.currentBatchId); state.batches = state.batches.map(function (batch) { return value(batch, 'id', 'id', '') === value(state.batch, 'id', 'id', '') ? state.batch : batch; }); renderAgentMessages(); render(); replayContentTransition(); }
+      async function loadTodayOperations(batchId) { if (!batchId) return false; var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/today-operations'); if (String(batchId) !== String(state.currentBatchId)) return false; state.todayOperations = response.plan || null; state.todayOperationsConfirmation = response.confirmation || null; render(); return true; }
+      async function loadBatch(batchId) { var response = await api('/api/batches/' + encodeURIComponent(batchId)); if (String(batchId) !== String(state.currentBatchId)) return false; applyBatchResponse(response); try { await loadTodayOperations(batchId); } catch (error) { if (String(batchId) === String(state.currentBatchId)) { state.todayOperations = null; render(); showToast(error.message || '当日操作载入失败'); } } restoreDraft(); return true; }
+      async function loadBatches() { var response = await api('/api/batches'); state.batches = Array.isArray(response.batches) ? response.batches : []; state.currentBatchId = response.currentBatchId || (state.batches[0] && value(state.batches[0], 'id', 'id', null)); if (state.currentBatchId) await loadBatch(state.currentBatchId); else { state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); } renderBatchMenu(); }
+      async function selectBatch(batchId) { closeBatchMenu(); if (!batchId || String(batchId) === String(state.currentBatchId)) return; state.currentBatchId = batchId; state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); try { var loaded = await loadBatch(batchId); if (loaded && String(batchId) === String(state.currentBatchId)) showToast('已切换批次'); } catch (error) { if (String(batchId) === String(state.currentBatchId)) showToast(error.message || '批次载入失败'); } }
+      async function createBatch(event) { event.preventDefault(); var button = $('createBatchBtn'); var error = $('newBatchError'); error.textContent = ''; button.disabled = true; button.setAttribute('aria-busy', 'true'); try { var payload = { name: $('newBatchName').value.trim(), room: $('newBatchRoom').value.trim(), startAge: number($('newBatchStartAge').value, 1), endAge: number($('newBatchEndAge').value, 30), headCount: number($('newBatchHeads').value, 1) }; var response = await api('/api/batches', { method: 'POST', body: payload }); state.currentBatchId = value(response.batch, 'id', 'id', null); state.batches = [response.batch].concat(state.batches.filter(function (batch) { return value(batch, 'id', 'id', '') !== state.currentBatchId; })); applyBatchResponse(response); await loadTodayOperations(state.currentBatchId); closeDialog(); renderBatchMenu(); showToast('批次已创建'); } catch (err) { error.textContent = err.message || '创建失败'; } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }
       function openNewBatch() { $('newBatchName').value = '批次_' + new Date().toLocaleDateString('zh-CN'); $('newBatchRoom').value = ''; $('newBatchStartAge').value = state.batch ? String(number(value(state.batch, 'startAge', 'start_age', 3), 3)) : '3'; $('newBatchEndAge').value = '30'; $('newBatchHeads').value = String(currentHeads() || ''); $('newBatchError').textContent = ''; openDialog($('batchSurface'), $('historyBtn')); }
 
       function creepValue(key) { return ({ none: 0, low: 10, medium: 45, high: 80, excellent: 130 })[key] == null ? 0 : ({ none: 0, low: 10, medium: 45, high: 80, excellent: 130 })[key]; }
@@ -427,15 +540,42 @@
 
       function saveTableImage() { var table = $('dailyTable'); var rows = Array.from(table.querySelectorAll('tr')); var cellRows = rows.map(function (row) { return Array.from(row.children).map(function (cell) { return cell.textContent.trim(); }); }); var widths = [90, 55, 90, 75, 90, 80, 55, 260, 100, 100, 65, 65, 65]; var rowHeight = 36; var width = widths.reduce(function (a, b) { return a + b; }, 0); var height = rowHeight * cellRows.length + 24; var svgRows = cellRows.map(function (cells, rowIndex) { var x = 0; var y = rowIndex * rowHeight + 24; return cells.map(function (cell, index) { var w = widths[index] || 100; var fill = rowIndex === 0 ? '#f2f2f7' : '#ffffff'; var text = escapeHtml(cell.length > 42 ? cell.slice(0, 42) + '…' : cell); var out = '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + rowHeight + '" fill="' + fill + '" stroke="#d8d8dd"/><text x="' + (x + 8) + '" y="' + (y + 23) + '" font-family="Arial,sans-serif" font-size="12" fill="#1d1d1f">' + text + '</text>'; x += w; return out; }).join(''); }).join(''); var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><rect width="100%" height="100%" fill="#ffffff"/><text x="12" y="16" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#1d1d1f">奶爸机每日明细</text>' + svgRows + '</svg>'; var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }); var link = document.createElement('a'); link.download = '奶爸机每日明细.svg'; link.href = URL.createObjectURL(blob); link.click(); setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000); showToast('每日明细图片已保存'); }
       function bindLongPress() { var target = $('dailyTableWrap'); target.addEventListener('pointerdown', function (event) { if (event.pointerType === 'mouse' && event.button !== 0) return; state.longPressStart = { x: event.clientX, y: event.clientY }; clearTimeout(state.longPressTimer); state.longPressTimer = setTimeout(function () { state.longPressStart = null; if (navigator.vibrate) navigator.vibrate(12); saveTableImage(); }, 650); }); ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (name) { target.addEventListener(name, function () { clearTimeout(state.longPressTimer); state.longPressStart = null; }); }); target.addEventListener('pointermove', function (event) { if (state.longPressStart && Math.hypot(event.clientX - state.longPressStart.x, event.clientY - state.longPressStart.y) > 10) { clearTimeout(state.longPressTimer); state.longPressStart = null; } }); }
-      function copySetting() { var today = state.today || {}; var times = first(today.mealTimes, today.meal_times, []); var text = ['单次下粉：' + (value(today, 'singlePowderGrams', 'single_powder_grams', '—')) + ' g', '程序总量：' + (value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')) + ' g', '时间点：' + (Array.isArray(times) ? times.join('、') : times)].join('\n'); navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).then(function () { showToast('设备设定已复制'); }).catch(function () { showToast('复制失败'); }) : showToast('浏览器不支持复制'); }
-      async function advanceDay() { if (!state.batch || state.agentBusy) return; var button = $('advanceDayBtn'); var observation = observationPayload(); var expectedRevision = number(value(state.batch, 'revision', 'revision', 0), 0); state.agentBusy = true; button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '推进中…'; try { var response = await api('/api/batches/' + encodeURIComponent(value(state.batch, 'id', 'id', '')) + '/advance', { method: 'POST', body: { expectedRevision: expectedRevision, observation: observation, idempotencyKey: uuid() } }); localStorage.removeItem(draftKey()); applyBatchResponse(response); restoreDraft(); showToast('已进入下一日'); } catch (error) { if (error.code === 'NBJ_BATCH_STALE') showToast('批次已更新，请刷新后重试'); else showToast(error.message || '推进失败'); } finally { state.agentBusy = false; button.removeAttribute('aria-busy'); render(); } }
+      function copySetting() { var today = state.today || {}; var schedule = deviceSchedule(today); var freeFeeding = deviceMode(today) === 'free_feeding'; var suggestion = value(today, 'suggestedDailyPowderGrams', 'suggested_daily_powder_grams', value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')); var count = value(today, 'suggestedDailyMealCount', 'suggested_daily_meal_count', 12); var text = (freeFeeding ? ['建议单日下粉总量（' + number(count, 12) + '次）：' + suggestion + ' g'] : ['单次下粉：' + (value(today, 'singlePowderGrams', 'single_powder_grams', '—')) + ' g', '程序总量：' + (value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')) + ' g']).concat([schedule.label + '：' + (schedule.entries.length ? schedule.entries.join('、') : '—')]).join('\n'); navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).then(function () { showToast('设备设定已复制'); }).catch(function () { showToast('复制失败'); }) : showToast('浏览器不支持复制'); }
+      async function confirmTodayOperations() {
+        if (!state.batch || !state.todayOperations || state.todayOperations.status === 'confirmed' || state.operationsBusy) return;
+        var batchId = value(state.batch, 'id', 'id', '');
+        var plan = state.todayOperations;
+        state.operationsBusy = true; render();
+        try {
+          var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/today-operations/confirm', {
+            method: 'POST',
+            body: { planId: plan.id, operationsSha256: plan.operationsSha256, idempotencyKey: dailyOperationConfirmKey(plan) },
+          });
+          if (String(batchId) !== String(state.currentBatchId)) return;
+          state.todayOperations = response.plan || plan;
+          state.todayOperationsConfirmation = response.confirmation || state.todayOperationsConfirmation;
+          showToast(response.replayed ? '今日操作已确认' : '今日操作已确认并留存审计记录');
+        } catch (error) {
+          if (String(batchId) !== String(state.currentBatchId)) return;
+          if (error.code === 'NBJ_DAILY_OPERATION_PLAN_STALE') {
+            try { await loadTodayOperations(batchId); } catch (_) {}
+            showToast('当日操作已更新，请核对后重试');
+          } else if (error.code === 'NBJ_AUTH_REQUIRED') showToast('登录已失效，请重新登录');
+          else showToast(error.message || '今日操作确认失败');
+        } finally {
+          state.operationsBusy = false;
+          if (String(batchId) === String(state.currentBatchId)) render();
+        }
+      }
+      async function advanceDay() { if (!state.batch || state.agentBusy || state.operationsBusy) return; var button = $('advanceDayBtn'); var batchId = value(state.batch, 'id', 'id', ''); var observation = observationPayload(); var expectedRevision = number(value(state.batch, 'revision', 'revision', 0), 0); state.agentBusy = true; button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = '推进中…'; try { var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/advance', { method: 'POST', body: { expectedRevision: expectedRevision, observation: observation, idempotencyKey: uuid() } }); localStorage.removeItem(draftKey()); applyBatchResponse(response); if (String(batchId) === String(state.currentBatchId)) await loadTodayOperations(batchId); restoreDraft(); showToast('已进入下一日'); } catch (error) { if (error.code === 'NBJ_BATCH_STALE') showToast('批次已更新，请刷新后重试'); else showToast(error.message || '推进失败'); } finally { state.agentBusy = false; button.removeAttribute('aria-busy'); render(); } }
+      async function switchFeedingMode(mode) { if (!state.batch || state.modeBusy) return; if (mode !== 'timed_quantity' && mode !== 'free_feeding') { showToast('不支持该饲喂模式'); return; } if (isFirstBatchDay()) { showToast('首日固定六次定时定量程序，不可切换'); return; } if (selectedMode() === mode) { showToast('当前已选择' + modeLabels[mode]); return; } var batchId = value(state.batch, 'id', 'id', ''); var expectedRevision = number(value(state.batch, 'revision', 'revision', 0), 0); state.modeBusy = true; render(); try { var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/mode', { method: 'POST', body: { mode: mode, expectedRevision: expectedRevision, idempotencyKey: uuid() } }); if (String(batchId) !== String(state.currentBatchId)) return; applyBatchResponse(response); showToast('已切换为' + modeLabels[mode]); } catch (error) { if (String(batchId) !== String(state.currentBatchId)) return; if (error.code === 'NBJ_BATCH_STALE') { try { await loadBatch(batchId); } catch (_) {} showToast('批次已更新，已刷新状态，请重新选择'); } else if (error.code === 'NBJ_BATCH_MODE_FIRST_DAY_LOCKED') showToast('首日固定六次定时定量程序，不可切换'); else if (error.code === 'NBJ_BATCH_MODE_INVALID') showToast('不支持该饲喂模式'); else if (error.code === 'NBJ_AUTH_REQUIRED') showToast('登录已失效，请重新登录'); else showToast('模式切换失败，请刷新后重试'); } finally { state.modeBusy = false; if (String(batchId) === String(state.currentBatchId)) render(); } }
       function saveData(event) { event.preventDefault(); if (!state.batch) { showToast('请先选择批次'); return; } saveDraft(); $('quickMessage').textContent = '草稿已保存'; showToast('草稿已保存'); if ($('diarrhea').value !== 'none') openAgent('已录入腹泻，请给出具体设备操作。'); }
       async function login(event) { event.preventDefault(); var button = $('loginBtn'); $('loginError').textContent = ''; button.disabled = true; button.setAttribute('aria-busy', 'true'); try { var response = await api('/api/auth/login', { method: 'POST', body: { email: $('loginEmail').value.trim(), password: $('loginPassword').value } }); state.user = response.user || null; setLoggedIn(true); await loadBatches(); } catch (error) { $('loginError').textContent = error.message || '登录失败'; } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }
       async function logout() { try { await api('/api/auth/logout', { method: 'POST' }); } catch (_) {} state.user = null; state.batch = null; state.batches = []; state.currentBatchId = null; setLoggedIn(false); }
       async function refresh() { try { setOnline(true); await loadBatches(); showToast('已刷新'); } catch (error) { setOnline(false); showToast(error.message || '刷新失败'); } }
       async function boot() { try { var session = await api('/api/auth/session'); state.user = session.user || null; setLoggedIn(true); await loadBatches(); } catch (error) { setLoggedIn(false); if (error.status && error.status !== 401) $('loginError').textContent = error.message || '服务不可用'; } }
 
-      $('loginForm').addEventListener('submit', login); $('logoutBtn').addEventListener('click', logout); $('refreshBtn').addEventListener('click', refresh); $('currentBatchBtn').addEventListener('click', toggleBatchMenu); $('historyBtn').addEventListener('click', openNewBatch); $('closeBatchBtn').addEventListener('click', closeDialog); $('newBatchView').addEventListener('submit', createBatch); $('agentLauncher').addEventListener('click', function () { openAgent(); }); $('closeAgentBtn').addEventListener('click', closeDialog); $('scrim').addEventListener('click', closeDialog); $('agentForm').addEventListener('submit', sendAgent); $('quickForm').addEventListener('submit', saveData); $('advanceDayBtn').addEventListener('click', advanceDay); $('nextDayBtn').addEventListener('click', function () { openAgent('只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。'); }); $('saveTableBtn').addEventListener('click', saveTableImage); $('copySettingBtn').addEventListener('click', copySetting);
+      $('loginForm').addEventListener('submit', login); $('logoutBtn').addEventListener('click', logout); $('refreshBtn').addEventListener('click', refresh); $('currentBatchBtn').addEventListener('click', toggleBatchMenu); $('historyBtn').addEventListener('click', openNewBatch); $('closeBatchBtn').addEventListener('click', closeDialog); $('newBatchView').addEventListener('submit', createBatch); $('agentLauncher').addEventListener('click', function () { openAgent(); }); $('closeAgentBtn').addEventListener('click', closeDialog); $('scrim').addEventListener('click', closeDialog); $('agentForm').addEventListener('submit', sendAgent); $('quickForm').addEventListener('submit', saveData); $('confirmTodayOperationsBtn').addEventListener('click', confirmTodayOperations); $('advanceDayBtn').addEventListener('click', advanceDay); $('timedModeButton').addEventListener('click', function () { switchFeedingMode('timed_quantity'); }); $('freeModeButton').addEventListener('click', function () { switchFeedingMode('free_feeding'); }); $('nextDayBtn').addEventListener('click', function () { openAgent('只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。'); }); $('saveTableBtn').addEventListener('click', saveTableImage); $('copySettingBtn').addEventListener('click', copySetting);
       document.addEventListener('pointerdown', function (event) { if (batchMenuIsOpen() && !$('batchMenu').contains(event.target) && !$('currentBatchBtn').contains(event.target)) closeBatchMenu(); });
       document.addEventListener('keydown', function (event) { if (event.key === 'Escape') { if (state.dialog) closeDialog(); else if (batchMenuIsOpen()) closeBatchMenu(); return; } if (state.dialog) trapFocus(event, state.dialog.element); });
       bindLongPress(); render(); boot();

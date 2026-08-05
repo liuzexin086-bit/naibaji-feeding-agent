@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -8,6 +9,8 @@ import {
   LocalStoreError,
   type LocalStore,
 } from "../../src/local-db/index.js";
+import { digestFrozenSopSnapshot } from "../../src/decision/batch-decision-service.js";
+import { loadFrozenBatchDecisionContext } from "../../src/decision/batch-decision-service.js";
 import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
 
 const cleanupDirectories: string[] = [];
@@ -72,6 +75,24 @@ function decision(
   };
 }
 
+function dailyOperations() {
+  return [{
+    code: "daily_patrol",
+    title: "日常巡栏",
+    dueWindow: { startLocal: "09:00", endLocal: "10:00" },
+    sopSection: "SOP.日常巡栏",
+    requiredObservationFields: ["diarrheaGrade"],
+    safetyNotes: ["异常按 SOP 升级。"],
+  }];
+}
+
+function dailyOperationsSha256(operations: ReturnType<typeof dailyOperations>): string {
+  return createHash("sha256")
+    .update(JSON.stringify(operations).normalize("NFC"), "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
 describe("SQLite local store", () => {
   it("applies the migration idempotently with all required tables and indexes", () => {
     const { filename, store } = fileStore();
@@ -86,22 +107,101 @@ describe("SQLite local store", () => {
       "users",
       "batches",
       "daily_observations",
+      "daily_operation_plans",
+      "daily_operation_confirmations",
       "feeding_decisions",
       "agent_sessions",
       "agent_messages",
       "audit_events",
     ]));
     expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count).toBe(1);
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     const indexes = database.prepare(`
       SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
     `).all().map((row) => String(row.name));
     expect(indexes).toEqual(expect.arrayContaining([
       "batches_user_revision_idx",
       "daily_observations_batch_date_revision_idx",
+      "daily_operation_plans_batch_business_date_idx",
+      "daily_operation_confirmations_plan_idx",
       "feeding_decisions_batch_date_revision_idx",
       "agent_messages_session_batch_idx",
     ]));
     database.close();
+  });
+
+  it("backfills a missing frozen SOP digest once for legacy batches without changing their revision", () => {
+    const { filename, store } = fileStore();
+    const sopSnapshot = {
+      templateId: "legacy-sop",
+      version: "2026.08.04",
+      sourceSha256: "A".repeat(64),
+      collectionRevision: "legacy:1",
+      parserVersion: "sop-parser@1",
+      embeddingModel: "bge-m3",
+      config: { freeFeedingWindows: [{ startLocal: "09:00", endLocal: "18:00" }] },
+    };
+    const legacyDevicePlan = {
+      version: "device-plan@legacy",
+      firstDay: { mode: "timed_quantity", mealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"] },
+      templates: {
+        timed_quantity: { mealTimes: ["09:00"], excludedMealTimes: [], precisionGrams: 1, reductionPriority: ["09:00"] },
+        free_feeding: {
+          windows: [{ startLocal: "00:00", endLocal: "23:59" }],
+          stageConditions: {},
+          exceptionBlockers: [],
+        },
+      },
+    };
+    const legacyDeviceDigest = createHash("sha256")
+      .update(JSON.stringify(legacyDevicePlan).normalize("NFC"), "utf8")
+      .digest("hex").toUpperCase();
+    const legacyConfig = {
+      startAge: 3,
+      endAge: 12,
+      effectiveHeads: 20,
+      startWeight: 1.5,
+      planStartDate: "2026-08-04",
+      controlStartDay: -1,
+      selectedMode: "free_feeding",
+      sopTemplate: sopSnapshot,
+      devicePlanSnapshot: { ...legacyDevicePlan, sha256: legacyDeviceDigest },
+    };
+    store.createBatch({
+      userId: "user-a",
+      batchId: "legacy-batch",
+      revision: 7,
+      currentDay: 2,
+      data: { config: legacyConfig, records: [] },
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.prepare("UPDATE batches SET data_json = ? WHERE user_id = ? AND id = ?").run(
+      JSON.stringify({ config: legacyConfig, records: [] }),
+      "user-a",
+      "legacy-batch",
+    );
+    legacy.exec("DELETE FROM schema_migrations; INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-08-04T00:00:00.000Z');");
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    const batch = upgraded.getBatch("user-a", "legacy-batch")!;
+    const frozen = ((batch.data.config as Record<string, unknown>).sopTemplate as Record<string, unknown>);
+    const devicePlan = ((batch.data.config as Record<string, unknown>).devicePlanSnapshot as Record<string, unknown>);
+    expect(batch).toMatchObject({ revision: 7, currentDay: 2 });
+    expect(frozen.snapshotSha256).toBe(digestFrozenSopSnapshot(sopSnapshot));
+    expect(((devicePlan.templates as Record<string, unknown>).free_feeding as Record<string, unknown>).slots)
+      .toHaveLength(8);
+    expect(loadFrozenBatchDecisionContext({
+      batchId: batch.batchId,
+      revision: batch.revision,
+      currentDayIndex: batch.currentDay,
+      config: batch.data.config as Record<string, unknown>,
+      records: batch.data.records as Record<string, unknown>[],
+    }).devicePlan.templates.free_feeding.windows).toEqual([{ startLocal: "00:00", endLocal: "23:59" }]);
+    upgraded.close();
   });
 
   it("isolates batches and safely binds SQL-injection-shaped identifiers", () => {
@@ -197,6 +297,73 @@ describe("SQLite local store", () => {
 
     const database = new DatabaseSync(filename, { readOnly: true });
     expect(database.prepare("SELECT count(*) AS count FROM daily_observations").get()?.count).toBe(1);
+    database.close();
+  });
+
+  it("materializes one immutable daily plan and confirms it without changing the batch revision", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({ userId: "user-a", batchId: "batch-operations", revision: 6 });
+    const operations = dailyOperations();
+    const operationsSha256 = dailyOperationsSha256(operations);
+    const planInput = {
+      userId: "user-a",
+      batchId: "batch-operations",
+      businessDate: "2026-08-04",
+      basedOnBatchRevision: 6,
+      sopTemplateId: "frozen-sop-v1",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v1",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity" as const,
+      effectiveMode: "timed_quantity" as const,
+      operations,
+      operationsSha256,
+    };
+    const first = store.ensureDailyOperationPlan(planInput);
+    const replay = store.ensureDailyOperationPlan({ ...planInput, basedOnBatchRevision: 999 });
+    expect(replay).toEqual(first);
+    expect(first.status).toBe("pending");
+
+    const confirmed = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-operations",
+      businessDate: first.businessDate,
+      planId: first.id,
+      operationsSha256: first.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-operations-1",
+    });
+    const dayReplay = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-operations",
+      businessDate: first.businessDate,
+      planId: first.id,
+      operationsSha256: first.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-operations-2",
+    });
+    expect(confirmed.replayed).toBe(false);
+    expect(dayReplay).toEqual({ confirmation: confirmed.confirmation, replayed: true });
+    expect(store.getDailyOperationPlan("user-a", "batch-operations", first.businessDate))
+      .toMatchObject({ id: first.id, status: "confirmed", operationsSha256 });
+    expect(store.getBatch("user-a", "batch-operations")?.revision).toBe(6);
+    store.close();
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const audit = database.prepare(`
+      SELECT action, details_json FROM audit_events WHERE batch_id = ?
+    `).get("batch-operations") as { action: string; details_json: string };
+    expect(audit.action).toBe("daily_operations.confirmed");
+    expect(JSON.parse(audit.details_json)).toMatchObject({
+      planId: first.id,
+      businessDate: "2026-08-04",
+      operationsSha256,
+      basedOnBatchRevision: 6,
+      sopTemplateId: "frozen-sop-v1",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v1",
+      devicePlanSha256: "B".repeat(64),
+    });
     database.close();
   });
 

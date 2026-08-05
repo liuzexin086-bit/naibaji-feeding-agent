@@ -1,9 +1,36 @@
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { computeDayDecision } from "../decision/core.js";
+import {
+  computeFrozenBatchDecision,
+  digestFrozenSopSnapshot,
+  loadFrozenBatchDecisionContext,
+} from "../decision/batch-decision-service.js";
+import {
+  defaultFreeFeedingSlots,
+  enabledFreeFeedingWindows,
+  normalizeFreeFeedingSlots,
+} from "../decision/free-feeding-slots.js";
+import {
+  buildDailyOperationItems,
+  digestDailyOperationItems,
+} from "../operations/daily-operation-plan.js";
 import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
-import type { LocalBatch, LocalUser, LocalUserRole } from "../shared/local-store-contract.js";
+import type { FeedingMode } from "../shared/agent-v2-contract.js";
+import type {
+  DevicePlanSnapshot,
+  DailyOperationPlan,
+  EnsureDailyOperationPlanInput,
+  FreeFeedingTemplateSnapshot,
+  LocalBatch,
+  LocalSopTemplate,
+  LocalUser,
+  LocalUserRole,
+  TimedQuantityTemplateSnapshot,
+} from "../shared/local-store-contract.js";
+import { ChromaKnowledgeIndex } from "../knowledge/chroma-index.js";
+import { DEFAULT_EMBEDDING_MODEL, SOP_PARSER_VERSION, sha256Text } from "../knowledge/sop-knowledge.js";
+import { MemoryKnowledgeIndex, publishSop } from "../knowledge/sop-publication.js";
 import {
   authenticateLocalUser,
   clearSessionCookie,
@@ -27,6 +54,17 @@ export const CREEP_VALUES = {
 } as const;
 
 export const DEFAULT_LOCAL_SOP_VERSION = "2026.08.03-v6-first-day-sop";
+export const DEFAULT_DEVICE_PLAN_VERSION = "device-plan@2026-08-04-v1";
+
+const FIRST_DAY_MEAL_TIMES = ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"];
+const TIMED_QUANTITY_MEAL_TIMES = [
+  "10:00", "14:00", "16:00", "18:00", "20:00",
+  "22:00", "02:00", "04:00", "06:00", "08:00",
+];
+const DEFAULT_REDUCTION_PRIORITY = [
+  "20:00", "16:00", "04:00", "14:00", "06:00",
+  "18:00", "02:00", "22:00", "10:00",
+];
 
 export const DEFAULT_SOP_CONFIG: Record<string, unknown> = {
   teachingProgramEnabled: true,
@@ -43,6 +81,11 @@ export const DEFAULT_SOP_CONFIG: Record<string, unknown> = {
   initialMealCount: 10,
   excludedMealTimes: ["00:00", "12:00"],
   productionProgramStartLocal: "09:00",
+  freeFeedingTemplate: {
+    windows: defaultFreeFeedingSlots(),
+    stageConditions: { earliestBatchDay: 1, requiresOperatorSelection: true },
+    exceptionBlockers: ["milk_control", "diarrhea", "refusal", "blockage", "probe_contamination", "curve_cap"],
+  },
 };
 
 type JsonObject = Record<string, unknown>;
@@ -51,6 +94,9 @@ interface LocalApiEnv {
   AGENT_GATEWAY_SECRET?: string;
   LOCAL_ADMIN_EMAIL?: string;
   LOCAL_ADMIN_PASSWORD?: string;
+  CHROMA_URL?: string;
+  EMBEDDING_BASE_URL?: string;
+  EMBEDDING_MODEL?: string;
 }
 
 function json(response: ServerResponse, body: unknown, status = 200, extra?: Record<string, string>): void {
@@ -71,6 +117,10 @@ function errorCode(error: unknown): string {
       LOCAL_STORE_USER_SELF_DELETE: "NBJ_USER_SELF_DELETE",
       LOCAL_STORE_USER_CONFIRM_MISMATCH: "NBJ_USER_CONFIRM_EMAIL_MISMATCH",
       LOCAL_STORE_LAST_ADMIN: "NBJ_LAST_ADMIN",
+      LOCAL_STORE_STALE_REVISION: "NBJ_BATCH_STALE",
+      LOCAL_STORE_BATCH_TERMINAL: "NBJ_BATCH_TERMINAL",
+      LOCAL_STORE_DAILY_OPERATION_CONFIRMED: "NBJ_SOP_MIGRATION_TODAY_CONFIRMED",
+      LOCAL_STORE_IDEMPOTENCY_CONFLICT: "NBJ_IDEMPOTENCY_CONFLICT",
       LOCAL_STORE_INVALID_INPUT: "NBJ_LOCAL_API_INVALID_INPUT",
     };
     return codes[error.code] ?? `NBJ_${error.code.replace(/^LOCAL_STORE_/, "")}`;
@@ -86,7 +136,10 @@ function sendError(response: ServerResponse, error: unknown): void {
     ? 401
     : code === "NBJ_ADMIN_REQUIRED"
       ? 403
-      : code === "NBJ_BATCH_STALE" || code === "NBJ_USER_EXISTS" || code === "NBJ_LAST_ADMIN"
+      : code === "NBJ_BATCH_STALE" || code === "NBJ_IDEMPOTENCY_CONFLICT" ||
+          code === "NBJ_BATCH_MODE_FIRST_DAY_LOCKED" || code === "NBJ_BATCH_TERMINAL" ||
+          code === "NBJ_SOP_MIGRATION_TODAY_CONFIRMED" ||
+          code === "NBJ_USER_EXISTS" || code === "NBJ_LAST_ADMIN"
         ? 409
         : code === "NBJ_BATCH_NOT_FOUND" || code === "NBJ_USER_NOT_FOUND"
           ? 404
@@ -154,6 +207,137 @@ function object(value: unknown, field: string): JsonObject {
   return value as JsonObject;
 }
 
+function feedingMode(value: unknown): FeedingMode {
+  if (value === "timed_quantity" || value === "free_feeding") return value;
+  throw new Error("NBJ_BATCH_MODE_INVALID");
+}
+
+function localTime(value: unknown, field: string): string {
+  if (typeof value !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) {
+    throw new Error(`NBJ_${field.toUpperCase()}_INVALID`);
+  }
+  return value;
+}
+
+function localTimeList(value: unknown, fallback: string[], field: string): string[] {
+  if (value === undefined) return [...fallback];
+  if (!Array.isArray(value)) throw new Error(`NBJ_${field.toUpperCase()}_INVALID`);
+  const times = value.map((item) => localTime(item, field));
+  if (new Set(times).size !== times.length) throw new Error(`NBJ_${field.toUpperCase()}_INVALID`);
+  return times;
+}
+
+function stringList(value: unknown, fallback: string[], field: string): string[] {
+  if (value === undefined) return [...fallback];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string" && item.trim())) {
+    throw new Error(`NBJ_${field.toUpperCase()}_INVALID`);
+  }
+  const result = value.map((item) => String(item).trim());
+  if (new Set(result).size !== result.length) throw new Error(`NBJ_${field.toUpperCase()}_INVALID`);
+  return result;
+}
+
+function buildDevicePlanSnapshot(sopConfig: JsonObject): DevicePlanSnapshot {
+  const timedInput = sopConfig.timedQuantityTemplate && typeof sopConfig.timedQuantityTemplate === "object" &&
+      !Array.isArray(sopConfig.timedQuantityTemplate)
+    ? sopConfig.timedQuantityTemplate as JsonObject
+    : {};
+  const mealTimes = localTimeList(timedInput.mealTimes, TIMED_QUANTITY_MEAL_TIMES, "timed_meal_times");
+  const excludedMealTimes = localTimeList(
+    timedInput.excludedMealTimes ?? sopConfig.excludedMealTimes,
+    ["00:00", "12:00"],
+    "excluded_meal_times",
+  );
+  const usableTimes = mealTimes.filter((time) => !excludedMealTimes.includes(time));
+  if (usableTimes.length === 0) throw new Error("NBJ_TIMED_MEAL_TIMES_INVALID");
+  const configuredPriority = localTimeList(
+    timedInput.reductionPriority,
+    DEFAULT_REDUCTION_PRIORITY,
+    "reduction_priority",
+  );
+  const reductionPriority = [
+    ...configuredPriority.filter((time) => usableTimes.includes(time)),
+    ...usableTimes.filter((time) => !configuredPriority.includes(time)).slice(0, -1),
+  ];
+  const timedQuantity: TimedQuantityTemplateSnapshot = {
+    mealTimes: usableTimes,
+    excludedMealTimes,
+    precisionGrams: finite(
+      timedInput.precisionGrams ?? sopConfig.devicePowderPrecisionGrams ?? 1,
+      "devicePowderPrecisionGrams",
+      0.1,
+      100,
+    ),
+    reductionPriority,
+  };
+
+  const freeInput = sopConfig.freeFeedingTemplate && typeof sopConfig.freeFeedingTemplate === "object" &&
+      !Array.isArray(sopConfig.freeFeedingTemplate)
+    ? sopConfig.freeFeedingTemplate as JsonObject
+    : {};
+  const slots = normalizeFreeFeedingSlots(freeInput.windows ?? defaultFreeFeedingSlots());
+  const freeFeeding: FreeFeedingTemplateSnapshot = {
+    slots,
+    windows: enabledFreeFeedingWindows(slots),
+    stageConditions: freeInput.stageConditions && typeof freeInput.stageConditions === "object" &&
+        !Array.isArray(freeInput.stageConditions)
+      ? structuredClone(freeInput.stageConditions as JsonObject)
+      : { earliestBatchDay: 1, requiresOperatorSelection: true },
+    exceptionBlockers: stringList(
+      freeInput.exceptionBlockers,
+      ["milk_control", "diarrhea", "refusal", "blockage", "probe_contamination", "curve_cap"],
+      "exception_blockers",
+    ),
+  };
+  const version = typeof sopConfig.devicePlanVersion === "string" && sopConfig.devicePlanVersion.trim()
+    ? sopConfig.devicePlanVersion.trim()
+    : DEFAULT_DEVICE_PLAN_VERSION;
+  const immutable = {
+    version,
+    firstDay: { mode: "timed_quantity" as const, mealTimes: [...FIRST_DAY_MEAL_TIMES] },
+    templates: { timed_quantity: timedQuantity, free_feeding: freeFeeding },
+  };
+  return { ...immutable, sha256: sha256Text(JSON.stringify(immutable)) };
+}
+
+/** Keep the long-standing editor field names compatible with the frozen
+ * decision contract. The canonical keys are what a batch snapshot uses. */
+function normalizePublishedSopConfig(config: JsonObject): JsonObject {
+  const normalized: JsonObject = { ...config };
+  if (normalized.teachingFirstLocal === undefined && typeof normalized.preferredFirstTeachingLocal === "string") {
+    normalized.teachingFirstLocal = normalized.preferredFirstTeachingLocal;
+  }
+  if (normalized.teachingEndLocal === undefined && typeof normalized.teachingProgramEndLocal === "string") {
+    normalized.teachingEndLocal = normalized.teachingProgramEndLocal;
+  }
+  if (normalized.waterClosedUntilDayAge === undefined && typeof normalized.waterClosedBeforeAgeDays === "number") {
+    normalized.waterClosedUntilDayAge = normalized.waterClosedBeforeAgeDays;
+  }
+  const defaultFree = DEFAULT_SOP_CONFIG.freeFeedingTemplate as JsonObject;
+  const configuredFree = normalized.freeFeedingTemplate && typeof normalized.freeFeedingTemplate === "object" &&
+      !Array.isArray(normalized.freeFeedingTemplate)
+    ? normalized.freeFeedingTemplate as JsonObject
+    : {};
+  return {
+    ...DEFAULT_SOP_CONFIG,
+    ...normalized,
+    freeFeedingTemplate: { ...defaultFree, ...configuredFree },
+  };
+}
+
+function frozenSopFromTemplate(template: LocalSopTemplate): JsonObject {
+  const base = {
+    templateId: template.id,
+    version: template.version,
+    config: normalizePublishedSopConfig(template.config as JsonObject),
+    sourceSha256: template.sourceSha256,
+    collectionRevision: template.collectionRevision,
+    parserVersion: template.parserVersion,
+    embeddingModel: template.embeddingModel,
+  };
+  return { ...base, snapshotSha256: digestFrozenSopSnapshot(base) };
+}
+
 function addDays(dateLocal: string, days: number): string {
   const date = new Date(`${dateLocal}T00:00:00.000Z`);
   date.setUTCDate(date.getUTCDate() + days);
@@ -213,125 +397,67 @@ function modelRecords(records: JsonObject[]): JsonObject[] {
   });
 }
 
-function latestGrades(records: JsonObject[]): InternalCreepGrade[] {
-  return records.slice(-3).map((row) => internalGrade(row.creepGrade));
+function frozenContextOf(batch: LocalBatch) {
+  return loadFrozenBatchDecisionContext({
+    batchId: batch.batchId,
+    revision: batch.revision,
+    currentDayIndex: batch.currentDay,
+    config: configOf(batch),
+    records: modelRecords(recordsOf(batch)),
+  });
 }
 
 function batchPublic(batch: LocalBatch): JsonObject {
   const config = configOf(batch);
+  const context = frozenContextOf(batch);
+  const devicePlan = context.devicePlan;
   const initialHeads = Number(config.initialHeads ?? config.headCount ?? 0);
-  const effectiveHeads = Number(config.effectiveHeads ?? config.headCount ?? initialHeads);
+  const effectiveHeads = context.modelInput.headCount;
   return {
     id: batch.batchId,
     name: String(config.name ?? batch.batchId),
     room: String(config.room ?? ""),
-    startAge: Number(config.startAge ?? 3),
-    endAge: Number(config.endAge ?? 21),
+    startAge: context.modelInput.startAge,
+    endAge: context.modelInput.endAge,
     initialHeads,
     effectiveHeads,
-    startWeight: Number(config.startWeight ?? modelStandardWeight(Number(config.startAge ?? 3))),
+    startWeight: context.modelInput.startWeight,
     startWeightSource: String(config.startWeightSource ?? "model_age_standard"),
     currentDayIndex: batch.currentDay,
-    currentDayAge: Number(config.startAge ?? 3) + batch.currentDay,
+    currentDayAge: context.modelInput.startAge + batch.currentDay,
     status: batch.status,
     revision: batch.revision,
+    selectedMode: context.selectedMode,
+    sopTemplateId: context.sop.templateId,
+    sopVersion: context.sop.version,
+    sopSourceSha256: context.sop.sourceSha256,
+    sopCollectionRevision: context.sop.collectionRevision,
+    sopParserVersion: context.sop.parserVersion,
+    sopEmbeddingModel: context.sop.embeddingModel,
+    devicePlanVersion: devicePlan.version,
+    devicePlanSha256: devicePlan.sha256,
+    availableModes: ["timed_quantity", "free_feeding"],
     createdAt: batch.createdAt,
     updatedAt: batch.updatedAt,
   };
 }
 
-function templateConfig(batch: LocalBatch): { version: string; config: JsonObject } {
-  const config = configOf(batch);
-  const template = config.sopTemplate;
-  if (template && typeof template === "object" && !Array.isArray(template)) {
-    const row = template as JsonObject;
-    return {
-      version: String(row.version ?? DEFAULT_LOCAL_SOP_VERSION),
-      config: { ...DEFAULT_SOP_CONFIG, ...(row.config as JsonObject ?? {}) },
-    };
-  }
-  return { version: DEFAULT_LOCAL_SOP_VERSION, config: { ...DEFAULT_SOP_CONFIG } };
-}
-
-function firstDaySopQuantity(config: JsonObject): JsonObject {
-  const directTotal = finite(
-    config.teachingDirectTotalPowderGrams ?? 0,
-    "teachingDirectTotalPowderGrams",
-    0,
-  );
-  const perTwenty = finite(
-    config.teachingPowderGramsPerTwenty ?? 35,
-    "teachingPowderGramsPerTwenty",
-    0,
-  );
-  return {
-    ...(directTotal > 0 ? { directTotalPowderGrams: directTotal } : {}),
-    ...(perTwenty > 0 ? { powderGramsPerTwentyHeadsPerMeal: perTwenty } : {}),
-    mealCount: 6,
-  };
-}
-
 function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = batch.revision): JsonObject {
-  const config = configOf(batch);
-  const template = templateConfig(batch);
-  const startAge = integer(config.startAge ?? 3, "startAge", 1, 60);
-  const endAge = integer(config.endAge ?? 21, "endAge", startAge, 60);
-  const headCount = integer(config.effectiveHeads ?? config.headCount ?? 1, "headCount", 1, 100_000);
-  const dayAge = startAge + dayIndex;
-  const storedRecords = recordsOf(batch);
-  const latest = storedRecords.at(-1);
-  const controlStartDay = Number(config.controlStartDay ?? -1);
-  const modelInput = {
-    startAge,
-    endAge,
-    startWeight: finite(config.startWeight ?? modelStandardWeight(startAge), "startWeight", 0.1, 50),
-    headCount,
-    records: modelRecords(storedRecords),
-    controlStartDay,
-    dayAge,
-    dilutionRatio: String(config.dilutionRatio ?? "水:粉=6:1"),
-    devicePowderPrecisionGrams: finite(template.config.devicePowderPrecisionGrams ?? 1, "devicePowderPrecisionGrams", 0.1, 100),
-    programStartLocal: "09:00",
-  };
-  const decisionInput: JsonObject = {
-    revision,
-    batchId: batch.batchId,
-    dateLocal: addDays(String(config.planStartDate ?? batch.createdAt.slice(0, 10)), dayIndex),
-    calculationDate: addDays(String(config.planStartDate ?? batch.createdAt.slice(0, 10)), dayIndex),
-    sopVersion: template.version,
-    modelInput,
-    requestedMode: "timed_quantity",
-    requestedStatus: "active",
-    precisionGrams: modelInput.devicePowderPrecisionGrams,
-    creepFeedGradesLast3Days: latestGrades(storedRecords),
-    milkControlActive: controlStartDay >= 0 && dayIndex >= controlStartDay,
-    diarrheaGrades: latest?.diarrheaGrade
-      ? [String(latest.diarrheaGrade)]
-      : undefined,
-    exceptionSignals: {
-      refusal: latest?.feedingResponse === "refusal" || latest?.refusal === true,
-      blockage: latest?.deviceStatus === "blocked" || latest?.blockage === true,
-      probeContaminated:
-        latest?.deviceStatus === "probe_contaminated" ||
-        latest?.probeContaminated === true,
-    },
-  };
-  if (dayIndex === 0 && template.config.teachingProgramEnabled !== false) {
-    decisionInput.sop = firstDaySopQuantity(template.config);
-    decisionInput.teachingProgram = {
-      enabled: true,
-      firstTeachingLocal: String(template.config.teachingFirstLocal ?? "17:00"),
-      intervalHours: finite(template.config.teachingIntervalHours ?? 3, "teachingIntervalHours", 0.5, 12),
-      endLocal: String(template.config.teachingEndLocal ?? "08:00"),
-    };
-  }
-  const decision = computeDayDecision(decisionInput as never) as unknown as JsonObject;
+  const context = frozenContextOf(batch);
+  const canonical = computeFrozenBatchDecision(context, dayIndex, revision);
+  const decision = canonical.decision as unknown as JsonObject;
   const setting = object(decision.setting, "decision_setting");
   const exceptionActions = Array.isArray(decision.exceptionActions)
     ? decision.exceptionActions
     : [];
+  const dayAge = context.modelInput.startAge + dayIndex;
   return {
     ...decision,
+    selectedMode: canonical.selectedMode,
+    effectiveMode: canonical.effectiveMode,
+    sopRef: canonical.sopRef,
+    devicePlanRef: canonical.devicePlanRef,
+    freeFeedingBlockers: canonical.freeFeedingBlockers,
     setting,
     dayIndex,
     dayAge,
@@ -340,14 +466,165 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     estimatedEndWeightKg: Number(setting.estimatedEndWeightKg ?? 0),
     singlePowderGrams: Number(setting.singlePowderGrams ?? 0),
     mealCount: Number(setting.mealCount ?? 0),
+    suggestedDailyPowderGrams: Number(setting.suggestedDailyPowderGrams ?? 0),
+    suggestedDailyMealCount: Number(setting.suggestedDailyMealCount ?? 0),
     mealTimes: Array.isArray(setting.timedMeals)
       ? (setting.timedMeals as JsonObject[]).map((meal) => String(meal.timeLocal))
       : [],
+    freeWindows: Array.isArray(setting.freeWindows)
+      ? (setting.freeWindows as JsonObject[]).map((window) => ({
+        startLocal: String(window.startLocal ?? ""),
+        endLocal: String(window.endLocal ?? ""),
+      }))
+      : [],
     exceptionActions,
     modelVersion: String((decision.evidence as JsonObject | undefined)?.modelVersion ?? "feeding-model+V5-Lite"),
-    sopVersion: template.version,
-    waterState: dayAge < Number(template.config.waterClosedUntilDayAge ?? 12) ? "closed" : "open",
+    sopVersion: canonical.sopRef.version,
+    waterState: dayAge < Number(context.sop.config.waterClosedUntilDayAge) ? "closed" : "open",
     planWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
+  };
+}
+
+function dailyOperationPlanInputFor(userId: string, batch: LocalBatch): EnsureDailyOperationPlanInput {
+  const context = frozenContextOf(batch);
+  const canonical = computeFrozenBatchDecision(context, batch.currentDay, batch.revision);
+  const dateLocal = canonical.decision.dateLocal;
+  const operations = buildDailyOperationItems({
+    dayIndex: batch.currentDay,
+    dayAge: context.modelInput.startAge + batch.currentDay,
+    endAge: context.modelInput.endAge,
+    sopConfig: context.sop.config,
+  });
+  return {
+    userId,
+    batchId: batch.batchId,
+    businessDate: dateLocal,
+    basedOnBatchRevision: batch.revision,
+    sopTemplateId: canonical.sopRef.templateId,
+    sopSourceSha256: canonical.sopRef.sourceSha256,
+    devicePlanVersion: canonical.devicePlanRef.version,
+    devicePlanSha256: canonical.devicePlanRef.sha256,
+    selectedMode: canonical.selectedMode,
+    effectiveMode: canonical.effectiveMode,
+    operations,
+    operationsSha256: digestDailyOperationItems(operations),
+  };
+}
+
+function ensureCurrentDailyOperationPlan(
+  store: SqliteLocalStore,
+  userId: string,
+  batch: LocalBatch,
+  requestedDateLocal?: string | null,
+) {
+  const input = dailyOperationPlanInputFor(userId, batch);
+  if (requestedDateLocal !== undefined && requestedDateLocal !== null && requestedDateLocal !== input.businessDate) {
+    throw new Error("NBJ_DAILY_OPERATION_DATE_INVALID");
+  }
+  return store.ensureDailyOperationPlan(input);
+}
+
+function batchWithMigratedSop(batch: LocalBatch, template: LocalSopTemplate): LocalBatch {
+  const frozenSop = frozenSopFromTemplate(template);
+  const config = configOf(batch);
+  const nextData: JsonObject = {
+    ...batch.data,
+    config: {
+      ...config,
+      sopTemplate: frozenSop,
+      devicePlanSnapshot: buildDevicePlanSnapshot(object(frozenSop.config, "frozen_sop_config")),
+    },
+  };
+  return { ...batch, revision: batch.revision + 1, data: nextData };
+}
+
+function freeFeedingSummary(plan: DevicePlanSnapshot): JsonObject {
+  const slots = plan.templates.free_feeding.slots
+    .filter((slot) => slot.enabled)
+    .map((slot) => ({ slot: slot.slot, label: slot.label ?? `时段 ${slot.slot}`, startLocal: slot.startLocal, endLocal: slot.endLocal }));
+  return { enabledSlotCount: slots.length, slots };
+}
+
+function dailyPlanSummary(plan: DailyOperationPlan | null): JsonObject | null {
+  if (!plan) return null;
+  return {
+    id: plan.id,
+    businessDate: plan.businessDate,
+    status: plan.status,
+    basedOnBatchRevision: plan.basedOnBatchRevision,
+    sopTemplateId: plan.sopTemplateId,
+    sopSourceSha256: plan.sopSourceSha256,
+    devicePlanSha256: plan.devicePlanSha256,
+    operationsSha256: plan.operationsSha256,
+    operationCount: plan.operations.length,
+  };
+}
+
+function sopMigrationPreview(
+  store: SqliteLocalStore,
+  userId: string,
+  batch: LocalBatch,
+  target: LocalSopTemplate,
+): JsonObject {
+  const current = frozenContextOf(batch);
+  const nextBatch = batchWithMigratedSop(batch, target);
+  const next = frozenContextOf(nextBatch);
+  const currentPlanInput = dailyOperationPlanInputFor(userId, batch);
+  const currentPlan = store.getDailyOperationPlan(userId, batch.batchId, currentPlanInput.businessDate);
+  const nextPlanInput = dailyOperationPlanInputFor(userId, nextBatch);
+  const blockedByConfirmedPlan = currentPlan?.status === "confirmed";
+  return {
+    batch: batchPublic(batch),
+    currentSop: {
+      templateId: current.sop.templateId,
+      version: current.sop.version,
+      sourceSha256: current.sop.sourceSha256,
+      devicePlanVersion: current.devicePlan.version,
+      devicePlanSha256: current.devicePlan.sha256,
+    },
+    targetSop: {
+      templateId: next.sop.templateId,
+      version: next.sop.version,
+      sourceSha256: next.sop.sourceSha256,
+      devicePlanVersion: next.devicePlan.version,
+      devicePlanSha256: next.devicePlan.sha256,
+    },
+    ruleChanges: {
+      teachingPowderGramsPerTwenty: {
+        from: current.sop.config.teachingPowderGramsPerTwenty,
+        to: next.sop.config.teachingPowderGramsPerTwenty,
+      },
+      teachingIntervalHours: {
+        from: current.sop.config.teachingIntervalHours,
+        to: next.sop.config.teachingIntervalHours,
+      },
+      waterClosedUntilDayAge: {
+        from: current.sop.config.waterClosedUntilDayAge,
+        to: next.sop.config.waterClosedUntilDayAge,
+      },
+      freeFeeding: {
+        from: freeFeedingSummary(current.devicePlan),
+        to: freeFeedingSummary(next.devicePlan),
+      },
+    },
+    todayOperation: {
+      current: dailyPlanSummary(currentPlan),
+      proposed: {
+        businessDate: nextPlanInput.businessDate,
+        basedOnBatchRevision: nextPlanInput.basedOnBatchRevision,
+        sopTemplateId: nextPlanInput.sopTemplateId,
+        devicePlanSha256: nextPlanInput.devicePlanSha256,
+        operationsSha256: nextPlanInput.operationsSha256,
+        operationCount: nextPlanInput.operations.length,
+      },
+      effect: blockedByConfirmedPlan
+        ? "blocked_confirmed"
+        : currentPlan
+          ? "refresh_pending"
+          : "generate_after_migration",
+    },
+    confirmationPhrase: "迁移 SOP",
+    canMigrate: batch.status === "active" && current.sop.templateId !== next.sop.templateId && !blockedByConfirmedPlan,
   };
 }
 
@@ -382,21 +659,13 @@ function recordPublic(
 }
 
 function allRecords(batch: LocalBatch): JsonObject[] {
-  const config = configOf(batch);
-  const heads = Number(config.effectiveHeads ?? config.headCount ?? 0);
-  const startAge = Number(config.startAge ?? 3);
-  const model = computeProductionPlan({
-    startAge,
-    endAge: Number(config.endAge ?? 21),
-    startWeight: Number(config.startWeight ?? modelStandardWeight(startAge)),
-    headCount: Math.max(1, heads),
-    records: modelRecords(recordsOf(batch)),
-    controlStartDay: Number(config.controlStartDay ?? -1),
-  });
+  const context = frozenContextOf(batch);
+  const heads = context.modelInput.headCount;
+  const model = computeProductionPlan(context.modelInput);
   const weights = new Map((model.control.days ?? []).map((day) => [Number(day.dayAge), day]));
   return recordsOf(batch).map((row) => recordPublic(row, {
     dayIndex: Number(row.dayIndex ?? 0),
-    dayAge: Number(row.dayAge ?? Number(config.startAge ?? 3)),
+    dayAge: Number(row.dayAge ?? context.modelInput.startAge),
     heads,
     revision: batch.revision,
   }, weights.get(Number(row.dayAge))));
@@ -422,6 +691,17 @@ function agentSessionPublic(
     ...session,
     messages: store.listMessages(userId, batchId, session.id, { limit: 1_000 }),
   };
+}
+
+/**
+ * The agent is only exposed through Nginx. Preserve the Secure flag when an
+ * HTTPS reverse proxy tells us the original scheme, while keeping the local
+ * loopback Compose endpoint usable over plain HTTP.
+ */
+function requestUsesHttps(request: IncomingMessage): boolean {
+  const forwarded = request.headers["x-forwarded-proto"];
+  const values = Array.isArray(forwarded) ? forwarded : [forwarded ?? ""];
+  return values.some((value) => value.split(",").some((part) => part.trim().toLowerCase() === "https"));
 }
 
 function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
@@ -476,7 +756,7 @@ export async function handleLocalApi(
     if (request.method === "POST" && url.pathname === "/api/auth/login") {
       const body = await readJson(request);
       const result = authenticateLocalUser(store, body.email, body.password);
-      setSessionCookie(response, result.token);
+      setSessionCookie(response, result.token, undefined, requestUsesHttps(request));
       json(response, { user: result.user });
       return true;
     }
@@ -490,7 +770,7 @@ export async function handleLocalApi(
       const auth = resolveLocalAuth(request, store);
       const token = getSessionToken(request);
       if (auth && token) store.revokeAuthSession(hashSessionToken(token));
-      clearSessionCookie(response);
+      clearSessionCookie(response, requestUsesHttps(request));
       json(response, { ok: true });
       return true;
     }
@@ -547,8 +827,12 @@ export async function handleLocalApi(
       const body = await readJson(request);
       const name = text(body.name, "batch_name");
       const room = typeof body.room === "string" ? body.room.trim().slice(0, 160) : "";
-      const startAge = integer(body.startAge, "start_age", 1, 60);
-      const endAge = integer(body.endAge, "end_age", startAge, 60);
+      // Keep the public boundary aligned with the frozen feeding model. The
+      // model supports a 1–30 day window and requires a genuine end day after
+      // the starting day; accepting a wider range only fails later as a
+      // generic API error while creating the batch.
+      const startAge = integer(body.startAge, "start_age", 1, 29);
+      const endAge = integer(body.endAge, "end_age", startAge + 1, 30);
       const headCount = integer(body.headCount, "head_count", 1, 100_000);
       const hasStartWeight = body.startWeight !== undefined && body.startWeight !== null && body.startWeight !== "";
       const startWeight = hasStartWeight
@@ -556,13 +840,27 @@ export async function handleLocalApi(
         : modelStandardWeight(startAge);
       const id = randomUUID();
       const nowDate = new Date().toISOString().slice(0, 10);
-      const latestSop = store.listSopTemplates()[0];
-      const frozenSop = latestSop
+      const latestSop = store.getPublishedSopTemplate();
+      const builtinDigest = sha256Text(JSON.stringify(DEFAULT_SOP_CONFIG));
+      const frozenSopBase = latestSop
         ? {
+            templateId: latestSop.id,
             version: latestSop.version,
-            config: { ...DEFAULT_SOP_CONFIG, ...latestSop.config },
+            config: normalizePublishedSopConfig(latestSop.config as JsonObject),
+            sourceSha256: latestSop.sourceSha256,
+            collectionRevision: latestSop.collectionRevision,
+            parserVersion: latestSop.parserVersion,
+            embeddingModel: latestSop.embeddingModel,
           }
-        : { version: DEFAULT_LOCAL_SOP_VERSION, config: { ...DEFAULT_SOP_CONFIG } };
+        : { templateId: "builtin-default", version: DEFAULT_LOCAL_SOP_VERSION,
+            config: { ...DEFAULT_SOP_CONFIG }, sourceSha256: builtinDigest,
+            collectionRevision: `builtin:${builtinDigest}`, parserVersion: SOP_PARSER_VERSION,
+            embeddingModel: env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL };
+      const frozenSop = {
+        ...frozenSopBase,
+        snapshotSha256: digestFrozenSopSnapshot(frozenSopBase),
+      };
+      const devicePlanSnapshot = buildDevicePlanSnapshot(frozenSop.config);
       const batch = store.createBatch({
         userId: auth.user.id,
         batchId: id,
@@ -575,6 +873,8 @@ export async function handleLocalApi(
             planStartDate: nowDate,
             controlStartDay: -1,
             sopTemplate: frozenSop,
+            selectedMode: "timed_quantity",
+            devicePlanSnapshot,
           },
           records: [],
           current_day_index: 0,
@@ -607,6 +907,87 @@ export async function handleLocalApi(
       if (request.method === "GET" && suffix === "agent/session") {
         const session = agentSessionPublic(store, auth.user.id, batchId);
         json(response, { session, messages: session.messages });
+        return true;
+      }
+      if (suffix === "today-operations" && request.method === "GET") {
+        const plan = ensureCurrentDailyOperationPlan(
+          store,
+          auth.user.id,
+          batch,
+          url.searchParams.get("dateLocal"),
+        );
+        json(response, {
+          plan,
+          confirmation: store.getDailyOperationConfirmation(auth.user.id, batchId, plan.businessDate),
+        });
+        return true;
+      }
+      if (suffix === "today-operations/confirm") {
+        if (request.method === "POST") {
+          const body = await readJson(request);
+          const plan = ensureCurrentDailyOperationPlan(store, auth.user.id, batch);
+          const planId = text(body.planId, "daily_operation_plan_id", 128);
+          const operationsSha256 = text(body.operationsSha256, "operations_sha256", 64).toUpperCase();
+          if (planId !== plan.id || operationsSha256 !== plan.operationsSha256) {
+            throw new Error("NBJ_DAILY_OPERATION_PLAN_STALE");
+          }
+          const committed = store.confirmDailyOperationPlan({
+            userId: auth.user.id,
+            batchId,
+            businessDate: plan.businessDate,
+            planId,
+            operationsSha256,
+            confirmedBy: auth.user.id,
+            idempotencyKey: text(body.idempotencyKey, "idempotency_key", 160),
+            ...(body.note === undefined ? {} : { note: text(body.note, "daily_operation_note", 500) }),
+          });
+          json(response, {
+            plan: store.getDailyOperationPlan(auth.user.id, batchId, plan.businessDate),
+            confirmation: committed.confirmation,
+            replayed: committed.replayed,
+          });
+          return true;
+        }
+        throw new Error("NBJ_METHOD_NOT_ALLOWED");
+      }
+      if (suffix === "mode") {
+        if (request.method !== "POST") throw new Error("NBJ_METHOD_NOT_ALLOWED");
+        if (batch.currentDay === 0) throw new Error("NBJ_BATCH_MODE_FIRST_DAY_LOCKED");
+        const body = await readJson(request);
+        const mode = feedingMode(body.mode);
+        const expectedRevision = integer(body.expectedRevision, "expected_revision", 0, Number.MAX_SAFE_INTEGER);
+        const key = text(body.idempotencyKey, "idempotency_key", 160);
+        const config = configOf(batch);
+        const context = frozenContextOf(batch);
+        const devicePlan = context.devicePlan;
+        const fromMode = context.selectedMode;
+        const nextData: JsonObject = {
+          ...batch.data,
+          config: { ...config, selectedMode: mode },
+        };
+        const nextBatch = {
+          ...batch,
+          revision: batch.revision + 1,
+          data: nextData,
+        } as LocalBatch;
+        const result = {
+          batch: batchPublic(nextBatch),
+          today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
+          records: allRecords(nextBatch),
+        };
+        const committed = store.commitModeSwitch({
+          userId: auth.user.id,
+          batchId,
+          expectedRevision,
+          idempotencyKey: key,
+          fromMode,
+          toMode: mode,
+          devicePlanVersion: devicePlan.version,
+          devicePlanSha256: devicePlan.sha256,
+          nextData,
+          result,
+        });
+        json(response, committed.result);
         return true;
       }
       if (request.method === "POST" && (suffix === "advance" || suffix === "records")) {
@@ -673,6 +1054,85 @@ export async function handleLocalApi(
       }
     }
 
+    if (request.method === "GET" && url.pathname === "/api/admin/batches") {
+      requireLocalAdmin(request, store);
+      const batches = store.listAllBatches().map((batch) => {
+        const owner = store.getUserById(batch.userId);
+        return {
+          ...batchPublic(batch),
+          userId: batch.userId,
+          userEmail: owner?.email ?? "",
+        };
+      });
+      json(response, { batches });
+      return true;
+    }
+
+    const sopMigrationMatch = url.pathname.match(/^\/api\/admin\/batches\/([^/]+)\/sop-migration(?:\/preview)?$/);
+    if (sopMigrationMatch) {
+      const admin = requireLocalAdmin(request, store);
+      const batchId = decodeURIComponent(sopMigrationMatch[1]);
+      const preview = url.pathname.endsWith("/preview");
+      if (preview && request.method !== "GET") throw new Error("NBJ_METHOD_NOT_ALLOWED");
+      if (!preview && request.method !== "POST") throw new Error("NBJ_METHOD_NOT_ALLOWED");
+      const body = preview ? null : await readJson(request);
+      const userId = text(preview ? url.searchParams.get("userId") : body?.userId, "batch_owner_id", 128);
+      const templateId = text(preview ? url.searchParams.get("templateId") : body?.templateId, "sop_template_id", 128);
+      const batch = store.getBatch(userId, batchId);
+      if (!batch) throw new Error("NBJ_BATCH_NOT_FOUND");
+      const target = store.getSopTemplate(templateId);
+      if (!target) throw new Error("NBJ_SOP_TEMPLATE_NOT_FOUND");
+      if (target.status !== "published") throw new Error("NBJ_SOP_TEMPLATE_NOT_PUBLISHED");
+      const migrationPreview = sopMigrationPreview(store, userId, batch, target);
+      if (preview) {
+        json(response, migrationPreview);
+        return true;
+      }
+      if (body?.confirmationPhrase !== "迁移 SOP") throw new Error("NBJ_SOP_MIGRATION_CONFIRMATION_REQUIRED");
+      const expectedRevision = integer(body?.expectedRevision, "expected_revision", 0, Number.MAX_SAFE_INTEGER);
+      // A retry is allowed to reach the store's idempotency lookup even after
+      // the first successful request has already changed the frozen snapshot.
+      const mayBeReplay = expectedRevision < batch.revision;
+      if (migrationPreview.canMigrate !== true && !mayBeReplay) {
+        const effect = object(migrationPreview.todayOperation, "sop_migration_today_operation").effect;
+        if (effect === "blocked_confirmed") throw new Error("NBJ_SOP_MIGRATION_TODAY_CONFIRMED");
+        throw new Error("NBJ_SOP_MIGRATION_NOT_AVAILABLE");
+      }
+      const nextBatch = batchWithMigratedSop(batch, target);
+      const nextPlanInput = dailyOperationPlanInputFor(userId, nextBatch);
+      const previousPlan = store.getDailyOperationPlan(userId, batchId, nextPlanInput.businessDate);
+      const result = {
+        batch: batchPublic(nextBatch),
+        today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
+        records: allRecords(nextBatch),
+      };
+      const committed = store.commitSopMigration({
+        userId,
+        batchId,
+        expectedRevision,
+        idempotencyKey: text(body?.idempotencyKey, "idempotency_key", 160),
+        actorUserId: admin.user.id,
+        targetTemplateId: target.id,
+        nextData: nextBatch.data,
+        result,
+        replacementDailyOperationPlan: previousPlan?.status === "pending" ? nextPlanInput : undefined,
+        auditDetails: {
+          previousSop: object(migrationPreview.currentSop, "sop_migration_current_sop"),
+          targetSop: object(migrationPreview.targetSop, "sop_migration_target_sop"),
+          ruleChanges: object(migrationPreview.ruleChanges, "sop_migration_rule_changes"),
+          previousDailyOperationPlan: dailyPlanSummary(previousPlan),
+          proposedDailyOperationPlan: object(migrationPreview.todayOperation, "sop_migration_today_operation").proposed,
+          confirmationPhrase: "迁移 SOP",
+        },
+      });
+      json(response, {
+        ...committed.result,
+        replayed: committed.replayed,
+        todayOperation: store.getDailyOperationPlan(userId, batchId, nextPlanInput.businessDate),
+      });
+      return true;
+    }
+
     if (url.pathname === "/api/admin/sop/templates") {
       if (request.method === "GET") {
         requireLocalAdmin(request, store);
@@ -685,8 +1145,20 @@ export async function handleLocalApi(
         const sourceId = body.copyFromId == null ? null : text(body.copyFromId, "copy_from_id", 128);
         const source = sourceId ? store.listSopTemplates().find((row) => row.id === sourceId) : null;
         if (sourceId && !source) throw new Error("NBJ_SOP_TEMPLATE_NOT_FOUND");
-        const config = { ...(source?.config ?? {}), ...object(body.config ?? {}, "config") };
-        const template = store.createSopTemplate({ version: text(body.version, "version", 160), name: text(body.name, "name", 200), config, createdBy: admin.user.id, sourceTemplateId: sourceId });
+        const config = normalizePublishedSopConfig({
+          ...(source?.config ?? {}),
+          ...object(body.config ?? {}, "config"),
+        });
+        const name = text(body.name, "name", 200);
+        const sourceMarkdown = typeof body.sourceMarkdown === "string" && body.sourceMarkdown.trim()
+          ? body.sourceMarkdown
+          : `# ${name}\n\n${JSON.stringify(config, null, 2)}`;
+        const index = env.CHROMA_URL && env.EMBEDDING_BASE_URL
+          ? new ChromaKnowledgeIndex({ chromaUrl: env.CHROMA_URL, embeddingBaseUrl: env.EMBEDDING_BASE_URL })
+          : new MemoryKnowledgeIndex();
+        const template = await publishSop({ store, index, version: text(body.version, "version", 160),
+          name, config, sourceMarkdown, createdBy: admin.user.id, sourceTemplateId: sourceId,
+          embeddingModel: env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL });
         json(response, { template }, 201);
         return true;
       }

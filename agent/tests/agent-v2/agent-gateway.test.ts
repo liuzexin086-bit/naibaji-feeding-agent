@@ -5,7 +5,12 @@ import { CHAT_SSE_EVENTS, writeChatSse } from "../../src/agent/sse.js";
 
 const root = resolve(import.meta.dirname, "../..");
 const tools = readFileSync(resolve(root, "src/container/tools.ts"), "utf8");
+const decisionService = readFileSync(resolve(root, "src/decision/batch-decision-service.ts"), "utf8");
 const server = readFileSync(resolve(root, "src/container/server.ts"), "utf8");
+const graphRuntime = readFileSync(resolve(root, "src/agent/langgraph/runtime.ts"), "utf8");
+const graphRouter = readFileSync(resolve(root, "src/agent/langgraph/router.ts"), "utf8");
+const graphState = readFileSync(resolve(root, "src/agent/langgraph/state.ts"), "utf8");
+const models = readFileSync(resolve(root, "src/agent/langgraph/models.ts"), "utf8");
 const store = readFileSync(resolve(root, "src/agent/message-store.ts"), "utf8");
 
 const contractTools = [
@@ -27,12 +32,32 @@ describe("Agent V2 deterministic gateway", () => {
       expect(tools).toContain(`"${name}"`);
       expect(server).toContain(`"${name}"`);
     }
-    expect(server).toContain("CONTRACT_TOOL_ALLOWLIST.has(toolCall.name)");
+    expect(server).toContain("!CONTRACT_TOOL_ALLOWLIST.has(tool.name)");
+    expect(graphRuntime).toContain('throw new Error("NBJ_AGENT_TOOL_NOT_ALLOWED")');
     expect(tools).not.toMatch(/name:\s*["'](?:bash|shell|read_file|write_file|fetch_url)/);
   });
 
+  it("uses the v2 fixed route/evidence graph rather than a free ReAct tool loop", () => {
+    expect(graphRuntime).toContain('LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2"');
+    expect(graphRuntime).toContain('addNode("load_turn_scope"');
+    expect(graphRuntime).toContain('addNode("verify_frozen_snapshot"');
+    expect(graphRuntime).toContain('addNode("safety_preflight"');
+    expect(graphRuntime).toContain('addNode("classify_intent"');
+    expect(graphRuntime).toContain('addNode("build_evidence_plan"');
+    expect(graphRuntime).toContain('addNode("validate_evidence"');
+    expect(graphRuntime).toContain('addNode("daily_operation_gate"');
+    expect(graphRuntime).toContain('addNode("validate_response"');
+    expect(graphRuntime).toContain('addNode("persist_response"');
+    expect(graphRuntime).toContain("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+    expect(graphRouter).toContain("Fixed safety precedence");
+    expect(graphRouter).toContain("staticEvidencePlan");
+    expect(graphState).toContain("never raw tool inputs/results");
+    expect(graphState).toContain("dailyOperations");
+  });
+
   it("routes all feeding arithmetic through the deterministic decision core", () => {
-    expect(tools).toContain("computeDayDecision(");
+    expect(tools).toContain("computeFrozenBatchDecision(");
+    expect(decisionService).toContain("computeDayDecision(input)");
     expect(tools).toContain("previewDiarrheaAdjustment({");
     expect(tools).toContain("fullFeedingCurve");
     expect(tools).toContain("timed_quantity");
@@ -69,7 +94,8 @@ describe("Agent V2 deterministic gateway", () => {
 
   it("ends safely on disconnect/error and persists before message_end", () => {
     expect(server).toContain('request.once("aborted", abortAgent)');
-    expect(server).toContain("agent?.abort()");
+    expect(server).toContain("abortController.abort()");
+    expect(server).toContain("AbortSignal.timeout(runtimeTimeout)");
     expect(server).toContain('writeChatSse(response, "error"');
     expect(server).toContain("response.end()");
     const persist = server.indexOf("content: assistantText");
@@ -79,13 +105,14 @@ describe("Agent V2 deterministic gateway", () => {
     expect(server).not.toMatch(/assistantText\.(?:slice|substring)|content:\s*assistantText\.slice/);
   });
 
-  it("buffers assistant messages and sanitizes public tool evidence", () => {
-    expect(server).toContain("bufferedAssistantText");
-    expect(server).toContain('event.type === "message_end"');
-    expect(server).toContain('type === "toolCall"');
+  it("emits finalized assistant messages and sanitizes public tool evidence", () => {
+    expect(server).toContain("const assistantText = graphResult.text");
+    expect(server).toContain('writeChatSse(response, "delta", identity, { text: assistantText })');
+    expect(graphRuntime).toContain('addNode("finalize"');
     expect(server).toContain("completed: true");
-    expect(server).not.toContain("name: event.toolName");
-    expect(server).not.toContain("evidence: event.result?.details");
+    expect(server).toContain("name: event.name");
+    expect(server).not.toContain("args: event");
+    expect(server).not.toContain("result: event");
   });
 
   it("supports replay deduplication and a replaceable message store", () => {
@@ -112,8 +139,9 @@ describe("Agent V2 deterministic gateway", () => {
   it("wires runtime timeout and output budget without logging credentials", () => {
     expect(server).toContain("runtimeConfig?.timeout ?? DEFAULT_RUNTIME_TIMEOUT");
     expect(server).toContain("runtimeConfig?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS");
-    expect(server).toContain("timeoutMs: runtimeTimeout");
-    expect(server).toContain("maxTokens: maxOutputTokens");
+    expect(server).toContain("timeout: runtimeTimeout");
+    expect(models).toContain("timeout: config.timeout");
+    expect(models).toContain("maxTokens: config.maxOutputTokens");
     expect(server).not.toMatch(/console\.(?:log|info|debug).*apiKey/i);
   });
 });

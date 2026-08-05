@@ -156,6 +156,25 @@ describe("deterministic day decision", () => {
       .toBe("timed_quantity");
   });
 
+  it("normalizes free-feeding windows on the 09:00 business-day axis", () => {
+    expect(computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [
+        { startLocal: "23:00", endLocal: "02:00" },
+        { startLocal: "03:00", endLocal: "05:00" },
+      ],
+    })).setting.mode).toBe("free_feeding");
+
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "23:00", endLocal: "02:00" }, { startLocal: "01:00", endLocal: "03:00" }],
+    }))).toThrow("NBJ_DECISION_FREE_WINDOWS_OVERLAP");
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "09:00", endLocal: "09:00" }],
+    }))).toThrow("NBJ_DECISION_FREE_WINDOW_ZERO_DURATION");
+  });
+
   it("returns deterministic exception operations without a risk prediction", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
@@ -182,6 +201,8 @@ describe("deterministic day decision", () => {
       dailyPowderGrams: 99,
       singlePowderGrams: 24,
       mealCount: 4,
+      suggestedDailyPowderGrams: 684,
+      suggestedDailyMealCount: 12,
       timedMeals: [],
     });
 
@@ -189,6 +210,10 @@ describe("deterministic day decision", () => {
     expect(modelSingle.setting.singlePowderGrams).toBe(70);
     expect(modelSingle.setting.dailyPowderGrams)
       .toBe(modelSingle.setting.singlePowderGrams * modelSingle.setting.mealCount);
+    expect(modelSingle.setting).toMatchObject({
+      suggestedDailyPowderGrams: 696,
+      suggestedDailyMealCount: 12,
+    });
   });
 });
 
@@ -209,8 +234,9 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.setting.mode).toBe("timed_quantity");
     expect(preview.setting.dailyPowderGrams).toBe(140);
     expect(preview.setting.timedMeals).toEqual([
-      { timeLocal: "18:00", powderGrams: 70 },
-      { timeLocal: "23:00", powderGrams: 70 },
+      { timeLocal: "06:00", powderGrams: 47 },
+      { timeLocal: "18:00", powderGrams: 47 },
+      { timeLocal: "23:00", powderGrams: 46 },
     ]);
     expect(preview.evidence.steps.at(-2)?.value).toEqual({
       adjustedDayCap: 450,
@@ -231,5 +257,20 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.setting.dailyPowderGrams).toBe(0);
     expect(preview.setting.timedMeals).toEqual([]);
     expect(preview.setting.mealCount).toBe(0);
+  });
+
+  it("keeps the next-day overnight meals after a 23:30 observation", () => {
+    const decision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 6 },
+      timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T23:30:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["02:00", "05:00", "08:00"]);
+    expect(preview.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(450);
   });
 });

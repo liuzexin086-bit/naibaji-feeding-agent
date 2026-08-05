@@ -49,15 +49,38 @@ describe("local frontend contract", () => {
     expect(html).toContain("creepValue");
   });
 
-  it("shows only the single amount, program total, and feeding times in the daily setting", () => {
-    expect(html).toContain('<span class="label">单次下粉</span>');
-    expect(html).toContain('<span class="label">程序总量</span>');
-    expect(html).toContain('<div class="program-time-label">配奶时间点</div>');
+  it("hides the single amount and shows a 12-meal suggestion for free-feeding", () => {
+    expect(html).toContain('id="singlePowderStat"');
+    expect(html).toContain('id="dailyPowderLabel"');
+    expect(html).toContain("function deviceMode(today)");
+    expect(html).toContain("value(source, 'effectiveMode', 'effective_mode'");
+    expect(html).toContain("$('singlePowderStat').hidden = freeFeeding");
+    expect(html).toContain("建议单日下粉总量（");
+    expect(html).toContain("suggestedDailyPowderGrams");
+    expect(html).toContain('<div class="program-time-label" id="programTimeLabel">配奶时间点</div>');
+    expect(html).toContain("自由采食时间段");
+    expect(html).toContain("function deviceSchedule(today)");
+    expect(html).toContain('<strong>定时定量</strong><span>保留既有时间点、排除时段、精度和减餐优先级</span>');
+    expect(html).toContain('<strong>自由采食</strong><span>采用批次冻结 SOP 的窗口、阶段条件与异常阻断</span>');
+    expect(html).not.toContain("现有定时定量模板");
+    expect(html).not.toContain("SOP 自由采食模板");
     expect(html).not.toContain('<span class="label">今日餐次</span>');
     expect(html).not.toContain('<span class="label">下一次</span>');
     expect(html).not.toContain("设备按设定执行");
     expect(html).not.toContain("自动下奶");
     expect(html).toContain("只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。");
+  });
+
+  it("recognizes free-feeding from the effective mode returned by the current-batch API", () => {
+    const source = html.match(/function deviceMode\(today\) \{[^\n]+\}/)?.[0];
+    expect(source).toBeTruthy();
+    const value = (object: Record<string, unknown> | undefined, camel: string, snake: string, fallback: unknown) => {
+      const result = object?.[camel] ?? object?.[snake];
+      return result == null ? fallback : result;
+    };
+    const deviceMode = new Function("value", `${source}\nreturn deviceMode;`)(value) as (today: Record<string, unknown>) => string;
+    expect(deviceMode({ effectiveMode: "free_feeding" })).toBe("free_feeding");
+    expect(deviceMode({ setting: { mode: "free_feeding" } })).toBe("free_feeding");
   });
 
   it("keeps the complete daily table and mobile-only horizontal scrolling", () => {
@@ -94,6 +117,66 @@ describe("local frontend contract", () => {
     expect(html).toContain("idempotencyKey");
     expect(html).toContain("applyBatchResponse(response)");
     expect(html).not.toContain("/sop/today");
+  });
+
+  it("switches only the selected feeding mode with revision and idempotency guards", () => {
+    expect(html).toContain('id="selectedModeLabel"');
+    expect(html).toContain('data-mode="timed_quantity"');
+    expect(html).toContain('data-mode="free_feeding"');
+    expect(html).toContain("'/mode'");
+    expect(html).toContain("body: { mode: mode, expectedRevision: expectedRevision, idempotencyKey: uuid() }");
+    expect(html).toContain("NBJ_BATCH_MODE_FIRST_DAY_LOCKED");
+    expect(html).toContain("NBJ_BATCH_MODE_INVALID");
+    expect(html).toContain("await loadBatch(batchId)");
+    expect(html).not.toContain("模板独立保存、互不覆盖");
+    expect(html).toContain("首日固定执行 17:00 / 20:00 / 23:00 / 02:00 / 05:00 / 08:00");
+  });
+
+  it("publishes and copies complete SOP Markdown with visible index metadata", () => {
+    expect(adminHtml).toContain('id="sopSourceMarkdown"');
+    expect(adminHtml).toContain('id="sopPasteButton"');
+    expect(adminHtml).toContain('id="sopCopyButton"');
+    expect(adminHtml).toContain("发布 / 索引状态");
+    expect(adminHtml).toContain("来源摘要");
+    expect(adminHtml).toContain("索引修订");
+    expect(adminJs).toContain("sourceMarkdown: sourceMarkdown");
+    expect(adminJs).toContain("template.sourceSha256");
+    expect(adminJs).toContain("template.collectionRevision");
+    expect(adminJs).toContain("template.embeddingModel");
+    expect(adminJs).toContain("template.indexError");
+    expect(adminJs).toContain("navigator.clipboard.writeText(source)");
+    expect(adminJs).toContain("navigator.clipboard.readText()");
+  });
+
+  it("edits, validates, copies, and publishes exactly eight free-feeding slots", () => {
+    expect(adminHtml).toContain('id="freeFeedingSlotsHeading">自由采食时间段');
+    expect(adminHtml).toContain('id="freeFeedingSlots"');
+    expect(adminHtml).toContain('id="freeFeedingSlotValidation"');
+    expect(adminHtml).toContain('id="sopSlotCount"');
+    expect(adminHtml).toContain("已启用窗口");
+    expect(adminJs).toContain("function defaultFreeFeedingSlots()")
+    expect(adminJs).toContain("length: 8")
+    expect(adminJs).toContain("function validateFreeFeedingSlots(slots)")
+    expect(adminJs).toContain("function businessMinute(value)")
+    expect(adminJs).toContain("自由采食时段重叠")
+    expect(adminJs).toContain("config.freeFeedingTemplate")
+    expect(adminJs).toContain("renderFreeFeedingSlots(config)")
+    expect(adminJs).toContain("data-free-slot-enabled")
+  });
+
+  it("loads an immutable current-day operation list and confirms it only as one audited action", () => {
+    expect(html).toContain('id="todayOperationsPanel"');
+    expect(html).toContain('id="todayOperationsList"');
+    expect(html).toContain('id="confirmTodayOperationsBtn"');
+    expect(html).not.toContain("不对单项逐一确认");
+    expect(html).toContain("function loadTodayOperations(batchId)");
+    expect(html).toContain("'/today-operations'");
+    expect(html).toContain("'/today-operations/confirm'");
+    expect(html).toContain("function confirmTodayOperations()");
+    expect(html).toContain("operationsSha256: plan.operationsSha256");
+    expect(html).toContain("dailyOperationConfirmKey(plan)");
+    expect(html).toContain("dailyOperationConfirmKey(plan)");
+    expect(html).not.toContain("operationItemConfirm");
   });
 
   it("preserves Agent session switching, Markdown, waiting state, and dialog accessibility", () => {

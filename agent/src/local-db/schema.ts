@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 1;
+export const MIGRATION_VERSION = 5;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -143,8 +143,76 @@ CREATE TABLE IF NOT EXISTS sop_templates (
   created_by TEXT NOT NULL,
   source_template_id TEXT,
   created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'failed')),
+  source_markdown TEXT NOT NULL DEFAULT '',
+  source_sha256 TEXT NOT NULL DEFAULT '',
+  collection_revision TEXT NOT NULL DEFAULT '',
+  parser_version TEXT NOT NULL DEFAULT '',
+  embedding_model TEXT NOT NULL DEFAULT '',
+  chunk_count INTEGER NOT NULL DEFAULT 0 CHECK (chunk_count >= 0),
+  published_at TEXT,
+  index_error TEXT,
   FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
   FOREIGN KEY (source_template_id) REFERENCES sop_templates(id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS daily_operation_plans (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+  sop_template_id TEXT NOT NULL,
+  sop_source_sha256 TEXT NOT NULL,
+  device_plan_version TEXT NOT NULL,
+  device_plan_sha256 TEXT NOT NULL,
+  selected_mode TEXT NOT NULL CHECK (selected_mode IN ('timed_quantity', 'free_feeding')),
+  effective_mode TEXT NOT NULL CHECK (effective_mode IN ('timed_quantity', 'free_feeding')),
+  operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+  operations_sha256 TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed')),
+  created_at TEXT NOT NULL,
+  UNIQUE (user_id, batch_id, business_date),
+  FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS daily_operation_confirmations (
+  id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  operations_sha256 TEXT NOT NULL,
+  confirmed_by TEXT NOT NULL,
+  confirmed_at TEXT NOT NULL,
+  idempotency_key TEXT NOT NULL,
+  UNIQUE (user_id, batch_id, business_date),
+  UNIQUE (user_id, idempotency_key),
+  FOREIGN KEY (plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (confirmed_by) REFERENCES users(id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS sop_publication_state (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  active_template_id TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  FOREIGN KEY (active_template_id) REFERENCES sop_templates(id) ON DELETE RESTRICT
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS sop_knowledge_chunks (
+  template_id TEXT NOT NULL,
+  chunk_id TEXT NOT NULL,
+  section_id TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL CHECK (chunk_index >= 0),
+  title TEXT NOT NULL,
+  text TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  collection_revision TEXT NOT NULL,
+  lexical_terms_json TEXT NOT NULL CHECK (json_valid(lexical_terms_json)),
+  PRIMARY KEY (template_id, chunk_id),
+  UNIQUE (template_id, section_id, chunk_index),
+  FOREIGN KEY (template_id) REFERENCES sop_templates(id) ON DELETE CASCADE
 ) STRICT;
 
 CREATE TABLE IF NOT EXISTS operation_results (
@@ -162,6 +230,10 @@ CREATE INDEX IF NOT EXISTS batches_user_revision_idx
   ON batches(user_id, revision DESC);
 CREATE INDEX IF NOT EXISTS daily_observations_batch_date_revision_idx
   ON daily_observations(user_id, batch_id, date_local, batch_revision DESC);
+CREATE INDEX IF NOT EXISTS daily_operation_plans_batch_business_date_idx
+  ON daily_operation_plans(user_id, batch_id, business_date DESC);
+CREATE INDEX IF NOT EXISTS daily_operation_confirmations_plan_idx
+  ON daily_operation_confirmations(plan_id, confirmed_at DESC);
 CREATE INDEX IF NOT EXISTS feeding_decisions_batch_date_revision_idx
   ON feeding_decisions(user_id, batch_id, date_local, revision DESC);
 CREATE INDEX IF NOT EXISTS feeding_decisions_active_idx
@@ -175,4 +247,6 @@ CREATE INDEX IF NOT EXISTS audit_events_batch_date_idx
   ON audit_events(user_id, batch_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS sop_templates_created_idx
   ON sop_templates(created_at DESC);
+CREATE INDEX IF NOT EXISTS sop_knowledge_chunks_digest_idx
+  ON sop_knowledge_chunks(source_sha256, collection_revision);
 `;

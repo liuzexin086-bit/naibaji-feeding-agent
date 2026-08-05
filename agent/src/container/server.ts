@@ -1,10 +1,5 @@
 import { createServer } from "node:http";
-import { Agent } from "@earendil-works/pi-agent-core";
-import { createModels, createProvider } from "@earendil-works/pi-ai";
-import type { Message } from "@earendil-works/pi-ai";
-import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completions.lazy";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { openaiProvider } from "@earendil-works/pi-ai/providers/openai";
+import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   supabaseRest,
   type SupabaseRuntime,
@@ -22,6 +17,13 @@ import {
 } from "../agent/local-message-store.js";
 import type { SqliteLocalStore } from "../local-db/index.js";
 import { writeChatSse } from "../agent/sse.js";
+import { NodeSqliteCheckpointSaver } from "../agent/langgraph/checkpoint.js";
+import { createLangChainModel } from "../agent/langgraph/models.js";
+import {
+  createAgentGraphRuntime,
+  LANGGRAPH_RUNTIME_VERSION,
+} from "../agent/langgraph/runtime.js";
+import { withMetadataTrace } from "../observability/langsmith.js";
 import {
   APPROVED_FEEDING_TOOL_NAMES,
   createFeedingTools,
@@ -83,31 +85,13 @@ if (
 
 function restoredMessages(
   rows: Array<Pick<StoredAgentMessage, "role" | "content" | "created_at">>,
-  model: { api: string; provider: string; id: string },
-): Message[] {
-  return rows.flatMap((row): Message[] => {
-    const timestamp = Date.parse(row.created_at) || Date.now();
+): BaseMessage[] {
+  return rows.flatMap((row): BaseMessage[] => {
     if (row.role === "user") {
-      return [{ role: "user", content: row.content, timestamp }];
+      return [new HumanMessage(row.content)];
     }
     if (row.role === "assistant") {
-      return [{
-        role: "assistant",
-        content: [{ type: "text", text: row.content }],
-        api: model.api,
-        provider: model.provider,
-        model: model.id,
-        usage: {
-          input: 0,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 0,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "stop",
-        timestamp,
-      }];
+      return [new AIMessage(row.content)];
     }
     return [];
   });
@@ -127,6 +111,11 @@ interface ContainerEnv {
   AGENT_CONFIG_PATH?: string;
   LOCAL_ADMIN_EMAIL?: string;
   LOCAL_ADMIN_PASSWORD?: string;
+  AGENT_CHECKPOINT_DB_PATH?: string;
+  LANGSMITH_TRACING?: string;
+  LANGSMITH_ENDPOINT?: string;
+  LANGSMITH_PROJECT?: string;
+  LANGSMITH_API_KEY?: string;
 }
 
 type ContainerStorage =
@@ -165,53 +154,6 @@ function normalizeBaseUrl(
   parsed.hash = "";
   parsed.search = "";
   return parsed.toString().replace(/\/+$/, "");
-}
-
-function configuredModel(
-  provider: "anthropic" | "openai",
-  modelId: string,
-  baseUrl: string,
-  apiMode: "responses" | "chat_completions",
-) {
-  const models = createModels();
-  const builtInProvider =
-    provider === "openai" ? openaiProvider() : anthropicProvider();
-  models.setProvider(builtInProvider);
-  const known = models.getModel(provider, modelId);
-  const fallback =
-    models.getModel(
-      provider,
-      provider === "openai" ? "gpt-5.2" : "claude-sonnet-4-6",
-    ) ?? models.getModels(provider)[0];
-  if (!fallback) throw new Error("NBJ_AGENT_PROVIDER_UNAVAILABLE");
-  if (provider === "openai" && apiMode === "chat_completions") {
-    const model = {
-      ...fallback,
-      id: modelId,
-      name: modelId,
-      provider,
-      api: "openai-completions" as const,
-      baseUrl,
-    };
-    models.setProvider(createProvider({
-      id: provider,
-      name: "OpenAI Compatible",
-      baseUrl,
-      auth: builtInProvider.auth,
-      models: [model],
-      api: openAICompletionsApi(),
-    }));
-    return { models, model };
-  }
-  return {
-    models,
-    model: {
-      ...(known ?? fallback),
-      id: modelId,
-      name: modelId,
-      baseUrl,
-    },
-  };
 }
 
 async function validateProviderConnection(
@@ -359,9 +301,10 @@ async function handleChat(
     messageId: crypto.randomUUID(),
     clientMessageId: body.clientMessageId?.trim() || crypto.randomUUID(),
   };
-  let agent: Agent | undefined;
+  const abortController = new AbortController();
+  let checkpointer: NodeSqliteCheckpointSaver | undefined;
   let messageStarted = false;
-  const abortAgent = () => agent?.abort();
+  const abortAgent = () => abortController.abort();
   request.once("aborted", abortAgent);
   response.once("close", () => {
     if (!response.writableEnded) abortAgent();
@@ -376,11 +319,18 @@ async function handleChat(
     const apiMode = runtimeConfig?.apiMode ?? "responses";
     const runtimeTimeout = runtimeConfig?.timeout ?? DEFAULT_RUNTIME_TIMEOUT;
     const maxOutputTokens = runtimeConfig?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS;
-    const configured = configuredModel(provider, modelId, baseUrl, apiMode);
-    const model = configured.model;
     const apiKey = runtimeConfig?.apiKey ??
       (provider === "openai" ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY);
     if (!apiKey) throw new Error("NBJ_AGENT_PROVIDER_UNAVAILABLE");
+    const model = createLangChainModel({
+      provider,
+      model: modelId,
+      apiKey,
+      baseUrl,
+      apiMode,
+      timeout: runtimeTimeout,
+      maxOutputTokens,
+    });
 
     if (storage.backend === "local") {
       requireLocalAgentSession({
@@ -459,11 +409,8 @@ async function handleChat(
     writeChatSse(response, "message_start", identity, { replayed: false });
     messageStarted = true;
     const storedRows = await store.loadHistory(body.sessionId);
-    const history = restoredMessages(
-      storedRows.reverse().filter((row) =>
-        row.evidence.clientMessageId !== identity.clientMessageId),
-      { api: model.api, provider: model.provider, id: model.id },
-    );
+    const history = restoredMessages(storedRows.reverse().filter((row) =>
+      row.evidence.clientMessageId !== identity.clientMessageId));
 
     const existingUser = matchingMessages.some((row) => row.role === "user");
     if (!existingUser) await store.append({
@@ -478,79 +425,63 @@ async function handleChat(
       },
     });
 
-    agent = new Agent({
-      initialState: {
-        systemPrompt: SYSTEM_PROMPT,
-        model,
-        thinkingLevel: "low",
-        tools: createFeedingTools({
-          ...context,
-          storage: storage.backend === "local"
-            ? { backend: "local", store: storage.store }
-            : { backend: "supabase", env: storage.runtime, token },
-        }),
-        messages: history,
-      },
-      streamFn: (streamModel, streamContext, options) =>
-        configured.models.streamSimple(streamModel, streamContext, {
-          ...options,
-          timeoutMs: runtimeTimeout,
-          maxTokens: maxOutputTokens,
-        }),
-      getApiKey: () => apiKey,
-      toolExecution: "sequential",
-      sessionId: body.sessionId,
-      beforeToolCall: async ({ toolCall }) => {
-        return CONTRACT_TOOL_ALLOWLIST.has(toolCall.name)
-          ? undefined
-          : { block: true, reason: "NBJ_AGENT_TOOL_NOT_ALLOWED" };
-      },
+    checkpointer = new NodeSqliteCheckpointSaver(
+      env.AGENT_CHECKPOINT_DB_PATH ?? "/checkpoints/agent-checkpoints.db",
+    );
+    const tools = createFeedingTools({
+      ...context,
+      storage: storage.backend === "local"
+        ? { backend: "local", store: storage.store }
+        : { backend: "supabase", env: storage.runtime, token },
     });
-
-    // Pi can emit assistant text before a tool call in the same message. Keep
-    // each message buffered until message_end, then expose/persist only the
-    // final assistant message that contains no tool-call blocks.
-    let assistantText = "";
-    let bufferedAssistantText = "";
-    let bufferingAssistantMessage = false;
-    let sawToolCallMessage = false;
-    let finalNoToolMessageSeen = false;
-    agent.subscribe((event) => {
-      if (event.type === "message_start") {
-        bufferingAssistantMessage = event.message.role === "assistant";
-        bufferedAssistantText = "";
-      } else if (
-        event.type === "message_update" &&
-        event.assistantMessageEvent.type === "text_delta" &&
-        bufferingAssistantMessage
-      ) {
-        bufferedAssistantText += event.assistantMessageEvent.delta;
-      } else if (event.type === "message_end" && bufferingAssistantMessage) {
-        const content = (event.message as { content?: unknown }).content;
-        const hasToolCall = Array.isArray(content) && content.some((block) =>
-          Boolean(block && typeof block === "object" && (block as { type?: unknown }).type === "toolCall"),
-        );
-        if (hasToolCall) {
-          sawToolCallMessage = true;
-          finalNoToolMessageSeen = false;
-        } else {
-          finalNoToolMessageSeen = true;
-          assistantText = bufferedAssistantText;
-        }
-        bufferingAssistantMessage = false;
-        bufferedAssistantText = "";
-      } else if (event.type === "tool_execution_end") {
-        writeChatSse(response, "tool_evidence", identity, {
-          completed: true,
-          isError: event.isError,
-        });
-      }
-    });
-    await agent.prompt(body.message);
-    if (agent.state.errorMessage) {
-      throw new Error(classifyAgentRuntimeError(agent.state.errorMessage));
+    if (tools.some((tool) => !CONTRACT_TOOL_ALLOWLIST.has(tool.name))) {
+      throw new Error("NBJ_AGENT_TOOL_NOT_ALLOWED");
     }
-    if (sawToolCallMessage && !finalNoToolMessageSeen) assistantText = "";
+    const graphRuntime = createAgentGraphRuntime({
+      model,
+      tools,
+      checkpointer,
+      onToolResult: (name, result) => {
+        const restored = result && typeof result === "object" && "details" in result
+          ? (result as { details: unknown }).details
+          : result;
+        evidence.set(name, restored);
+      },
+      onToolEvidence: (event) => writeChatSse(response, "tool_evidence", identity, {
+        completed: true,
+        name: event.name,
+        isError: event.isError,
+        ...(event.receiptId ? { receiptId: event.receiptId } : {}),
+      }),
+    });
+    const runSignal = AbortSignal.any([
+      abortController.signal,
+      AbortSignal.timeout(runtimeTimeout),
+    ]);
+    const graphResult = await withMetadataTrace({
+      enabled: env.LANGSMITH_TRACING === "true",
+      apiKey: env.LANGSMITH_API_KEY,
+      endpoint: env.LANGSMITH_ENDPOINT,
+      project: env.LANGSMITH_PROJECT,
+      hashKey: env.CONFIG_ENCRYPTION_KEY ?? env.AGENT_GATEWAY_SECRET,
+    }, {
+      provider,
+      model: modelId,
+      apiMode,
+      graphVersion: LANGGRAPH_RUNTIME_VERSION,
+      query: body.message,
+    }, () => graphRuntime.run({
+      userId,
+      batchId: body.batchId!,
+      sessionId: body.sessionId!,
+      clientMessageId: identity.clientMessageId,
+      message: body.message!,
+      history,
+      systemPrompt: SYSTEM_PROMPT,
+      signal: runSignal,
+      resume: existingUser,
+    }));
+    const assistantText = graphResult.text;
     if (assistantText) writeChatSse(response, "delta", identity, { text: assistantText });
 
     if (assistantText.trim()) {
@@ -562,7 +493,11 @@ async function handleChat(
         content: assistantText,
         evidence: {
           clientMessageId: identity.clientMessageId,
-          tools: Object.fromEntries(evidence),
+          tools: graphResult.toolEvidence,
+          deterministicEvidence: Object.fromEntries(evidence),
+          graphVersion: LANGGRAPH_RUNTIME_VERSION,
+          graphResumed: graphResult.resumed,
+          toolExecutions: graphResult.toolExecutions,
         },
       });
     }
@@ -571,12 +506,13 @@ async function handleChat(
     const code =
       error instanceof Error && error.message.startsWith("NBJ_")
         ? error.message
-        : "NBJ_AGENT_UNAVAILABLE";
+        : classifyAgentRuntimeError(error instanceof Error ? error.message : error);
     if (!messageStarted) {
       writeChatSse(response, "message_start", identity, { replayed: false });
     }
     writeChatSse(response, "error", identity, { code });
   } finally {
+    checkpointer?.close();
     clearInterval(heartbeat);
     if (!response.writableEnded && !response.destroyed) response.end();
   }
@@ -657,7 +593,15 @@ async function handleAdminConfig(
         updatedBy: userId,
       };
       if (next.enabled) {
-        configuredModel(next.provider, next.model, next.baseUrl, next.apiMode);
+        createLangChainModel({
+          provider: next.provider,
+          model: next.model,
+          baseUrl: next.baseUrl,
+          apiMode: next.apiMode,
+          apiKey: next.apiKey,
+          timeout: next.timeout ?? DEFAULT_RUNTIME_TIMEOUT,
+          maxOutputTokens: next.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+        });
         const validation = await validateProviderConnection(next);
         if (validation.modelListed === false) {
           throw new Error("NBJ_AGENT_MODEL_NOT_FOUND");
@@ -674,12 +618,15 @@ async function handleAdminConfig(
         ...existing,
         baseUrl: normalizeBaseUrl(existing.provider, existing.baseUrl),
       };
-      configuredModel(
-        normalized.provider,
-        normalized.model,
-        normalized.baseUrl,
-        normalized.apiMode ?? "responses",
-      );
+      createLangChainModel({
+        provider: normalized.provider,
+        model: normalized.model,
+        baseUrl: normalized.baseUrl,
+        apiMode: normalized.apiMode ?? "responses",
+        apiKey: normalized.apiKey,
+        timeout: normalized.timeout ?? DEFAULT_RUNTIME_TIMEOUT,
+        maxOutputTokens: normalized.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+      });
       const validation = await validateProviderConnection(normalized);
       if (validation.modelListed === false) {
         throw new Error("NBJ_AGENT_MODEL_NOT_FOUND");

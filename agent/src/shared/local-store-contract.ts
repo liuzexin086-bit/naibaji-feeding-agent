@@ -1,4 +1,4 @@
-import type { FeedingDecision } from "./agent-v2-contract.js";
+import type { DeviceWindow, FeedingDecision, FeedingMode } from "./agent-v2-contract.js";
 
 export interface LocalStoreOptions {
   filename: string;
@@ -31,6 +31,74 @@ export interface LocalSopTemplate {
   createdBy: string;
   sourceTemplateId: string | null;
   createdAt: string;
+  status: "draft" | "published" | "failed";
+  sourceMarkdown: string;
+  sourceSha256: string;
+  collectionRevision: string;
+  parserVersion: string;
+  embeddingModel: string;
+  chunkCount: number;
+  publishedAt: string | null;
+  indexError: string | null;
+}
+
+export interface SopKnowledgeChunk {
+  templateId: string;
+  chunkId: string;
+  sectionId: string;
+  chunkIndex: number;
+  title: string;
+  text: string;
+  sourceSha256: string;
+  collectionRevision: string;
+  lexicalTerms: string[];
+}
+
+export interface FrozenSopKnowledge {
+  templateId: string;
+  sopVersion: string;
+  sourceSha256: string;
+  collectionRevision: string;
+  parserVersion: string;
+  embeddingModel: string;
+}
+
+export interface TimedQuantityTemplateSnapshot {
+  mealTimes: string[];
+  excludedMealTimes: string[];
+  precisionGrams: number;
+  /** Times are disabled in this order; surviving times retain their original order. */
+  reductionPriority: string[];
+}
+
+export type FreeFeedingSlotNumber = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
+
+/** Immutable SOP row. All eight rows are frozen even when a row is disabled. */
+export interface FreeFeedingSlot extends DeviceWindow {
+  slot: FreeFeedingSlotNumber;
+  enabled: boolean;
+  label?: string;
+}
+
+export interface FreeFeedingTemplateSnapshot {
+  slots: FreeFeedingSlot[];
+  /** Derived from enabled slots only; this is the only window list sent to the deterministic core. */
+  windows: DeviceWindow[];
+  stageConditions: Record<string, unknown>;
+  exceptionBlockers: string[];
+}
+
+export interface DevicePlanSnapshot {
+  version: string;
+  sha256: string;
+  firstDay: {
+    mode: "timed_quantity";
+    mealTimes: string[];
+  };
+  templates: {
+    timed_quantity: TimedQuantityTemplateSnapshot;
+    free_feeding: FreeFeedingTemplateSnapshot;
+  };
 }
 
 export interface LocalBatch {
@@ -73,6 +141,37 @@ export interface CommitRecordInput {
   result: Record<string, unknown>;
 }
 
+export interface CommitModeSwitchInput {
+  userId: string;
+  batchId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  fromMode: FeedingMode;
+  toMode: FeedingMode;
+  devicePlanVersion: string;
+  devicePlanSha256: string;
+  nextData: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
+
+/**
+ * Administrator-approved replacement of the frozen SOP snapshot for one
+ * active batch. A pending current-day operation plan may be refreshed in the
+ * same transaction; a confirmed plan is never rewritten.
+ */
+export interface CommitSopMigrationInput {
+  userId: string;
+  batchId: string;
+  expectedRevision: number;
+  idempotencyKey: string;
+  actorUserId: string;
+  targetTemplateId: string;
+  nextData: Record<string, unknown>;
+  result: Record<string, unknown>;
+  auditDetails: Record<string, unknown>;
+  replacementDailyOperationPlan?: EnsureDailyOperationPlanInput;
+}
+
 export interface CommitResult {
   replayed: boolean;
   result: Record<string, unknown>;
@@ -98,6 +197,74 @@ export interface DailyObservation {
   data: Record<string, unknown>;
   idempotencyKey: string;
   createdAt: string;
+}
+
+export interface DailyOperationItem {
+  code: string;
+  title: string;
+  dueWindow: { startLocal: string; endLocal: string; endDayOffset?: 0 | 1 };
+  sopSection: string;
+  requiredObservationFields: string[];
+  safetyNotes: string[];
+}
+
+export interface DailyOperationPlan {
+  id: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  basedOnBatchRevision: number;
+  sopTemplateId: string;
+  sopSourceSha256: string;
+  devicePlanVersion: string;
+  devicePlanSha256: string;
+  selectedMode: FeedingMode;
+  effectiveMode: FeedingMode;
+  operations: DailyOperationItem[];
+  operationsSha256: string;
+  status: "pending" | "confirmed";
+  createdAt: string;
+}
+
+export interface DailyOperationConfirmation {
+  id: string;
+  planId: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  operationsSha256: string;
+  confirmedBy: string;
+  confirmedAt: string;
+  idempotencyKey: string;
+}
+
+export interface EnsureDailyOperationPlanInput {
+  id?: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  basedOnBatchRevision: number;
+  sopTemplateId: string;
+  sopSourceSha256: string;
+  devicePlanVersion: string;
+  devicePlanSha256: string;
+  selectedMode: FeedingMode;
+  effectiveMode: FeedingMode;
+  operations: DailyOperationItem[];
+  operationsSha256: string;
+}
+
+export interface ConfirmDailyOperationPlanInput {
+  id?: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  planId: string;
+  operationsSha256: string;
+  confirmedBy: string;
+  idempotencyKey: string;
+  /** Optional operator context, retained only in the audit event. */
+  note?: string;
 }
 
 export interface AppendDailyObservationInput {
@@ -195,7 +362,20 @@ export interface LocalStore {
   migrate(): void;
   getBatch(userId: string, batchId: string): LocalBatch | null;
   listBatches(userId: string, options?: BatchListOptions): LocalBatch[];
+  /** Administrator-only callers must enforce authorization before using this. */
+  listAllBatches(options?: BatchListOptions): LocalBatch[];
   listObservations(userId: string, batchId: string): DailyObservation[];
+  getDailyOperationPlan(userId: string, batchId: string, businessDate: string): DailyOperationPlan | null;
+  getDailyOperationConfirmation(
+    userId: string,
+    batchId: string,
+    businessDate: string,
+  ): DailyOperationConfirmation | null;
+  ensureDailyOperationPlan(input: EnsureDailyOperationPlanInput): DailyOperationPlan;
+  confirmDailyOperationPlan(input: ConfirmDailyOperationPlanInput): {
+    confirmation: DailyOperationConfirmation;
+    replayed: boolean;
+  };
   createBatch(input: CreateBatchInput): LocalBatch;
   appendDailyObservation(input: AppendDailyObservationInput): DailyObservation;
   saveDecision(input: SaveDecisionInput): FeedingDecision;
@@ -245,6 +425,8 @@ export interface LocalStore {
     confirmEmail: string;
   }): void;
   listSopTemplates(): LocalSopTemplate[];
+  getPublishedSopTemplate(): LocalSopTemplate | null;
+  getSopTemplate(templateId: string): LocalSopTemplate | null;
   createSopTemplate(input: {
     id?: string;
     version: string;
@@ -252,7 +434,20 @@ export interface LocalStore {
     config: Record<string, unknown>;
     createdBy: string;
     sourceTemplateId?: string | null;
+    sourceMarkdown?: string;
+    sourceSha256?: string;
+    collectionRevision?: string;
+    parserVersion?: string;
+    embeddingModel?: string;
   }): LocalSopTemplate;
+  publishSopTemplate(input: {
+    templateId: string;
+    chunks: SopKnowledgeChunk[];
+  }): LocalSopTemplate;
+  failSopTemplate(templateId: string, error: string): LocalSopTemplate;
+  listSopKnowledgeChunks(templateId: string): SopKnowledgeChunk[];
   commitAdvance(input: CommitAdvanceInput): CommitResult;
   commitRecord(input: CommitRecordInput): CommitResult;
+  commitModeSwitch(input: CommitModeSwitchInput): CommitResult;
+  commitSopMigration(input: CommitSopMigrationInput): CommitResult;
 }

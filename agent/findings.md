@@ -1,0 +1,69 @@
+# Findings & Decisions
+
+## Requirements
+
+- Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
+- Aggregate all routine human SOP actions for a business day into a separate onsite “今日操作” column.
+- Permit only one routine-operation confirmation per batch and business day.
+- Provide exactly eight administrator-editable free-feeding time-slot rows in SOP configuration.
+- Freeze the published slot configuration into new batches without changing existing batches.
+
+## Existing System Findings
+
+- Current LangGraph is a generic ReAct loop and can finalize without deterministic numeric evidence.
+- Local API already freezes timed/free templates and hashes the device plan.
+- Agent tools currently duplicate local decision construction, hardcode a generic free window and select the timed curve as the current decision.
+- Missing frozen run can fall back to the default SOP template for numeric decisions.
+- Cross-midnight remaining-meal adjustment compares `HH:mm` strings and can lose next-day meals.
+- Local timeline returns no SOP tasks and local decision draft persistence is unavailable.
+- Current canonical SOP has 22 operational chunks and excludes the filming appendix.
+
+## Implementation Baseline — 2026-08-04
+
+- The repository worktree already contains broad, uncommitted changes across the local API, tools, storage, LangGraph, deployment, UI, tests, and new planning artifacts. Treat all of them as user work; P0 implementation must be additive and must not reset, checkout, or overwrite them.
+- `src/container/tools.ts` still has the P0-01/P0-02 defect shape: local `currentRun()` can return `null`, `batchDecisionState()` then falls back to `DEFAULT_SOP_TEMPLATE`, and `productionDecisionsForBatch()` selects a timed-quantity decision regardless of the frozen selected mode.
+- `src/container/local-api.ts` already has a more complete frozen device-plan path, but its free-feeding snapshot currently accepts one to eight windows and has no fixed eight-slot/09:00-axis validation.
+- `src/decision/core.ts` still determines implicit remaining meals by lexically comparing `HH:mm` strings, which loses cross-midnight meals after 23:59. The P0-03 correction must use a business-day timeline, not another string comparison.
+- `src/agent/langgraph/runtime.ts` remains the generic ReAct loop. P0-04 therefore needs a deterministic evidence/response-validation layer before final text can contain operational numbers.
+
+## P0 Read-only Review — 2026-08-04
+
+- P0 is not release-ready. The existing suite passes, but none of the four mandatory gates has the dedicated implementation and acceptance evidence required by `task_plan.md`.
+- The smallest safe implementation order is: (1) one frozen-context/`BatchDecisionService` used by Agent and local API; (2) fail-closed revision/SOP-digest/device-plan-digest validation with no numeric fallback; (3) a shared 09:00 business-day normalizer for remaining meals and free-feeding windows; (4) deterministic evidence receipts plus numeric-whitelist response validation; and (5) a `p0-release-gate` command covering unit, integration, and Agent/local parity tests.
+- The safety review adds two linked guardrails: late admission that cannot retain the required 8–10 hour adaptation window before the fixed 17:00 teaching meal must escalate rather than silently reschedule, and the SOP engine must not permit a teaching interval that diverges from the fixed six-meal first-day schedule.
+- Required P0 regressions include missing/wrong/old frozen digest safe-blocks, Agent/local parity for selected/effective mode/hash/times/quantities, 23:30 retaining 02:00/05:00/08:00, 08:59 versus 09:00 date boundaries, cross-midnight/overlap/zero-duration window rejection, and rejection of missing/stale/tampered/invented numeric evidence.
+- Implementation is being serialized by the root agent because no new execution leaf can be created while the completed review threads remain counted against the agent limit. File ownership and the planned no-overwrite constraint remain unchanged.
+
+## Technical Decisions
+
+| Decision | Rationale |
+|---|---|
+| Daily plan and confirmation are separate persistent entities | Supports a frozen audit target and exactly-once confirmation |
+| Unique key uses batch plus business date | Enforces one confirmation at the database layer |
+| Operations list is hashed | Detects stale UI or altered confirmation payloads |
+| Later anomalies do not reopen daily confirmation | Preserves one-confirmation rule while retaining separate safety approval |
+| Eight ordered slots include `enabled` | Provides all 8 admin controls without requiring all 8 to run |
+| Cross-midnight windows normalize on a 09:00 business-day axis | Matches feeding operations and prevents lexical-time defects |
+| Complete orchestration contract lives in `task_plan.md` | Future Codex execution must not depend on chat history or an informal design note |
+| Short-lived `TurnGraph` routes into SOP-oriented subgraphs | Separates message lifecycle from long-lived batch, approval and daily-operation state |
+| Evidence receipts and numeric whitelist gate every answer | Prevents model-generated numbers or unverified tool claims from becoming operational advice |
+
+## Resources
+
+- `E:\obsidian_hermes\hermes\山川奶爸®超早期断奶SOP完整视频脚本.md`
+- `E:\plan\agent\src\agent\langgraph\runtime.ts`
+- `E:\plan\agent\src\container\local-api.ts`
+- `E:\plan\agent\src\container\tools.ts`
+- `E:\plan\agent\src\decision\core.ts`
+- `E:\plan\agent\src\local-db\schema.ts`
+- `E:\plan\admin.html`
+- `E:\plan\admin.js`
+- `E:\plan\agent\ui\liquid-index.html`
+
+## Issues to Preserve as Explicit Work
+
+- The four defects `P0-01` snapshot drift/currentRun null, `P0-02` frozen-SOP fallback, `P0-03` cross-midnight meal loss and `P0-04` missing numeric-evidence enforcement are mandatory release blockers.
+- SOP source says approximately 17:00 after 8–10 hours, while the product rule fixes six first-day times. Late admission must be blocked/escalated, not silently rescheduled.
+- SOP mentions free feeding at 20+ days, while product rules allow operator selection from day two. Frozen stage conditions remain the operational authority.
+- Water resumption and veterinary safety exceptions are not sufficiently specified for automatic device control.
+- Routine daily confirmation must not absorb abnormal, weak-pig disposition, mode-change or device-change approvals.

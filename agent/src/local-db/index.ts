@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { FeedingDecision } from "../shared/agent-v2-contract.js";
+import type { FeedingDecision, FeedingMode } from "../shared/agent-v2-contract.js";
 import type {
   AgentMessage,
   AgentSession,
@@ -10,15 +10,23 @@ import type {
   AuditInput,
   BatchListOptions,
   CommitAdvanceInput,
+  CommitModeSwitchInput,
   CommitRecordInput,
+  CommitSopMigrationInput,
   CommitResult,
   CreateBatchInput,
   CreateSessionInput,
+  DailyOperationConfirmation,
+  DailyOperationItem,
+  DailyOperationPlan,
   DailyObservation,
+  ConfirmDailyOperationPlanInput,
+  EnsureDailyOperationPlanInput,
   ListMessagesOptions,
   LocalBatch,
   LocalSession,
   LocalSopTemplate,
+  SopKnowledgeChunk,
   LocalStore,
   LocalStoreOptions,
   LocalUser,
@@ -32,6 +40,8 @@ type Row = Record<string, unknown>;
 export type LocalStoreErrorCode =
   | "LOCAL_STORE_CLOSED"
   | "LOCAL_STORE_BATCH_NOT_FOUND"
+  | "LOCAL_STORE_BATCH_TERMINAL"
+  | "LOCAL_STORE_DAILY_OPERATION_CONFIRMED"
   | "LOCAL_STORE_SESSION_NOT_FOUND"
   | "LOCAL_STORE_STALE_REVISION"
   | "LOCAL_STORE_IDEMPOTENCY_CONFLICT"
@@ -231,6 +241,239 @@ function sopTemplateFromRow(row: Row): LocalSopTemplate {
     createdBy: stringValue(row.created_by, "sop_templates.created_by"),
     sourceTemplateId: nullableString(row.source_template_id, "sop_templates.source_template_id"),
     createdAt: stringValue(row.created_at, "sop_templates.created_at"),
+    status: stringValue(row.status ?? "draft", "sop_templates.status") as LocalSopTemplate["status"],
+    sourceMarkdown: stringValue(row.source_markdown ?? "", "sop_templates.source_markdown"),
+    sourceSha256: stringValue(row.source_sha256 ?? "", "sop_templates.source_sha256"),
+    collectionRevision: stringValue(row.collection_revision ?? "", "sop_templates.collection_revision"),
+    parserVersion: stringValue(row.parser_version ?? "", "sop_templates.parser_version"),
+    embeddingModel: stringValue(row.embedding_model ?? "", "sop_templates.embedding_model"),
+    chunkCount: numberValue(row.chunk_count ?? 0, "sop_templates.chunk_count"),
+    publishedAt: nullableString(row.published_at ?? null, "sop_templates.published_at"),
+    indexError: nullableString(row.index_error ?? null, "sop_templates.index_error"),
+  };
+}
+
+function businessDate(value: string, field: string): string {
+  const date = requiredText(value, field);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `${field} must be YYYY-MM-DD`);
+  }
+  return date;
+}
+
+function sha256(value: string, field: string): string {
+  const digest = requiredText(value, field).toUpperCase();
+  if (!/^[A-F0-9]{64}$/.test(digest)) {
+    throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `${field} must be a SHA-256 digest`);
+  }
+  return digest;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function legacyFrozenSopSnapshotDigest(snapshot: Record<string, unknown>): string | null {
+  const templateId = typeof snapshot.templateId === "string" ? snapshot.templateId.trim() : "";
+  const version = typeof snapshot.version === "string" ? snapshot.version.trim() : "";
+  const sourceSha256 = typeof snapshot.sourceSha256 === "string" ? snapshot.sourceSha256.toUpperCase() : "";
+  const collectionRevision = typeof snapshot.collectionRevision === "string" ? snapshot.collectionRevision.trim() : "";
+  const parserVersion = typeof snapshot.parserVersion === "string" ? snapshot.parserVersion.trim() : "";
+  const embeddingModel = typeof snapshot.embeddingModel === "string" ? snapshot.embeddingModel.trim() : "";
+  const config = objectValue(snapshot.config);
+  if (!templateId || !version || !/^[A-F0-9]{64}$/.test(sourceSha256) ||
+      !collectionRevision || !parserVersion || !embeddingModel || !config) return null;
+  const immutable = {
+    templateId,
+    version,
+    sourceSha256,
+    collectionRevision,
+    parserVersion,
+    embeddingModel,
+    config,
+  };
+  return createHash("sha256").update(JSON.stringify(immutable).normalize("NFC"), "utf8").digest("hex").toUpperCase();
+}
+
+function legacyFreeFeedingSlots(windows: unknown): Record<string, unknown>[] | null {
+  if (!Array.isArray(windows) || windows.length > 8) return null;
+  const slots = Array.from({ length: 8 }, (_, index) => ({
+    slot: index + 1,
+    enabled: false,
+    label: `自由采食时段 ${index + 1}`,
+    startLocal: "09:00",
+    endLocal: "10:00",
+  }));
+  for (const [index, window] of windows.entries()) {
+    const row = objectValue(window);
+    const startLocal = typeof row?.startLocal === "string" ? row.startLocal : "";
+    const endLocal = typeof row?.endLocal === "string" ? row.endLocal : "";
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startLocal) ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(endLocal)) return null;
+    slots[index] = {
+      slot: index + 1,
+      enabled: true,
+      label: `自由采食时段 ${index + 1}`,
+      startLocal,
+      endLocal,
+    };
+  }
+  return slots;
+}
+
+function legacyDevicePlanDigest(snapshot: Record<string, unknown>): string | null {
+  const version = typeof snapshot.version === "string" ? snapshot.version : "";
+  const firstDay = objectValue(snapshot.firstDay);
+  const templates = objectValue(snapshot.templates);
+  if (!version || !firstDay || !templates) return null;
+  const immutable = { version, firstDay, templates };
+  return createHash("sha256").update(JSON.stringify(immutable).normalize("NFC"), "utf8").digest("hex").toUpperCase();
+}
+
+function dailyOperationItems(value: DailyOperationItem[]): DailyOperationItem[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "operations are required");
+  }
+  return value.map((item, index) => {
+    if (!item || typeof item !== "object") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `operations[${index}] is invalid`);
+    }
+    const dueWindow = item.dueWindow;
+    if (!dueWindow || typeof dueWindow !== "object" ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dueWindow.startLocal) ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dueWindow.endLocal) ||
+        (dueWindow.endDayOffset !== undefined && dueWindow.endDayOffset !== 0 && dueWindow.endDayOffset !== 1)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `operations[${index}].dueWindow is invalid`);
+    }
+    if (!Array.isArray(item.requiredObservationFields) || !Array.isArray(item.safetyNotes)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `operations[${index}] list fields are invalid`);
+    }
+    return {
+      code: requiredText(item.code, `operations[${index}].code`),
+      title: requiredText(item.title, `operations[${index}].title`),
+      dueWindow: {
+        startLocal: dueWindow.startLocal,
+        endLocal: dueWindow.endLocal,
+        ...(dueWindow.endDayOffset === undefined ? {} : { endDayOffset: dueWindow.endDayOffset }),
+      },
+      sopSection: requiredText(item.sopSection, `operations[${index}].sopSection`),
+      requiredObservationFields: item.requiredObservationFields.map((entry, fieldIndex) =>
+        requiredText(entry, `operations[${index}].requiredObservationFields[${fieldIndex}]`)),
+      safetyNotes: item.safetyNotes.map((entry, fieldIndex) =>
+        requiredText(entry, `operations[${index}].safetyNotes[${fieldIndex}]`)),
+    };
+  });
+}
+
+function digestDailyOperations(operations: DailyOperationItem[]): string {
+  return createHash("sha256")
+    .update(JSON.stringify(operations).normalize("NFC"), "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
+function dailyOperationMode(value: FeedingMode, field: string): FeedingMode {
+  if (value !== "timed_quantity" && value !== "free_feeding") {
+    throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `${field} is invalid`);
+  }
+  return value;
+}
+
+function operationItemsFromJson(value: unknown, field: string): DailyOperationItem[] {
+  const parsed: unknown = JSON.parse(stringValue(value, field));
+  if (!Array.isArray(parsed)) throw new Error(`Invalid database ${field}`);
+  return parsed.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error(`Invalid database ${field}`);
+    const row = item as Record<string, unknown>;
+    const dueWindow = row.dueWindow;
+    if (!dueWindow || typeof dueWindow !== "object" || Array.isArray(dueWindow)) {
+      throw new Error(`Invalid database ${field}`);
+    }
+    const window = dueWindow as Record<string, unknown>;
+    const startLocal = stringValue(window.startLocal, `${field}.dueWindow.startLocal`);
+    const endLocal = stringValue(window.endLocal, `${field}.dueWindow.endLocal`);
+    const endDayOffset = window.endDayOffset;
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(startLocal) ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(endLocal) ||
+        (endDayOffset !== undefined && endDayOffset !== 0 && endDayOffset !== 1)) {
+      throw new Error(`Invalid database ${field}.dueWindow`);
+    }
+    return {
+      code: stringValue(row.code, `${field}.code`),
+      title: stringValue(row.title, `${field}.title`),
+      dueWindow: {
+        startLocal,
+        endLocal,
+        ...(endDayOffset === undefined ? {} : { endDayOffset: endDayOffset as 0 | 1 }),
+      },
+      sopSection: stringValue(row.sopSection, `${field}.sopSection`),
+      requiredObservationFields: Array.isArray(row.requiredObservationFields)
+        ? row.requiredObservationFields.map((entry) => stringValue(entry, `${field}.requiredObservationFields`)) : [],
+      safetyNotes: Array.isArray(row.safetyNotes)
+        ? row.safetyNotes.map((entry) => stringValue(entry, `${field}.safetyNotes`)) : [],
+    };
+  });
+}
+
+function dailyOperationPlanFromRow(row: Row): DailyOperationPlan {
+  const status = stringValue(row.status, "daily_operation_plans.status");
+  if (status !== "pending" && status !== "confirmed") throw new Error("Invalid database daily_operation_plans.status");
+  const selectedMode = stringValue(row.selected_mode, "daily_operation_plans.selected_mode");
+  const effectiveMode = stringValue(row.effective_mode, "daily_operation_plans.effective_mode");
+  if ((selectedMode !== "timed_quantity" && selectedMode !== "free_feeding") ||
+      (effectiveMode !== "timed_quantity" && effectiveMode !== "free_feeding")) {
+    throw new Error("Invalid database daily_operation_plans.mode");
+  }
+  return {
+    id: stringValue(row.id, "daily_operation_plans.id"),
+    userId: stringValue(row.user_id, "daily_operation_plans.user_id"),
+    batchId: stringValue(row.batch_id, "daily_operation_plans.batch_id"),
+    businessDate: stringValue(row.business_date, "daily_operation_plans.business_date"),
+    basedOnBatchRevision: numberValue(row.based_on_batch_revision, "daily_operation_plans.based_on_batch_revision"),
+    sopTemplateId: stringValue(row.sop_template_id, "daily_operation_plans.sop_template_id"),
+    sopSourceSha256: stringValue(row.sop_source_sha256, "daily_operation_plans.sop_source_sha256"),
+    devicePlanVersion: stringValue(row.device_plan_version, "daily_operation_plans.device_plan_version"),
+    devicePlanSha256: stringValue(row.device_plan_sha256, "daily_operation_plans.device_plan_sha256"),
+    selectedMode: selectedMode,
+    effectiveMode,
+    operations: operationItemsFromJson(row.operations_json, "daily_operation_plans.operations_json"),
+    operationsSha256: stringValue(row.operations_sha256, "daily_operation_plans.operations_sha256"),
+    status,
+    createdAt: stringValue(row.created_at, "daily_operation_plans.created_at"),
+  };
+}
+
+function dailyOperationConfirmationFromRow(row: Row): DailyOperationConfirmation {
+  return {
+    id: stringValue(row.id, "daily_operation_confirmations.id"),
+    planId: stringValue(row.plan_id, "daily_operation_confirmations.plan_id"),
+    userId: stringValue(row.user_id, "daily_operation_confirmations.user_id"),
+    batchId: stringValue(row.batch_id, "daily_operation_confirmations.batch_id"),
+    businessDate: stringValue(row.business_date, "daily_operation_confirmations.business_date"),
+    operationsSha256: stringValue(row.operations_sha256, "daily_operation_confirmations.operations_sha256"),
+    confirmedBy: stringValue(row.confirmed_by, "daily_operation_confirmations.confirmed_by"),
+    confirmedAt: stringValue(row.confirmed_at, "daily_operation_confirmations.confirmed_at"),
+    idempotencyKey: stringValue(row.idempotency_key, "daily_operation_confirmations.idempotency_key"),
+  };
+}
+
+function sopChunkFromRow(row: Row): SopKnowledgeChunk {
+  const terms = JSON.parse(stringValue(row.lexical_terms_json, "sop_knowledge_chunks.lexical_terms_json")) as unknown;
+  if (!Array.isArray(terms) || !terms.every((term) => typeof term === "string")) {
+    throw new Error("Invalid database sop_knowledge_chunks.lexical_terms_json");
+  }
+  return {
+    templateId: stringValue(row.template_id, "sop_knowledge_chunks.template_id"),
+    chunkId: stringValue(row.chunk_id, "sop_knowledge_chunks.chunk_id"),
+    sectionId: stringValue(row.section_id, "sop_knowledge_chunks.section_id"),
+    chunkIndex: numberValue(row.chunk_index, "sop_knowledge_chunks.chunk_index"),
+    title: stringValue(row.title, "sop_knowledge_chunks.title"),
+    text: stringValue(row.text, "sop_knowledge_chunks.text"),
+    sourceSha256: stringValue(row.source_sha256, "sop_knowledge_chunks.source_sha256"),
+    collectionRevision: stringValue(row.collection_revision, "sop_knowledge_chunks.collection_revision"),
+    lexicalTerms: terms,
   };
 }
 
@@ -264,6 +507,9 @@ export class SqliteLocalStore implements LocalStore {
     this.#ensureOpen();
     this.#transaction(() => {
       this.#database.exec(INITIAL_SCHEMA);
+      const appliesFrozenSopDigestBackfill = !this.#database.prepare(
+        "SELECT 1 FROM schema_migrations WHERE version = ?",
+      ).get(MIGRATION_VERSION);
       // Existing development volumes may contain the pre-auth users table.
       // The product no longer migrates business data, but adding nullable
       // credential columns keeps a restart safe without copying or exposing
@@ -283,14 +529,78 @@ export class SqliteLocalStore implements LocalStore {
           this.#database.exec(`ALTER TABLE users ADD COLUMN ${name} ${definition}`);
         }
       }
+      const sopColumns = new Set(
+        (this.#database.prepare("PRAGMA table_info(sop_templates)").all() as Row[])
+          .map((row) => String(row.name)),
+      );
+      for (const [name, definition] of [
+        ["status", "TEXT NOT NULL DEFAULT 'draft'"],
+        ["source_markdown", "TEXT NOT NULL DEFAULT ''"],
+        ["source_sha256", "TEXT NOT NULL DEFAULT ''"],
+        ["collection_revision", "TEXT NOT NULL DEFAULT ''"],
+        ["parser_version", "TEXT NOT NULL DEFAULT ''"],
+        ["embedding_model", "TEXT NOT NULL DEFAULT ''"],
+        ["chunk_count", "INTEGER NOT NULL DEFAULT 0"],
+        ["published_at", "TEXT"],
+        ["index_error", "TEXT"],
+      ] as const) {
+        if (!sopColumns.has(name)) {
+          this.#database.exec(`ALTER TABLE sop_templates ADD COLUMN ${name} ${definition}`);
+        }
+      }
       this.#database.exec(`
         CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx
           ON users(email) WHERE email IS NOT NULL;
       `);
+      if (appliesFrozenSopDigestBackfill) this.#backfillLegacyFrozenSnapshots();
       this.#database.prepare(
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
       ).run(MIGRATION_VERSION, new Date().toISOString());
     });
+  }
+
+  #backfillLegacyFrozenSnapshots(): void {
+    const rows = this.#database.prepare(
+      "SELECT user_id, id, data_json FROM batches",
+    ).all() as Row[];
+    const update = this.#database.prepare(
+      "UPDATE batches SET data_json = ? WHERE user_id = ? AND id = ?",
+    );
+    for (const row of rows) {
+      const data = jsonObject(row.data_json, "batches.data_json");
+      const config = objectValue(data.config);
+      const snapshot = config && objectValue(config.sopTemplate);
+      let changed = false;
+      if (snapshot && !Object.prototype.hasOwnProperty.call(snapshot, "snapshotSha256")) {
+        const snapshotSha256 = legacyFrozenSopSnapshotDigest(snapshot);
+        if (snapshotSha256) {
+          snapshot.snapshotSha256 = snapshotSha256;
+          changed = true;
+        }
+      }
+      const devicePlan = config && objectValue(config.devicePlanSnapshot);
+      const templates = devicePlan && objectValue(devicePlan.templates);
+      const freeFeeding = templates && objectValue(templates.free_feeding);
+      if (devicePlan && freeFeeding && !Object.prototype.hasOwnProperty.call(freeFeeding, "slots")) {
+        const slots = legacyFreeFeedingSlots(freeFeeding.windows);
+        if (slots) {
+          freeFeeding.slots = slots;
+          const sha256 = legacyDevicePlanDigest(devicePlan);
+          if (sha256) {
+            devicePlan.sha256 = sha256;
+            changed = true;
+          } else {
+            delete freeFeeding.slots;
+          }
+        }
+      }
+      if (!changed) continue;
+      update.run(
+        serializeObject(data, "batches.data_json"),
+        stringValue(row.user_id, "batches.user_id"),
+        stringValue(row.id, "batches.id"),
+      );
+    }
   }
 
   getBatch(userId: string, batchId: string): LocalBatch | null {
@@ -313,6 +623,17 @@ export class SqliteLocalStore implements LocalStore {
     return rows.map(batchFromRow);
   }
 
+  listAllBatches(options: BatchListOptions = {}): LocalBatch[] {
+    this.#ensureOpen();
+    const limit = Math.min(nonNegativeInteger(options.limit ?? 500, "limit"), 2_000);
+    const rows = this.#database.prepare(`
+      SELECT * FROM batches
+      ORDER BY updated_at DESC, created_at DESC
+      LIMIT ?
+    `).all(limit) as Row[];
+    return rows.map(batchFromRow);
+  }
+
   listObservations(userId: string, batchId: string): DailyObservation[] {
     this.#ensureOpen();
     const rows = this.#database.prepare(`
@@ -324,6 +645,219 @@ export class SqliteLocalStore implements LocalStore {
       requiredText(batchId, "batchId"),
     ) as Row[];
     return rows.map(observationFromRow);
+  }
+
+  getDailyOperationPlan(
+    userId: string,
+    batchId: string,
+    businessDateValue: string,
+  ): DailyOperationPlan | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(`
+      SELECT * FROM daily_operation_plans
+      WHERE user_id = ? AND batch_id = ? AND business_date = ?
+    `).get(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      businessDate(businessDateValue, "businessDate"),
+    ) as Row | undefined;
+    return row ? dailyOperationPlanFromRow(row) : null;
+  }
+
+  getDailyOperationConfirmation(
+    userId: string,
+    batchId: string,
+    businessDateValue: string,
+  ): DailyOperationConfirmation | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(`
+      SELECT * FROM daily_operation_confirmations
+      WHERE user_id = ? AND batch_id = ? AND business_date = ?
+    `).get(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      businessDate(businessDateValue, "businessDate"),
+    ) as Row | undefined;
+    return row ? dailyOperationConfirmationFromRow(row) : null;
+  }
+
+  ensureDailyOperationPlan(input: EnsureDailyOperationPlanInput): DailyOperationPlan {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const dateLocal = businessDate(input.businessDate, "businessDate");
+    const existing = this.getDailyOperationPlan(userId, batchId, dateLocal);
+    if (existing) return existing;
+
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    if (batch.status !== "active") {
+      throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation plans require an active batch");
+    }
+    const operations = dailyOperationItems(input.operations);
+    const operationsSha256 = sha256(input.operationsSha256, "operationsSha256");
+    if (digestDailyOperations(operations) !== operationsSha256) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "operationsSha256 does not match operations");
+    }
+    const id = requiredText(input.id ?? randomUUID(), "id");
+    const now = new Date().toISOString();
+    this.#transaction(() => {
+      const concurrent = this.#database.prepare(`
+        SELECT * FROM daily_operation_plans
+        WHERE user_id = ? AND batch_id = ? AND business_date = ?
+      `).get(userId, batchId, dateLocal) as Row | undefined;
+      if (concurrent) return;
+      this.#database.prepare(`
+        INSERT INTO daily_operation_plans (
+          id, user_id, batch_id, business_date, based_on_batch_revision,
+          sop_template_id, sop_source_sha256, device_plan_version, device_plan_sha256,
+          selected_mode, effective_mode, operations_json, operations_sha256, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+      `).run(
+        id,
+        userId,
+        batchId,
+        dateLocal,
+        nonNegativeInteger(input.basedOnBatchRevision, "basedOnBatchRevision"),
+        requiredText(input.sopTemplateId, "sopTemplateId"),
+        sha256(input.sopSourceSha256, "sopSourceSha256"),
+        requiredText(input.devicePlanVersion, "devicePlanVersion"),
+        sha256(input.devicePlanSha256, "devicePlanSha256"),
+        dailyOperationMode(input.selectedMode, "selectedMode"),
+        dailyOperationMode(input.effectiveMode, "effectiveMode"),
+        JSON.stringify(operations),
+        operationsSha256,
+        now,
+      );
+    });
+    const stored = this.getDailyOperationPlan(userId, batchId, dateLocal);
+    if (!stored) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation plan was not stored");
+    return stored;
+  }
+
+  confirmDailyOperationPlan(input: ConfirmDailyOperationPlanInput): {
+    confirmation: DailyOperationConfirmation;
+    replayed: boolean;
+  } {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const dateLocal = businessDate(input.businessDate, "businessDate");
+    const planId = requiredText(input.planId, "planId");
+    const operationsSha256 = sha256(input.operationsSha256, "operationsSha256");
+    const confirmedBy = requiredText(input.confirmedBy, "confirmedBy");
+    const idempotencyKey = requiredText(input.idempotencyKey, "idempotencyKey");
+    const note = input.note === undefined ? undefined : requiredText(input.note, "note").slice(0, 500);
+    if (confirmedBy !== userId) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "confirmedBy must be the batch owner");
+    }
+    const replay = this.#database.prepare(`
+      SELECT * FROM daily_operation_confirmations
+      WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, idempotencyKey) as Row | undefined;
+    if (replay) {
+      const confirmation = dailyOperationConfirmationFromRow(replay);
+      if (confirmation.batchId !== batchId || confirmation.businessDate !== dateLocal ||
+          confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256 ||
+          confirmation.confirmedBy !== confirmedBy) this.#idempotencyConflict();
+      return { confirmation, replayed: true };
+    }
+    const alreadyConfirmed = this.#database.prepare(`
+      SELECT * FROM daily_operation_confirmations
+      WHERE user_id = ? AND batch_id = ? AND business_date = ?
+    `).get(userId, batchId, dateLocal) as Row | undefined;
+    if (alreadyConfirmed) {
+      const confirmation = dailyOperationConfirmationFromRow(alreadyConfirmed);
+      if (confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256) {
+        this.#idempotencyConflict();
+      }
+      return { confirmation, replayed: true };
+    }
+
+    const plan = this.#database.prepare(`
+      SELECT * FROM daily_operation_plans
+      WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+    `).get(planId, userId, batchId, dateLocal) as Row | undefined;
+    if (!plan) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation plan not found");
+    const storedPlan = dailyOperationPlanFromRow(plan);
+    if (storedPlan.operationsSha256 !== operationsSha256) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation hash does not match plan");
+    }
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    if (batch.status !== "active") {
+      throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation confirmations require an active batch");
+    }
+
+    const id = requiredText(input.id ?? randomUUID(), "id");
+    const now = new Date().toISOString();
+    return this.#transaction(() => {
+      const transactionReplay = this.#database.prepare(`
+        SELECT * FROM daily_operation_confirmations
+        WHERE user_id = ? AND idempotency_key = ?
+      `).get(userId, idempotencyKey) as Row | undefined;
+      if (transactionReplay) {
+        const confirmation = dailyOperationConfirmationFromRow(transactionReplay);
+        if (confirmation.batchId !== batchId || confirmation.businessDate !== dateLocal ||
+            confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256 ||
+            confirmation.confirmedBy !== confirmedBy) this.#idempotencyConflict();
+        return { confirmation, replayed: true };
+      }
+      const transactionDayConfirmation = this.#database.prepare(`
+        SELECT * FROM daily_operation_confirmations
+        WHERE user_id = ? AND batch_id = ? AND business_date = ?
+      `).get(userId, batchId, dateLocal) as Row | undefined;
+      if (transactionDayConfirmation) {
+        const confirmation = dailyOperationConfirmationFromRow(transactionDayConfirmation);
+        if (confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256) {
+          this.#idempotencyConflict();
+        }
+        return { confirmation, replayed: true };
+      }
+      const update = this.#database.prepare(`
+        UPDATE daily_operation_plans SET status = 'confirmed'
+        WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ? AND status = 'pending'
+      `).run(planId, userId, batchId, dateLocal);
+      if (Number(update.changes) !== 1) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation plan is not pending");
+      }
+      this.#database.prepare(`
+        INSERT INTO daily_operation_confirmations (
+          id, plan_id, user_id, batch_id, business_date, operations_sha256,
+          confirmed_by, confirmed_at, idempotency_key
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(id, planId, userId, batchId, dateLocal, operationsSha256, confirmedBy, now, idempotencyKey);
+      this.#database.prepare(`
+        INSERT INTO audit_events (
+          user_id, id, batch_id, action, details_json, idempotency_key, created_at
+        ) VALUES (?, ?, ?, 'daily_operations.confirmed', ?, ?, ?)
+      `).run(
+        userId,
+        randomUUID(),
+        batchId,
+        JSON.stringify({
+          planId,
+          businessDate: dateLocal,
+          operationsSha256,
+          actorUserId: confirmedBy,
+          basedOnBatchRevision: storedPlan.basedOnBatchRevision,
+          sopTemplateId: storedPlan.sopTemplateId,
+          sopSourceSha256: storedPlan.sopSourceSha256,
+          devicePlanVersion: storedPlan.devicePlanVersion,
+          devicePlanSha256: storedPlan.devicePlanSha256,
+          selectedMode: storedPlan.selectedMode,
+          effectiveMode: storedPlan.effectiveMode,
+          ...(note ? { note } : {}),
+        }),
+        `daily-operations-confirm:${idempotencyKey}`,
+        now,
+      );
+      const confirmationRow = this.#database.prepare(
+        "SELECT * FROM daily_operation_confirmations WHERE id = ?",
+      ).get(id) as Row | undefined;
+      if (!confirmationRow) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation confirmation was not stored");
+      return { confirmation: dailyOperationConfirmationFromRow(confirmationRow), replayed: false };
+    });
   }
 
   createBatch(input: CreateBatchInput): LocalBatch {
@@ -722,6 +1256,24 @@ export class SqliteLocalStore implements LocalStore {
     return rows.map(sopTemplateFromRow);
   }
 
+  getPublishedSopTemplate(): LocalSopTemplate | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(`
+      SELECT t.* FROM sop_publication_state s
+      JOIN sop_templates t ON t.id = s.active_template_id
+      WHERE s.singleton = 1 AND t.status = 'published'
+    `).get() as Row | undefined;
+    return row ? sopTemplateFromRow(row) : null;
+  }
+
+  getSopTemplate(templateId: string): LocalSopTemplate | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(
+      "SELECT * FROM sop_templates WHERE id = ?",
+    ).get(requiredText(templateId, "templateId")) as Row | undefined;
+    return row ? sopTemplateFromRow(row) : null;
+  }
+
   createSopTemplate(input: {
     id?: string;
     version: string;
@@ -729,6 +1281,11 @@ export class SqliteLocalStore implements LocalStore {
     config: Record<string, unknown>;
     createdBy: string;
     sourceTemplateId?: string | null;
+    sourceMarkdown?: string;
+    sourceSha256?: string;
+    collectionRevision?: string;
+    parserVersion?: string;
+    embeddingModel?: string;
   }): LocalSopTemplate {
     this.#ensureOpen();
     const version = requiredText(input.version, "version");
@@ -741,8 +1298,10 @@ export class SqliteLocalStore implements LocalStore {
     const now = new Date().toISOString();
     this.#database.prepare(`
       INSERT INTO sop_templates (
-        id, version, name, config_json, created_by, source_template_id, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        id, version, name, config_json, created_by, source_template_id, created_at,
+        status, source_markdown, source_sha256, collection_revision,
+        parser_version, embedding_model
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?)
     `).run(
       id,
       version,
@@ -751,11 +1310,84 @@ export class SqliteLocalStore implements LocalStore {
       createdBy,
       input.sourceTemplateId ?? null,
       now,
+      input.sourceMarkdown ?? "",
+      input.sourceSha256 ?? "",
+      input.collectionRevision ?? "",
+      input.parserVersion ?? "",
+      input.embeddingModel ?? "",
     );
     const row = this.#database.prepare(
       "SELECT * FROM sop_templates WHERE id = ?",
     ).get(id) as Row;
     return sopTemplateFromRow(row);
+  }
+
+  publishSopTemplate(input: { templateId: string; chunks: SopKnowledgeChunk[] }): LocalSopTemplate {
+    this.#ensureOpen();
+    const templateId = requiredText(input.templateId, "templateId");
+    const template = this.getSopTemplate(templateId);
+    if (!template) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP template not found");
+    if (template.status === "published") return template;
+    if (!template.sourceSha256 || !template.collectionRevision || !template.parserVersion || !template.embeddingModel) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP knowledge metadata incomplete");
+    }
+    if (input.chunks.length === 0) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP chunks are required");
+    }
+    const now = new Date().toISOString();
+    this.#transaction(() => {
+      this.#database.prepare("DELETE FROM sop_knowledge_chunks WHERE template_id = ?").run(templateId);
+      const insert = this.#database.prepare(`
+        INSERT INTO sop_knowledge_chunks (
+          template_id, chunk_id, section_id, chunk_index, title, text,
+          source_sha256, collection_revision, lexical_terms_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const chunk of input.chunks) {
+        if (chunk.templateId !== templateId || chunk.sourceSha256 !== template.sourceSha256 ||
+            chunk.collectionRevision !== template.collectionRevision) {
+          throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP chunk metadata mismatch");
+        }
+        insert.run(
+          templateId, requiredText(chunk.chunkId, "chunkId"), requiredText(chunk.sectionId, "sectionId"),
+          nonNegativeInteger(chunk.chunkIndex, "chunkIndex"), requiredText(chunk.title, "title"),
+          requiredText(chunk.text, "text"), chunk.sourceSha256, chunk.collectionRevision,
+          JSON.stringify(chunk.lexicalTerms),
+        );
+      }
+      this.#database.prepare(`
+        UPDATE sop_templates SET status = 'published', chunk_count = ?, published_at = ?, index_error = NULL
+        WHERE id = ? AND status IN ('draft', 'failed')
+      `).run(input.chunks.length, now, templateId);
+      this.#database.prepare(`
+        INSERT INTO sop_publication_state (singleton, active_template_id, updated_at)
+        VALUES (1, ?, ?)
+        ON CONFLICT(singleton) DO UPDATE SET active_template_id = excluded.active_template_id,
+          updated_at = excluded.updated_at
+      `).run(templateId, now);
+    });
+    return this.getSopTemplate(templateId)!;
+  }
+
+  failSopTemplate(templateId: string, error: string): LocalSopTemplate {
+    this.#ensureOpen();
+    const id = requiredText(templateId, "templateId");
+    this.#database.prepare(`
+      UPDATE sop_templates SET status = 'failed', index_error = ?
+      WHERE id = ? AND status <> 'published'
+    `).run(requiredText(error, "error").slice(0, 2_000), id);
+    const result = this.getSopTemplate(id);
+    if (!result) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP template not found");
+    return result;
+  }
+
+  listSopKnowledgeChunks(templateId: string): SopKnowledgeChunk[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT * FROM sop_knowledge_chunks WHERE template_id = ?
+      ORDER BY section_id ASC, chunk_index ASC
+    `).all(requiredText(templateId, "templateId")) as Row[];
+    return rows.map(sopChunkFromRow);
   }
 
   commitAdvance(input: CommitAdvanceInput): CommitResult {
@@ -855,6 +1487,200 @@ export class SqliteLocalStore implements LocalStore {
           user_id, batch_id, operation, idempotency_key, response_json, created_at
         ) VALUES (?, ?, 'record', ?, ?, ?)
       `).run(userId, batchId, key, resultJson, now);
+    });
+    return { replayed: false, result: input.result };
+  }
+
+  commitModeSwitch(input: CommitModeSwitchInput): CommitResult {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const key = requiredText(input.idempotencyKey, "idempotencyKey");
+    const replay = this.#database.prepare(`
+      SELECT * FROM audit_events WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, key) as Row | undefined;
+    if (replay) {
+      const event = auditFromRow(replay);
+      const details = event.details;
+      if (
+        event.batchId !== batchId ||
+        event.action !== "batch.mode_switched" ||
+        details.toMode !== input.toMode ||
+        details.previousRevision !== input.expectedRevision
+      ) {
+        this.#idempotencyConflict();
+      }
+      const response = details.response;
+      if (!response || typeof response !== "object" || Array.isArray(response)) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "mode switch replay is invalid");
+      }
+      return { replayed: true, result: response as Record<string, unknown> };
+    }
+
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
+    if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
+    const now = new Date().toISOString();
+    const resultJson = serializeObject(input.result, "result");
+    const details = {
+      fromMode: input.fromMode,
+      toMode: input.toMode,
+      previousRevision: expected,
+      newRevision: expected + 1,
+      devicePlanVersion: requiredText(input.devicePlanVersion, "devicePlanVersion"),
+      devicePlanSha256: requiredText(input.devicePlanSha256, "devicePlanSha256"),
+      response: JSON.parse(resultJson) as Record<string, unknown>,
+    };
+
+    this.#transaction(() => {
+      const update = this.#database.prepare(`
+        UPDATE batches SET revision = ?, data_json = ?, updated_at = ?
+        WHERE user_id = ? AND id = ? AND revision = ?
+      `).run(
+        expected + 1,
+        serializeObject(input.nextData, "nextData"),
+        now,
+        userId,
+        batchId,
+        expected,
+      );
+      if (Number(update.changes) !== 1) this.#staleRevision(expected + 1, expected);
+      this.#database.prepare(`
+        INSERT INTO audit_events (
+          user_id, id, batch_id, action, details_json, idempotency_key, created_at
+        ) VALUES (?, ?, ?, 'batch.mode_switched', ?, ?, ?)
+      `).run(userId, randomUUID(), batchId, serializeObject(details, "details"), key, now);
+    });
+    return { replayed: false, result: input.result };
+  }
+
+  commitSopMigration(input: CommitSopMigrationInput): CommitResult {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const key = requiredText(input.idempotencyKey, "idempotencyKey");
+    const targetTemplateId = requiredText(input.targetTemplateId, "targetTemplateId");
+    const actorUserId = requiredText(input.actorUserId, "actorUserId");
+    const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
+    const replay = this.#database.prepare(`
+      SELECT * FROM audit_events WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, key) as Row | undefined;
+    if (replay) {
+      const event = auditFromRow(replay);
+      const details = event.details;
+      if (
+        event.batchId !== batchId ||
+        event.action !== "batch.sop_migrated" ||
+        details.targetTemplateId !== targetTemplateId ||
+        details.previousRevision !== expected ||
+        details.actorUserId !== actorUserId
+      ) this.#idempotencyConflict();
+      const response = details.response;
+      if (!response || typeof response !== "object" || Array.isArray(response)) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP migration replay is invalid");
+      }
+      return { replayed: true, result: response as Record<string, unknown> };
+    }
+
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    if (batch.status !== "active") {
+      throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "SOP migration requires an active batch");
+    }
+    if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
+
+    const replacement = input.replacementDailyOperationPlan;
+    if (replacement) {
+      if (replacement.userId !== userId || replacement.batchId !== batchId) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "replacement daily operation plan belongs to another batch");
+      }
+      nonNegativeInteger(replacement.basedOnBatchRevision, "replacement.basedOnBatchRevision");
+      requiredText(replacement.sopTemplateId, "replacement.sopTemplateId");
+      sha256(replacement.sopSourceSha256, "replacement.sopSourceSha256");
+      requiredText(replacement.devicePlanVersion, "replacement.devicePlanVersion");
+      sha256(replacement.devicePlanSha256, "replacement.devicePlanSha256");
+      dailyOperationMode(replacement.selectedMode, "replacement.selectedMode");
+      dailyOperationMode(replacement.effectiveMode, "replacement.effectiveMode");
+      const replacementOperations = dailyOperationItems(replacement.operations);
+      const replacementHash = sha256(replacement.operationsSha256, "replacement.operationsSha256");
+      if (digestDailyOperations(replacementOperations) !== replacementHash) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "replacement operations hash does not match operations");
+      }
+    }
+
+    const now = new Date().toISOString();
+    const resultJson = serializeObject(input.result, "result");
+    const details = {
+      ...input.auditDetails,
+      actorUserId,
+      targetTemplateId,
+      previousRevision: expected,
+      newRevision: expected + 1,
+      response: JSON.parse(resultJson) as Record<string, unknown>,
+    };
+
+    this.#transaction(() => {
+      const update = this.#database.prepare(`
+        UPDATE batches SET revision = ?, data_json = ?, updated_at = ?
+        WHERE user_id = ? AND id = ? AND revision = ?
+      `).run(
+        expected + 1,
+        serializeObject(input.nextData, "nextData"),
+        now,
+        userId,
+        batchId,
+        expected,
+      );
+      if (Number(update.changes) !== 1) this.#staleRevision(expected + 1, expected);
+
+      if (replacement) {
+        const existingRow = this.#database.prepare(`
+          SELECT * FROM daily_operation_plans
+          WHERE user_id = ? AND batch_id = ? AND business_date = ?
+        `).get(userId, batchId, businessDate(replacement.businessDate, "replacement.businessDate")) as Row | undefined;
+        if (existingRow) {
+          const existing = dailyOperationPlanFromRow(existingRow);
+          if (existing.status !== "pending") {
+            throw new LocalStoreError(
+              "LOCAL_STORE_DAILY_OPERATION_CONFIRMED",
+              "confirmed daily operation plans cannot be rewritten",
+            );
+          }
+          const replacementOperations = dailyOperationItems(replacement.operations);
+          const replacementHash = sha256(replacement.operationsSha256, "replacement.operationsSha256");
+          const refreshed = this.#database.prepare(`
+            UPDATE daily_operation_plans
+            SET based_on_batch_revision = ?, sop_template_id = ?, sop_source_sha256 = ?,
+                device_plan_version = ?, device_plan_sha256 = ?, selected_mode = ?, effective_mode = ?,
+                operations_json = ?, operations_sha256 = ?
+            WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ? AND status = 'pending'
+          `).run(
+            nonNegativeInteger(replacement.basedOnBatchRevision, "replacement.basedOnBatchRevision"),
+            requiredText(replacement.sopTemplateId, "replacement.sopTemplateId"),
+            sha256(replacement.sopSourceSha256, "replacement.sopSourceSha256"),
+            requiredText(replacement.devicePlanVersion, "replacement.devicePlanVersion"),
+            sha256(replacement.devicePlanSha256, "replacement.devicePlanSha256"),
+            dailyOperationMode(replacement.selectedMode, "replacement.selectedMode"),
+            dailyOperationMode(replacement.effectiveMode, "replacement.effectiveMode"),
+            JSON.stringify(replacementOperations),
+            replacementHash,
+            existing.id,
+            userId,
+            batchId,
+            businessDate(replacement.businessDate, "replacement.businessDate"),
+          );
+          if (Number(refreshed.changes) !== 1) {
+            throw new LocalStoreError("LOCAL_STORE_DAILY_OPERATION_CONFIRMED", "daily operation plan changed during migration");
+          }
+        }
+      }
+
+      this.#database.prepare(`
+        INSERT INTO audit_events (
+          user_id, id, batch_id, action, details_json, idempotency_key, created_at
+        ) VALUES (?, ?, ?, 'batch.sop_migrated', ?, ?, ?)
+      `).run(userId, randomUUID(), batchId, serializeObject(details, "details"), key, now);
     });
     return { replayed: false, result: input.result };
   }
@@ -1125,6 +1951,7 @@ export type {
   AppendMessageInput,
   AuditEvent,
   AuditInput,
+  CommitModeSwitchInput,
   CreateBatchInput,
   CreateSessionInput,
   DailyObservation,
@@ -1132,6 +1959,7 @@ export type {
   LocalBatch,
   LocalSession,
   LocalSopTemplate,
+  SopKnowledgeChunk,
   LocalStore,
   LocalStoreOptions,
   LocalUser,

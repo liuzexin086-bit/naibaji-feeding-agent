@@ -10,26 +10,26 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
+    "p0-release-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/batch-decision-service.test.ts tests/langgraph-runtime.test.ts tests/local-integration/local-tools.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts",
     "test:watch": "vitest",
-    "cf:types": "wrangler types",
-    "dev": "wrangler dev",
     "prepare:assets": "node scripts/prepare-assets.mjs",
-    "prepare:container": "node scripts/prepare-container.mjs",
-    "deploy:staging": "npm run prepare:assets && npm run prepare:container && wrangler deploy --env staging --dry-run",
     "start:container": "node dist/container/server.js"
   },
   "dependencies": {
-    "@cloudflare/containers": "0.3.7",
-    "@earendil-works/pi-agent-core": "0.83.0",
-    "@earendil-works/pi-ai": "0.83.0",
+    "@langchain/anthropic": "^1.5.2",
+    "@langchain/core": "^1.2.4",
+    "@langchain/langgraph": "^1.4.9",
+    "@langchain/langgraph-checkpoint": "^1.1.3",
+    "@langchain/openai": "^1.5.5",
     "@supabase/supabase-js": "2.111.0",
     "jose": "6.2.5",
-    "typebox": "1.3.7"
+    "langsmith": "^0.8.9",
+    "typebox": "1.3.7",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
     "typescript": "5.9.3",
-    "vitest": "3.2.4",
-    "wrangler": "4.116.0"
+    "vitest": "3.2.4"
   }
 }
