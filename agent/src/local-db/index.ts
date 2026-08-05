@@ -720,7 +720,48 @@ export class SqliteLocalStore implements LocalStore {
     const batchId = requiredText(input.batchId, "batchId");
     const dateLocal = businessDate(input.businessDate, "businessDate");
     const existing = this.getDailyOperationPlan(userId, batchId, dateLocal);
-    if (existing) return existing;
+    if (existing) {
+      if (existing.status !== "pending") return existing;
+      const operations = dailyOperationItems(input.operations);
+      const operationsSha256 = sha256(input.operationsSha256, "operationsSha256");
+      if (digestDailyOperations(operations) !== operationsSha256) {
+        throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "operationsSha256 does not match operations");
+      }
+      if (existing.operationsSha256 === operationsSha256) return existing;
+      const batch = this.getBatch(userId, batchId);
+      if (!batch) this.#batchNotFound();
+      if (batch.status !== "active") {
+        throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation plans require an active batch");
+      }
+      this.#database.prepare(`
+        UPDATE daily_operation_plans SET
+          based_on_batch_revision = ?,
+          sop_template_id = ?,
+          sop_source_sha256 = ?,
+          device_plan_version = ?,
+          device_plan_sha256 = ?,
+          selected_mode = ?,
+          effective_mode = ?,
+          operations_json = ?,
+          operations_sha256 = ?,
+          status = 'pending'
+        WHERE id = ? AND status = 'pending'
+      `).run(
+        nonNegativeInteger(input.basedOnBatchRevision, "basedOnBatchRevision"),
+        requiredText(input.sopTemplateId, "sopTemplateId"),
+        sha256(input.sopSourceSha256, "sopSourceSha256"),
+        requiredText(input.devicePlanVersion, "devicePlanVersion"),
+        sha256(input.devicePlanSha256, "devicePlanSha256"),
+        dailyOperationMode(input.selectedMode, "selectedMode"),
+        dailyOperationMode(input.effectiveMode, "effectiveMode"),
+        JSON.stringify(operations),
+        operationsSha256,
+        existing.id,
+      );
+      const refreshed = this.getDailyOperationPlan(userId, batchId, dateLocal);
+      if (!refreshed) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation plan was not refreshed");
+      return refreshed;
+    }
 
     const batch = this.getBatch(userId, batchId);
     if (!batch) this.#batchNotFound();

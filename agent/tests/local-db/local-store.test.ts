@@ -367,6 +367,56 @@ describe("SQLite local store", () => {
     database.close();
   });
 
+  it("refreshes only pending daily plans when materialized operations change", () => {
+    const { store } = fileStore();
+    store.createBatch({ userId: "user-a", batchId: "batch-refresh", revision: 6 });
+    const firstOps = dailyOperations();
+    const baseInput = {
+      userId: "user-a",
+      batchId: "batch-refresh",
+      businessDate: "2026-08-05",
+      basedOnBatchRevision: 6,
+      sopTemplateId: "frozen-sop-v1",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v1",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity" as const,
+      effectiveMode: "timed_quantity" as const,
+    };
+    const first = store.ensureDailyOperationPlan({
+      ...baseInput,
+      operations: firstOps,
+      operationsSha256: dailyOperationsSha256(firstOps),
+    });
+    const changedOps = firstOps.map((item) => ({ ...item, title: "日常巡栏（刷新）" }));
+    const refreshed = store.ensureDailyOperationPlan({
+      ...baseInput,
+      operations: changedOps,
+      operationsSha256: dailyOperationsSha256(changedOps),
+    });
+    expect(refreshed.id).toBe(first.id);
+    expect(refreshed.operationsSha256).not.toBe(first.operationsSha256);
+    expect(refreshed.operations[0].title).toBe("日常巡栏（刷新）");
+
+    store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-refresh",
+      businessDate: refreshed.businessDate,
+      planId: refreshed.id,
+      operationsSha256: refreshed.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "refresh-confirm-1",
+    });
+    const thirdOps = changedOps.map((item) => ({ ...item, title: "不应刷新" }));
+    const locked = store.ensureDailyOperationPlan({
+      ...baseInput,
+      operations: thirdOps,
+      operationsSha256: dailyOperationsSha256(thirdOps),
+    });
+    expect(locked.operationsSha256).toBe(refreshed.operationsSha256);
+    store.close();
+  });
+
   it("fails predictably after close and allows close to be repeated", () => {
     const store = memoryStore();
     store.close();

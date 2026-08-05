@@ -75,7 +75,13 @@ describe("today operations API", () => {
       operationsSha256: string; operations: Array<{ code: string }>;
     } };
     expect(firstBody.plan).toMatchObject({ status: "pending", basedOnBatchRevision: 0 });
-    expect(firstBody.plan.operations.map((item) => item.code)).toEqual(["first_day_teaching"]);
+    expect(firstBody.plan.operations.map((item) => item.code)).toEqual([
+      "first_day_admission",
+      "first_day_health_check",
+      "first_day_water_stop",
+      "first_day_mode_setup",
+      "first_day_teaching",
+    ]);
 
     const second = await request(base, `/api/batches/${createdBody.batch.id}/today-operations`, {
       headers: { cookie },

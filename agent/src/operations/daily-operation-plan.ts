@@ -47,6 +47,37 @@ function enabled(config: Record<string, unknown>, key: string): boolean {
   return config[key] !== false;
 }
 
+function plusMinutes(localTime: string, minutes: number): string {
+  const [hour, minute] = localTime.split(":").map(Number);
+  const total = (hour * 60 + minute + minutes) % (24 * 60);
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function customTaskOperations(source: DailyOperationPlanSource): DailyOperationItem[] {
+  const definitions = Array.isArray(source.sopConfig.customTasks)
+    ? source.sopConfig.customTasks
+    : [];
+  const items: DailyOperationItem[] = [];
+  for (const raw of definitions) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const definition = raw as Record<string, unknown>;
+    if (definition.ageDay !== source.dayAge ||
+        typeof definition.title !== "string" || !definition.title.trim() ||
+        typeof definition.localTime !== "string" ||
+        !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(definition.localTime)) {
+      continue;
+    }
+    items.push(operation(
+      "sop_custom_task",
+      definition.title.trim(),
+      definition.localTime,
+      plusMinutes(definition.localTime, 60),
+      "SOP.自定义任务",
+    ));
+  }
+  return items;
+}
+
 function stageOperation(source: DailyOperationPlanSource): DailyOperationItem {
   const config = source.sopConfig;
   const creepStart = configuredInteger(config, "creepAgeStart", 8, 1);
@@ -91,12 +122,43 @@ export function buildDailyOperationItems(source: DailyOperationPlanSource): Dail
     const teachingEnd = configuredTime(source.sopConfig, "teachingEndLocal", "teachingProgramEndLocal", "08:00");
     const intervalHours = configuredNumber(source.sopConfig, "teachingIntervalHours", 3, 0.5);
     const powderPerTwenty = configuredNumber(source.sopConfig, "teachingPowderGramsPerTwenty", 35, 0.1);
+    const admission = configuredTime(
+      source.sopConfig,
+      "defaultAdmissionDeadlineLocal",
+      "defaultAdmissionDeadlineLocal",
+      "09:00",
+    );
     // D0 is a dedicated teaching-program day. Routine patrols, cleaning and
-    // maintenance begin on D1 and must not be presented as first-day work.
-    return [operation(
+    // maintenance begin on D1, but the SOP's admission, water-stop and mode
+    // setup steps still belong to first-day work.
+    const items: DailyOperationItem[] = [];
+    if (enabled(source.sopConfig, "teachingProgramEnabled")) {
+      items.push(operation(
+        "first_day_admission", "挑猪入栏与分栏", admission, "10:00", "SOP.首日入栏",
+        ["effectiveHeads"],
+      ));
+      items.push(operation(
+        "first_day_health_check", "入栏保健与健康检查", "10:00", "11:00", "SOP.首日保健",
+        ["diarrheaGrade", "effectiveHeads"],
+      ));
+    }
+    if (enabled(source.sopConfig, "waterPolicyEnabled")) {
+      items.push(operation(
+        "first_day_water_stop", "停水停奶并关闭水嘴", "09:00", "16:00", "SOP.饮水策略",
+      ));
+    }
+    if (enabled(source.sopConfig, "teachingProgramEnabled")) {
+      items.push(operation(
+        "first_day_mode_setup", "设置饲喂模式并确认设备", "16:00", "17:00", "SOP.首日设备",
+        ["deviceStatus"],
+      ));
+    }
+    items.push(...customTaskOperations(source));
+    items.push(operation(
       "first_day_teaching", `首日教学程序启动（${powderPerTwenty} g/20头/次；每${intervalHours}小时）`, firstTeaching, teachingEnd, "SOP.首日教学",
       ["deviceStatus"], [`按 SOP 定量 ${powderPerTwenty} g/20头/次、每${intervalHours}小时执行；不得改为自由采食。`], 1,
-    )];
+    ));
+    return items;
   }
   const operations: DailyOperationItem[] = [
     operation(
@@ -123,6 +185,7 @@ export function buildDailyOperationItems(source: DailyOperationPlanSource): Dail
       [], ["清洁后需复核探头和管路状态。"],
     ));
   }
+  operations.push(...customTaskOperations(source));
   return operations;
 }
 
