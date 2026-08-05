@@ -117,6 +117,17 @@ function isCompleteSopMarkdown(value: string): boolean {
   }
 }
 
+function isPastedSopInstruction(task: SopEditTask, template: LocalSopTemplate | null): boolean {
+  if (template) return false;
+  if (isCompleteSopMarkdown(task.instruction)) return true;
+  if (task.instruction.length <= SOP_NL_LLM_INSTRUCTION_MAX) return false;
+  try {
+    return parseSopMarkdown(task.instruction).chunks.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function buildPrompt(task: SopEditTask, template: LocalSopTemplate | null): BaseMessage[] {
   const source = template
     ? `当前模板：${template.name}（版本 ${template.version}）\n\n完整 SOP Markdown：\n${template.sourceMarkdown}\n\n当前配置：\n${JSON.stringify(template.config, null, 2)}`
@@ -144,7 +155,7 @@ export async function draftSopEdit(input: {
   try {
     const template = task.templateId ? input.store.getSopTemplate(task.templateId) : null;
     if (task.templateId && !template) throw new Error("NBJ_SOP_NL_TEMPLATE_NOT_FOUND");
-    if (!template && isCompleteSopMarkdown(task.instruction)) {
+    if (isPastedSopInstruction(task, template)) {
       const parsed = parseSopMarkdown(task.instruction);
       const affectedSections = [...new Set(parsed.chunks.map((chunk) => chunk.title))];
       return input.store.completeSopEditTaskDraft({

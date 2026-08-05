@@ -185,6 +185,6 @@ describe("Agent security boundary", () => {
 
   it("prevents stale public admin bundles after a configuration rollout", () => {
     expect(nginx).toContain('add_header Cache-Control "no-store" always');
-    expect(adminPage).toContain("admin.js?v=20260805-1");
+    expect(adminPage).toContain("admin.js?v=20260805-2");
   });
 });

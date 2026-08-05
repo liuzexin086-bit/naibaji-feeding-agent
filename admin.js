@@ -86,6 +86,7 @@
       NBJ_SOP_NL_DRAFT_PARSE_FAILED: '模型输出无法解析，草稿生成失败。',
       NBJ_SOP_NL_DRAFT_INVALID: '模型提案未通过 SOP 校验，草稿生成失败。',
       NBJ_SOP_NL_DRAFT_UNCHANGED: '提案与当前模板没有实际变化，已标记失败。',
+      NBJ_SOP_NL_INSTRUCTION_TOO_LONG: '指令过长：请改为直接粘贴完整 SOP 原文，或缩短自然语言描述。',
       NBJ_SOP_NL_MODEL_UNAVAILABLE: 'Agent 模型未配置，无法生成草稿。',
       NBJ_SOP_NL_DRAFT_FAILED: '草稿生成失败。',
       NBJ_FREE_FEEDING_SLOTS_INVALID: '自由采食必须保留完整的 8 个有效时段。',

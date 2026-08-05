@@ -263,7 +263,7 @@ describe("SOP natural-language editing", () => {
 
   it("fails a long non-markdown instruction before invoking the model", async () => {
     const { store, adminId } = makeStore();
-    const longInstruction = "新建一份包含详细流程的 SOP，".repeat(300);
+    const longInstruction = "<!-- 注释 -->\n".repeat(400);
     const task = store.createSopEditTask({
       templateId: null,
       instruction: longInstruction,
@@ -276,5 +276,30 @@ describe("SOP natural-language editing", () => {
     });
     expect(drafted.status).toBe("draft_failed");
     expect(drafted.errorCode).toBe("NBJ_SOP_NL_INSTRUCTION_TOO_LONG");
+  });
+
+  it("treats a long plain-text SOP paste as a direct new template", async () => {
+    const { store, adminId } = makeStore();
+    const pasted = "超早期断奶 SOP\n\n▎ 适用对象：体重约 2.3–4.4 kg 的仔猪\n▎ 核心设备：奶爸机\n\n每日巡栏。\n".repeat(100);
+    expect(pasted.length).toBeGreaterThan(4_000);
+    const task = store.createSopEditTask({
+      templateId: null,
+      instruction: pasted,
+      createdBy: adminId,
+    });
+    let modelCalls = 0;
+    const drafted = await draftSopEdit({
+      store,
+      model: {
+        invoke: async () => {
+          modelCalls += 1;
+          throw new Error("model must not be called");
+        },
+      },
+      taskId: task.id,
+    });
+    expect(drafted.status).toBe("draft_ready");
+    expect(drafted.proposedMarkdown).toBe(pasted);
+    expect(modelCalls).toBe(0);
   });
 });
