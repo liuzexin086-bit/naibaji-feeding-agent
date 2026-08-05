@@ -15,7 +15,8 @@ import {
 import type { SopKnowledgeIndex } from "../knowledge/sop-knowledge.js";
 
 export const SOP_NL_CONFIRM_PHRASE = "发布 SOP 修改";
-export const SOP_NL_INSTRUCTION_MAX = 4_000;
+export const SOP_NL_INSTRUCTION_MAX = 200_000;
+export const SOP_NL_LLM_INSTRUCTION_MAX = 4_000;
 export const SOP_NL_MARKDOWN_MAX = 200_000;
 
 export interface SopEditModel {
@@ -107,6 +108,15 @@ function validateProposal(
   }
 }
 
+function isCompleteSopMarkdown(value: string): boolean {
+  if (!/^#{1,6}\s+.+$/m.test(value)) return false;
+  try {
+    return parseSopMarkdown(value).chunks.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function buildPrompt(task: SopEditTask, template: LocalSopTemplate | null): BaseMessage[] {
   const source = template
     ? `当前模板：${template.name}（版本 ${template.version}）\n\n完整 SOP Markdown：\n${template.sourceMarkdown}\n\n当前配置：\n${JSON.stringify(template.config, null, 2)}`
@@ -134,6 +144,20 @@ export async function draftSopEdit(input: {
   try {
     const template = task.templateId ? input.store.getSopTemplate(task.templateId) : null;
     if (task.templateId && !template) throw new Error("NBJ_SOP_NL_TEMPLATE_NOT_FOUND");
+    if (!template && isCompleteSopMarkdown(task.instruction)) {
+      const parsed = parseSopMarkdown(task.instruction);
+      const affectedSections = [...new Set(parsed.chunks.map((chunk) => chunk.title))];
+      return input.store.completeSopEditTaskDraft({
+        taskId: task.id,
+        proposedMarkdown: task.instruction,
+        proposedConfig: {},
+        changeSummary: "新建 SOP 模板（直接使用粘贴的完整原文）",
+        affectedSections,
+      });
+    }
+    if (task.instruction.length > SOP_NL_LLM_INSTRUCTION_MAX) {
+      throw new Error("NBJ_SOP_NL_INSTRUCTION_TOO_LONG");
+    }
     const response = await input.model.invoke(buildPrompt(task, template), { callbacks: [] });
     const proposal = parseProposalJson(messageText(response));
     validateProposal(proposal, template?.sourceSha256 ?? null);

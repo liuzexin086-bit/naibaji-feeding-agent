@@ -235,4 +235,46 @@ describe("SOP natural-language editing", () => {
     })).not.toThrow();
     expect(store.getSopEditTask(task.id)?.status).toBe("rejected");
   });
+
+  it("uses pasted SOP markdown directly for a new template without calling the model", async () => {
+    const { store, adminId } = makeStore();
+    const pasted = "# 教奶\n\n17:00 开始教奶。\n\n# 巡栏\n\n每日巡栏。";
+    const task = store.createSopEditTask({
+      templateId: null,
+      instruction: pasted,
+      createdBy: adminId,
+    });
+    let modelCalls = 0;
+    const drafted = await draftSopEdit({
+      store,
+      model: {
+        invoke: async () => {
+          modelCalls += 1;
+          throw new Error("model must not be called");
+        },
+      },
+      taskId: task.id,
+    });
+    expect(drafted.status).toBe("draft_ready");
+    expect(drafted.proposedMarkdown).toBe(pasted);
+    expect(drafted.affectedSections).toContain("教奶");
+    expect(modelCalls).toBe(0);
+  });
+
+  it("fails a long non-markdown instruction before invoking the model", async () => {
+    const { store, adminId } = makeStore();
+    const longInstruction = "新建一份包含详细流程的 SOP，".repeat(300);
+    const task = store.createSopEditTask({
+      templateId: null,
+      instruction: longInstruction,
+      createdBy: adminId,
+    });
+    const drafted = await draftSopEdit({
+      store,
+      model: fakeModel(proposal("# 新 SOP\n\n每日巡栏。")),
+      taskId: task.id,
+    });
+    expect(drafted.status).toBe("draft_failed");
+    expect(drafted.errorCode).toBe("NBJ_SOP_NL_INSTRUCTION_TOO_LONG");
+  });
 });

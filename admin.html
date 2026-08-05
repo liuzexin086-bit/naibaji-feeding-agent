@@ -168,7 +168,7 @@
         <form id="sopNlForm" class="config-card">
           <div class="config-grid">
             <label class="field span-2">目标模板<select id="sopNlTemplateId"><option value="">新建 SOP 模板</option></select><span class="secret-hint">选择现有模板进行修改，或新建模板。</span></label>
-            <label class="field span-2">自然语言指令<textarea id="sopNlInstruction" maxlength="4000" required placeholder="例如：把第 2 天教奶次数从 6 次改为 5 次，并补充 09:00 巡栏检查料槽。"></textarea></label>
+            <label class="field span-2">自然语言指令或完整 SOP 原文<textarea id="sopNlInstruction" maxlength="200000" required placeholder="新建模板可直接粘贴完整 SOP Markdown 原文；也可以描述要求，例如：把第 2 天教奶次数从 6 次改为 5 次。"></textarea></label>
           </div>
           <div class="form-actions"><button id="sopNlCreateButton" class="btn btn-primary" type="submit">创建草稿任务</button></div>
         </form>
