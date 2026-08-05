@@ -473,6 +473,24 @@ function worstDiarrheaGrade(grades: DiarrheaGrade[]): DiarrheaGrade {
   "none");
 }
 
+function observedLocalHourMinute(value: string): string {
+  const match = value.match(/T(\d{2}):(\d{2})/u);
+  if (!match) fail("INVALID_OBSERVED_AT");
+  const zoneSuffix = /(?:Z|[+-]\d{2}:\d{2})$/u.test(value);
+  if (!zoneSuffix) return `${match[1]!}:${match[2]!}`;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) fail("INVALID_OBSERVED_AT");
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(date);
+  const hour = parts.find((part) => part.type === "hour")?.value ?? "";
+  const minute = parts.find((part) => part.type === "minute")?.value ?? "";
+  return `${hour}:${minute}`;
+}
+
 function gradeTargetRatio(grade: DiarrheaGrade): number {
   return { none: 1, mild: 0.9, moderate: 0.75, severe: 0.5 }[grade];
 }
@@ -500,7 +518,7 @@ export function previewDiarrheaAdjustment(
     Math.max(0, adjustedDayCap - actual),
     precision,
   );
-  const observedTime = input.observedAt.slice(11, 16);
+  const observedTime = observedLocalHourMinute(input.observedAt);
   const remainingTimes = input.remainingMealTimes ??
     remainingBusinessDayTimes(
       input.decision.setting.timedMeals.map((meal) => meal.timeLocal),

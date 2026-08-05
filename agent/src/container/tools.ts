@@ -23,6 +23,7 @@ import {
 import { searchFrozenKnowledge, type SopKnowledgeIndex } from "../knowledge/sop-knowledge.js";
 import { ChromaKnowledgeIndex } from "../knowledge/chroma-index.js";
 import type { FrozenSopKnowledge } from "../shared/local-store-contract.js";
+import { shanghaiLocalNowIso } from "../shared/shanghai-time.js";
 import {
   supabaseInsert,
   supabaseRest,
@@ -53,6 +54,12 @@ export interface AgentRequestContext {
   batchId: string;
   sessionId: string;
   evidence: Map<string, unknown>;
+  observation?: AgentObservation;
+}
+
+export interface AgentObservation {
+  diarrheaGrade?: "none" | "mild" | "moderate" | "severe";
+  actualPowderGrams?: number | null;
 }
 
 interface BatchRecord {
@@ -749,14 +756,14 @@ export function createFeedingTools(
     label: "预览腹泻调整",
     description: "先调用确定性决策核心，按腹泻档位、设备累计实际下粉量和剩余餐次生成未生效的设备调整草案；严重异常转人工处置。",
     parameters: Type.Object({
-      grades: Type.Array(Type.Union([
+      grades: Type.Optional(Type.Array(Type.Union([
         Type.Literal("none"),
         Type.Literal("mild"),
         Type.Literal("moderate"),
         Type.Literal("severe"),
-      ]), { minItems: 1, maxItems: 10000 }),
-      cumulativePowderGrams: Type.Number({ minimum: 0 }),
-      observedAt: Type.String({ minLength: 1, maxLength: 80 }),
+      ]), { minItems: 1, maxItems: 10000 })),
+      cumulativePowderGrams: Type.Optional(Type.Number({ minimum: 0 })),
+      observedAt: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
       remainingMealTimes: Type.Optional(Type.Array(
         Type.String({ pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" }),
         { maxItems: 32 },
@@ -764,22 +771,67 @@ export function createFeedingTools(
     }),
     execute: async (_id, rawParams) => {
       const params = rawParams as {
-        grades: DiarrheaGrade[];
-        cumulativePowderGrams: number;
-        observedAt: string;
+        grades?: DiarrheaGrade[];
+        cumulativePowderGrams?: number;
+        observedAt?: string;
         remainingMealTimes?: string[];
       };
+      const observedGrade = context.observation?.diarrheaGrade &&
+        context.observation.diarrheaGrade !== "none"
+        ? context.observation.diarrheaGrade
+        : undefined;
+      const grades = observedGrade
+        ? [observedGrade]
+        : (params.grades ?? []).filter((grade): grade is DiarrheaGrade =>
+          grade === "mild" || grade === "moderate" || grade === "severe");
+      if (!grades.length) throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
+      const batch = await loadBatch(context);
+      const records = Array.isArray(batch?.records) ? batch.records : [];
+      const sortedRecords = [...records].sort((left, right) => {
+        const leftAt = String(left?.recordedAt ?? left?.created_at ?? "");
+        const rightAt = String(right?.recordedAt ?? right?.created_at ?? "");
+        return leftAt.localeCompare(rightAt);
+      });
+      const latestRecord = sortedRecords[sortedRecords.length - 1] as Record<string, unknown> | undefined;
+      const recordActualRaw = latestRecord?.actualPowderGrams;
+      const recordActual = recordActualRaw == null || recordActualRaw === ""
+        ? Number.NaN
+        : Number(recordActualRaw);
+      const hasRecordActual = Number.isFinite(recordActual) && recordActual >= 0;
+      const observationActual = context.observation?.actualPowderGrams;
+      const cumulativeValue = observationActual != null
+        ? observationActual
+        : params.cumulativePowderGrams != null
+          ? params.cumulativePowderGrams
+          : hasRecordActual
+            ? recordActual
+            : 0;
+      const cumulativeSource: "observation" | "request" | "latest_record" | "assumed_zero" =
+        observationActual != null
+          ? "observation"
+          : params.cumulativePowderGrams != null
+            ? "request"
+            : hasRecordActual
+              ? "latest_record"
+              : "assumed_zero";
       const production = await productionDecisionsForBatch(context);
       const preview = previewDiarrheaAdjustment({
         decision: production.selectedDecision,
-        grades: params.grades,
-        cumulativePowderGrams: params.cumulativePowderGrams,
-        observedAt: params.observedAt,
+        grades,
+        cumulativePowderGrams: cumulativeValue,
+        observedAt: params.observedAt ?? shanghaiLocalNowIso(),
         remainingMealTimes: params.remainingMealTimes,
       });
-      const severe = params.grades.includes("severe");
+      const severe = grades.includes("severe");
+      const worstGrade = grades.reduce<DiarrheaGrade>((worst, grade) =>
+        ["none", "mild", "moderate", "severe"].indexOf(grade) >
+        ["none", "mild", "moderate", "severe"].indexOf(worst)
+          ? grade
+          : worst,
+      "none") as "mild" | "moderate" | "severe";
       return record(context, "preview_diarrhea_adjustment", {
         decision: preview,
+        worstGrade,
         deviceOperation: {
           mode: preview.setting.mode,
           remainingDailyPowderGrams: preview.setting.dailyPowderGrams,
@@ -789,6 +841,8 @@ export function createFeedingTools(
           requiresHumanApproval: true,
           manualDispositionRequired: severe,
         },
+        cumulativePowderGrams: cumulativeValue,
+        cumulativeSource,
         severeException: severe
           ? "严重异常：暂停常规增量，执行现场检查并进入人工处置。"
           : null,

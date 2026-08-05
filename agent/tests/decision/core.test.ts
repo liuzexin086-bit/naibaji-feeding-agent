@@ -273,4 +273,19 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["02:00", "05:00", "08:00"]);
     expect(preview.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(450);
   });
+
+  it("treats UTC observed timestamps as Asia/Shanghai local time", () => {
+    const decision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 6 },
+      timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T09:00:00.000Z",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal))
+      .toEqual(["20:00", "23:00", "02:00", "05:00", "08:00"]);
+  });
 });

@@ -17,12 +17,13 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { FeedingTool } from "../../container/tools.js";
 import { classifyDeterministicIntent, staticEvidencePlan, staticToolArguments } from "./router.js";
 import { selectSopSubgraph } from "./subgraphs/handlers.js";
-import { deterministicResponse, knowledgeResponseText } from "./subgraphs/responses.js";
+import { deterministicDiarrheaResponse, deterministicResponse, knowledgeResponseText } from "./subgraphs/responses.js";
 import type {
   AgentEvidenceRef,
   AgentGraphStateContract,
   AgentIntentKind,
   CurrentBatchSummary,
+  DiarrheaPreviewSummary,
   KnowledgeResultRef,
   TodayOperationSummary,
 } from "./state.js";
@@ -84,6 +85,7 @@ const GraphState = Annotation.Root({
   batchSummary: Annotation<CurrentBatchSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   todayOperations: Annotation<TodayOperationSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   knowledgeResults: Annotation<KnowledgeResultRef[] | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
+  diarrheaPreview: Annotation<DiarrheaPreviewSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   dailyOperations: Annotation<AgentGraphStateContract["dailyOperations"]>({ reducer: (_left, right) => right, default: () => undefined }),
   approval: Annotation<AgentGraphStateContract["approval"]>({ reducer: (_left, right) => right, default: () => null }),
   toolExecutions: Annotation<number>({ reducer: (_left, right) => right, default: () => 0 }),
@@ -222,6 +224,21 @@ function narrationContextText(state: AgentGraphState): string {
     const rows = state.knowledgeResults.map((row) => `- ${row.title}：${row.text}`).join("\n");
     parts.push(`冻结SOP检索：\n${rows}`);
   }
+  if (state.diarrheaPreview) {
+    const preview = state.diarrheaPreview;
+    const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
+    const times = preview.timedMeals
+      .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
+      .join("、");
+    const sourceLabel = preview.cumulativeSource === "observation"
+      ? "本次观察"
+      : preview.cumulativeSource === "request"
+        ? "请求参数"
+        : preview.cumulativeSource === "latest_record"
+          ? "最近记录"
+          : "未录入按0估算";
+    parts.push(`腹泻调整预览：${gradeLabel}；剩余${preview.mealCount}餐；${times}；剩余程序总量${preview.remainingDailyPowderGrams}g；单次最大下粉${preview.singlePowderGrams}g；按累计实际下粉${preview.cumulativePowderGrams}g（${sourceLabel}）计算。`);
+  }
   parts.push("以上数字均已通过确定性证据校验。");
   return parts.join("\n");
 }
@@ -267,6 +284,21 @@ function narrationWhitelist(state: AgentGraphState): number[] {
   for (const row of state.knowledgeResults ?? []) {
     for (const value of responseNumbers(row.title)) values.add(value);
     for (const value of responseNumbers(row.text)) values.add(value);
+  }
+  const preview = state.diarrheaPreview;
+  if (preview) {
+    for (const value of [
+      preview.remainingDailyPowderGrams,
+      preview.singlePowderGrams,
+      preview.mealCount,
+      preview.cumulativePowderGrams,
+    ]) {
+      if (value !== undefined) values.add(value);
+    }
+    for (const meal of preview.timedMeals) {
+      for (const value of responseNumbers(meal.timeLocal)) values.add(value);
+      values.add(meal.powderGrams);
+    }
   }
   return [...values];
 }
@@ -418,6 +450,50 @@ function knowledgeResultsFromToolResult(result: unknown): KnowledgeResultRef[] |
   return rows.length ? rows : undefined;
 }
 
+function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary | undefined {
+  const envelope = envelopeFromToolResult(result);
+  const data = object(envelope?.data);
+  const deviceOperation = object(data?.deviceOperation);
+  const decision = object(data?.decision);
+  const setting = object(decision?.setting);
+  const worstGrade = String(data?.worstGrade ?? "");
+  if (!deviceOperation || !setting || !["mild", "moderate", "severe"].includes(worstGrade)) {
+    return undefined;
+  }
+  const timedMeals: DiarrheaPreviewSummary["timedMeals"] = [];
+  if (Array.isArray(setting.timedMeals)) {
+    for (const meal of setting.timedMeals) {
+      const row = object(meal);
+      const timeLocal = localTime(row?.timeLocal);
+      const powderGrams = finite(row?.powderGrams);
+      if (timeLocal && powderGrams !== undefined) {
+        timedMeals.push({ timeLocal, powderGrams });
+      }
+    }
+  }
+  const remainingDailyPowderGrams = finite(deviceOperation.remainingDailyPowderGrams);
+  const singlePowderGrams = finite(deviceOperation.singlePowderGrams);
+  const mealCount = finite(deviceOperation.mealCount ?? setting.mealCount);
+  const cumulativePowderGrams = finite(data?.cumulativePowderGrams);
+  const cumulativeSource = String(data?.cumulativeSource ?? "");
+  if (remainingDailyPowderGrams === undefined || singlePowderGrams === undefined ||
+      mealCount === undefined || cumulativePowderGrams === undefined ||
+      !["observation", "request", "latest_record", "assumed_zero"].includes(cumulativeSource)) {
+    return undefined;
+  }
+  return {
+    worstGrade: worstGrade as DiarrheaPreviewSummary["worstGrade"],
+    mode: "timed_quantity",
+    remainingDailyPowderGrams,
+    singlePowderGrams,
+    mealCount,
+    timedMeals,
+    manualDispositionRequired: deviceOperation.manualDispositionRequired === true,
+    cumulativePowderGrams,
+    cumulativeSource: cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"],
+  };
+}
+
 function stableTurnId(input: Pick<AgentGraphRunInput, "userId" | "batchId" | "sessionId" | "clientMessageId">): string {
   return createHash("sha256").update([
     "nbj-langgraph-v2", input.userId, input.batchId, input.sessionId, input.clientMessageId,
@@ -547,7 +623,7 @@ const planTurnNode = async (state: AgentGraphState, config: RunnableConfig) => {
   const intent = classifyDeterministicIntent(run.message);
   return {
     intent,
-    evidencePlan: { ...staticEvidencePlan(intent.kind), nextToolIndex: 0 },
+    evidencePlan: { ...staticEvidencePlan(intent.kind, run.message), nextToolIndex: 0 },
     subgraph: selectSopSubgraph(intent.kind, state.snapshot.selectedMode, state.snapshot.currentDayIndex),
   };
 };
@@ -590,6 +666,9 @@ const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfi
       ...(name === "get_today_timeline" ? { todayOperations: todayOperationSummaryFromToolResult(result) } : {}),
       ...(name === "search_feeding_knowledge"
         ? { knowledgeResults: knowledgeResultsFromToolResult(result) }
+        : {}),
+      ...(name === "preview_diarrhea_adjustment"
+        ? { diarrheaPreview: diarrheaPreviewFromToolResult(result) }
         : {}),
     };
   } catch (error) {
@@ -652,10 +731,19 @@ const NARRATION_INTENTS = new Set<AgentIntentKind>([
 ]);
 
 const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig) => {
+  if (state.status === "safe_block" && state.errorCode === "NBJ_DIARRHEA_GRADE_REQUIRED") {
+    return {
+      finalText: "请补充腹泻档位（轻/中/重）；累计下粉量请在页面“今日数据”录入并保存，或直接在消息里说明已下粉量（如 120g）。",
+      status: "safe_block" as const,
+    };
+  }
   if (state.status === "safe_block" || state.status === "stale") {
     return { finalText: safeBlockText(state.errorCode), status: state.status };
   }
   if (state.intent.kind === "exception" || state.intent.kind === "laggard") {
+    if (state.intent.kind === "exception" && state.diarrheaPreview) {
+      return { finalText: deterministicDiarrheaResponse(state.batchSummary, state.diarrheaPreview) };
+    }
     return { finalText: deterministicResponse(
       state.intent.kind,
       state.intent.requestsMutation,
@@ -667,6 +755,8 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
   if (!NARRATION_INTENTS.has(state.intent.kind)) {
     const response = await run.narrationModel.invoke([
       new SystemMessage(run.systemPrompt),
+      new SystemMessage(NARRATION_SYSTEM_PROMPT),
+      new SystemMessage(`已核实现场上下文：\n${narrationContextText(state)}`),
       ...run.history,
       new HumanMessage(run.message),
       new SystemMessage("仅回答一般说明；不得调用工具、生成设备数值、审批或设备控制命令。"),
@@ -699,9 +789,8 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
 };
 
 const validateResponseNode = async (state: AgentGraphState) => {
-  const whitelist = state.intent.kind === "general"
-    ? state.numericWhitelist
-    : narrationWhitelist(state);
+  if (state.status === "safe_block" || state.status === "stale") return {};
+  const whitelist = narrationWhitelist(state);
   try {
     validateNumericResponse(state.finalText, whitelist);
   } catch (error) {
@@ -848,6 +937,7 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
         batchSummary: undefined,
         todayOperations: undefined,
         knowledgeResults: undefined,
+        diarrheaPreview: undefined,
         dailyOperations: undefined,
         approval: null,
         toolExecutions: 0,

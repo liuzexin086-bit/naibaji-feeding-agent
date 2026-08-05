@@ -59,9 +59,9 @@ previewDiarrheaAdjustment(input: DiarrheaAdjustmentInput): FeedingDecision;
 
 ## HTTP/SSE 契约
 
-- `POST /api/agent/chat`：请求 `{ batchId, sessionId, message, clientMessageId }`；响应 SSE 事件 `message_start`、`delta`、`tool_evidence`、`message_end`、`error`。
+- `POST /api/feeding-agent/chat`：请求 `{ batchId, sessionId, message, clientMessageId, observation? }`；响应 SSE 事件 `message_start`、`delta`、`tool_evidence`、`message_end`、`error`。
 - `POST /api/batches/:id/advance`：保存当天最小记录并原子返回 `{ closedDay, nextDay, decision, tasks }`；重复 `idempotencyKey` 返回同一结果。
-- `POST /api/batches/:id/diarrhea/preview`：请求必须包含 `{ observedAt, grades, cumulativePowderGrams }`，返回未生效的 `FeedingDecision`。
+- 腹泻调整在 Agent 对话内通过 `preview_diarrhea_adjustment` 生成确定性预览；预览不自动生效，需人工确认。
 - 旧 revision 统一返回 HTTP 409 和错误码 `NBJ_AGENT_STALE`。
 - 认证失败 401，权限不足 403，参数错误 400，确定性规则错误 422，LLM 故障 503；LLM 故障不阻塞数据和决策接口。
 

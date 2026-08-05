@@ -93,6 +93,23 @@
 - Migrated a network-isolated copy of the verified `agent-config` archive from schema versions `1,2` to `1,2,3`. Integrity remained `ok`; counts for users, batches, observations, sessions, messages, audit records, published SOP templates and SOP knowledge chunks were unchanged, while the new daily-operation tables were added empty. The clone and all smoke volumes were removed afterward; the four `naibaji-*` persistent volumes still exist and were never attached to the test stack.
 - Final verification: `npm test` passed 29 files / 212 tests; `npm run p0-release-gate` passed 6 files / 38 tests; `npm run check`, `npm run build`, and `git diff --check` passed (only pre-existing CRLF warnings).
 
+## Session: 2026-08-05（LangGraph v2 上线与通路修复）
+
+- 提交 `f16faf4` 至 `bb8bd80`：SOP 驱动的 LangGraph v2、今日操作、SOP 自然语言
+  后台、冻结 SOP 回答、已核实上下文自然叙述 v3、首日 5 项操作与自定义任务。
+- 架构与领域复核后完成本轮通路修复：
+  - 腹泻异常改为调用确定性 `preview_diarrhea_adjustment`，返回批次日龄、
+    剩余餐次、时间点和单次下粉的固定文案；缺少档位时提示补充，不猜测。
+  - 聊天请求携带 `observation`，工具按“本次观察 > 请求参数 > 最近记录 > 0”
+    解析实际累计下粉量，并记录来源。
+  - general 意图同样注入已核实现场上下文（批次/第 N 天/日龄/模式/今日操作），
+    数值统一走 `narrationWhitelist` 校验。
+  - 管理员后台新增批次 SOP 迁移界面：预览目标模板、规则变化和今日操作影响，
+    以“迁移 SOP”短语确认后原子迁移；已确认今日操作仍被阻止。
+  - Agent 头部状态栏显示当前批次、第 N 天和日龄，不再停留在“等待批次”。
+- 验证基线：`npm run check`、31 文件 / 248 测试、`npm run p0-release-gate`（53 测试）、`npm run build` 全绿；
+  本轮新增路由、运行时、工具与 UI 契约测试。
+
 ## Test Results
 
 | Test | Expected | Actual | Status |

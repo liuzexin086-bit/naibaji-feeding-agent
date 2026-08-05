@@ -56,6 +56,7 @@
 
   function byId(id) { return document.getElementById(id) }
   function escapeHtml(value) { return String(value == null ? '' : value).replace(/[&<>'"]/g, function (char) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[char] }) }
+  function uuid() { try { if (window.crypto && crypto.randomUUID) return crypto.randomUUID() } catch (_) {} return 'nbj-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2) }
   function valueText(value) { return value == null || value === '' ? '—' : String(value) }
   function dateText(value) { if (!value) return '—'; var date = new Date(value); return isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false }) }
   function showOnly(id) { ;['loadingScreen', 'loginScreen', 'noPermissionScreen', 'adminRoot'].forEach(function (screen) { byId(screen).hidden = screen !== id }) }
@@ -91,7 +92,11 @@
       NBJ_SOP_NL_DRAFT_FAILED: '草稿生成失败。',
       NBJ_FREE_FEEDING_SLOTS_INVALID: '自由采食必须保留完整的 8 个有效时段。',
       NBJ_FREE_FEEDING_SLOTS_OVERLAP: '已启用的自由采食时段在业务日内重叠。',
-      NBJ_FREE_FEEDING_SLOT_ZERO_DURATION: '自由采食时段不能使用相同的开始和结束时间。'
+      NBJ_FREE_FEEDING_SLOT_ZERO_DURATION: '自由采食时段不能使用相同的开始和结束时间。',
+      NBJ_SOP_TEMPLATE_NOT_PUBLISHED: '目标 SOP 模板尚未发布。',
+      NBJ_SOP_MIGRATION_CONFIRMATION_REQUIRED: '确认短语不匹配，未迁移。',
+      NBJ_SOP_MIGRATION_NOT_AVAILABLE: '该批次当前不可迁移（状态或计划条件不满足）。',
+      NBJ_SOP_MIGRATION_TODAY_CONFIRMED: '今日操作已确认，迁移被阻止；明天或确认解除后再处理。'
     }
     return messages[code] || error && (error.message || code) || '请求失败。'
   }
@@ -124,11 +129,12 @@
     var body = byId('batchRows'); var rows = AdminState.rows
     body.innerHTML = rows.map(function (row) {
       var batch = row.batch || row; var id = batch.id || ''; var name = batch.name || (batch.config && batch.config.name) || '未命名批次'; var heads = batch.effectiveHeads || batch.initialHeads || (batch.config && batch.config.headCount) || '—'; var key = encodeURIComponent(id)
-      return '<tr><td><input type="checkbox" data-select-batch="' + escapeHtml(key) + '" aria-label="选择 ' + escapeHtml(name) + '"></td><td>' + escapeHtml(row.userEmail || row.user_email || (AdminState.user && AdminState.user.email) || '本地用户') + '</td><td>' + escapeHtml(name) + '</td><td>' + escapeHtml(batch.room || (batch.config && batch.config.farmRoom) || '—') + '</td><td>' + escapeHtml(batch.startAge || (batch.config && batch.config.startAge) || '—') + '</td><td>' + escapeHtml(batch.endAge || (batch.config && batch.config.endAge) || '—') + '</td><td>' + escapeHtml(batch.status === 'completed' ? '已完成' : '进行中') + '</td><td>' + escapeHtml(Array.isArray(batch.records) ? batch.records.length : '—') + '</td><td>' + escapeHtml(batch.revision == null ? '—' : batch.revision) + '</td><td>' + escapeHtml(dateText(batch.updatedAt || batch.updated_at)) + '</td><td><button class="btn btn-outline" type="button" data-action="detail" data-batch-id="' + escapeHtml(key) + '">查看</button></td></tr>'
+      var ownerId = row.userId || row.user_id || (AdminState.user && AdminState.user.id) || ''
+      return '<tr><td><input type="checkbox" data-select-batch="' + escapeHtml(key) + '" aria-label="选择 ' + escapeHtml(name) + '"></td><td>' + escapeHtml(row.userEmail || row.user_email || (AdminState.user && AdminState.user.email) || '本地用户') + '</td><td>' + escapeHtml(name) + '</td><td>' + escapeHtml(batch.room || (batch.config && batch.config.farmRoom) || '—') + '</td><td>' + escapeHtml(batch.startAge || (batch.config && batch.config.startAge) || '—') + '</td><td>' + escapeHtml(batch.endAge || (batch.config && batch.config.endAge) || '—') + '</td><td>' + escapeHtml(batch.status === 'completed' ? '已完成' : '进行中') + '</td><td>' + escapeHtml(Array.isArray(batch.records) ? batch.records.length : '—') + '</td><td>' + escapeHtml(batch.revision == null ? '—' : batch.revision) + '</td><td>' + escapeHtml(dateText(batch.updatedAt || batch.updated_at)) + '</td><td><div class="table-actions"><button class="btn btn-outline" type="button" data-action="detail" data-batch-id="' + escapeHtml(key) + '">查看</button><button class="btn btn-outline" type="button" data-action="migrate-sop" data-batch-id="' + escapeHtml(key) + '" data-user-id="' + escapeHtml(ownerId) + '">迁移 SOP</button></div></td></tr>'
     }).join('')
     byId('emptyState').hidden = rows.length !== 0; renderStats(); byId('resultSummary').textContent = '共 ' + rows.length + ' 个批次'; byId('pageInfo').textContent = '本地数据'
   }
-  async function loadBatches() { notice('queryNotice', '正在读取本地批次……', false); try { var response = await api('/api/batches'); AdminState.rows = Array.isArray(response.batches) ? response.batches : []; renderBatches(); notice('queryNotice', '', false) } catch (error) { AdminState.rows = []; renderBatches(); notice('queryNotice', errorText(error), true) } }
+  async function loadBatches() { notice('queryNotice', '正在读取本地批次……', false); try { var response = await api('/api/admin/batches'); AdminState.rows = Array.isArray(response.batches) ? response.batches : []; renderBatches(); notice('queryNotice', '', false) } catch (error) { AdminState.rows = []; renderBatches(); notice('queryNotice', errorText(error), true) } }
 
   function renderUsers() {
     var body = byId('accountRows');
@@ -336,6 +342,72 @@
   function validateSopConfig(config) { if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('配置必须是 JSON 对象'); if (!config.version) throw new Error('版本号不能为空'); if (Number(config.adaptationMaxHours) < Number(config.adaptationMinHours)) throw new Error('适应期范围无效'); if (!Array.isArray(config.customTasks)) throw new Error('customTasks 必须是数组'); if (config.teachingQuantitySource !== 'sop') throw new Error('数量权威必须设置为 SOP'); if (JSON.stringify(config.quantityAuthorityOrder) !== JSON.stringify(['sop_direct', 'sop_indirect', 'production_model'])) throw new Error('数量权威顺序无效') }
 
   function openDetail(batchId) { var row = AdminState.rows.find(function (item) { return String(item.id || item.batch && item.batch.id) === String(batchId) }); if (!row) return; var batch = row.batch || row; var pairs = [['批次 ID', batch.id], ['名称', batch.name || batch.config && batch.config.name], ['栏位', batch.room || batch.config && batch.config.farmRoom], ['日龄', (batch.currentDayIndex || 0) + (batch.startAge || 1)], ['头数', batch.effectiveHeads || batch.initialHeads], ['revision', batch.revision], ['状态', batch.status]]; byId('detailBody').innerHTML = pairs.map(function (pair) { return '<div class="detail-row"><dt>' + escapeHtml(pair[0]) + '</dt><dd>' + escapeHtml(valueText(pair[1])) + '</dd></div>' }).join(''); byId('detailModal').hidden = false }
+  function migrationTemplateOptions() { return AdminState.sopTemplates.filter(function (template) { return template.status === 'published' }).map(function (template) { return '<option value="' + escapeHtml(template.id) + '">' + escapeHtml(template.name + '（' + template.version + '）') + '</option>' }).join('') }
+  async function openSopMigration(batchId, userId) {
+    var row = AdminState.rows.find(function (item) { return String(item.id || item.batch && item.batch.id) === String(batchId) })
+    if (!row) return
+    var batch = row.batch || row
+    byId('migrationUserId').value = userId || row.userId || row.user_id || ''
+    byId('migrationBatchId').value = batch.id || batchId
+    byId('migrationRevision').value = batch.revision == null ? '0' : String(batch.revision)
+    byId('migrationTemplateId').innerHTML = '<option value="">请选择目标模板</option>' + migrationTemplateOptions()
+    byId('migrationTemplateId').value = ''
+    byId('migrationPhrase').value = ''
+    byId('migrationMessage').textContent = ''
+    byId('migrationPreview').textContent = ''
+    byId('migrationModal').hidden = false
+    if (!AdminState.sopLoaded) { try { await loadSopTemplates(true) } catch (_) {} }
+    byId('migrationTemplateId').innerHTML = '<option value="">请选择目标模板</option>' + migrationTemplateOptions()
+  }
+  function migrationPreviewText(preview) {
+    if (!preview) return '未返回预览。'
+    var current = preview.currentSop || {}
+    var target = preview.targetSop || {}
+    var today = preview.todayOperation || {}
+    var rules = preview.ruleChanges || {}
+    var lines = ['当前：' + valueText(current.version) + '（' + valueText(current.sourceSha256) + '）', '目标：' + valueText(target.version) + '（' + valueText(target.sourceSha256) + '）', '教奶单餐量：' + (rules.teachingPowderGramsPerTwenty ? valueText(rules.teachingPowderGramsPerTwenty.from) + ' → ' + valueText(rules.teachingPowderGramsPerTwenty.to) + ' g/20头/次' : '—'), '今日操作：' + (today.effect || '—'), preview.canMigrate ? '可以迁移，待确认。' : '当前不可迁移。']
+    return lines.join('\n')
+  }
+  async function loadMigrationPreview() {
+    var templateId = byId('migrationTemplateId').value
+    var batchId = byId('migrationBatchId').value
+    var userId = byId('migrationUserId').value
+    var preview = byId('migrationPreview')
+    if (!templateId || !batchId || !userId) { preview.textContent = '请选择目标模板。'; return }
+    preview.textContent = '正在读取迁移预览……'
+    try {
+      var response = await api('/api/admin/batches/' + encodeURIComponent(batchId) + '/sop-migration/preview?userId=' + encodeURIComponent(userId) + '&templateId=' + encodeURIComponent(templateId))
+      preview.textContent = migrationPreviewText(response)
+    } catch (error) {
+      preview.textContent = errorText(error)
+    }
+  }
+  async function submitSopMigration(event) {
+    event.preventDefault()
+    var button = byId('migrationSubmitButton')
+    var message = byId('migrationMessage')
+    var batchId = byId('migrationBatchId').value
+    var userId = byId('migrationUserId').value
+    var templateId = byId('migrationTemplateId').value
+    var phrase = byId('migrationPhrase').value.trim()
+    message.textContent = ''
+    if (!templateId || phrase !== '迁移 SOP') { message.textContent = '请选择目标模板并输入确认短语“迁移 SOP”。'; return }
+    button.disabled = true
+    message.textContent = '正在迁移……'
+    try {
+      await api('/api/admin/batches/' + encodeURIComponent(batchId) + '/sop-migration', {
+        method: 'POST',
+        body: { userId: userId, templateId: templateId, expectedRevision: Number(byId('migrationRevision').value || 0), confirmationPhrase: phrase, idempotencyKey: uuid() }
+      })
+      message.textContent = '迁移完成。'
+      byId('migrationModal').hidden = true
+      await loadBatches()
+    } catch (error) {
+      message.textContent = errorText(error)
+    } finally {
+      button.disabled = false
+    }
+  }
   function exportRows(rows) { var payload = { exportedAt: new Date().toISOString(), batchCount: rows.length, batches: rows }; var blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }); var link = document.createElement('a'); link.download = '奶爸机本地批次.json'; link.href = URL.createObjectURL(blob); link.click(); setTimeout(function () { URL.revokeObjectURL(link.href) }, 500); byId('exportProgress').textContent = '已导出 ' + rows.length + ' 个批次'; byId('exportProgress').hidden = false }
 
   function bindEvents() {
@@ -347,7 +419,14 @@
     byId('filterForm').addEventListener('submit', function (event) { event.preventDefault(); loadBatches() }); byId('resetButton').addEventListener('click', function () { byId('filterForm').reset(); loadBatches() })
     byId('selectAll').addEventListener('change', function () { document.querySelectorAll('[data-select-batch]').forEach(function (input) { input.checked = byId('selectAll').checked }) })
     byId('batchRows').addEventListener('change', function (event) { if (!event.target.matches('[data-select-batch]')) return; if (event.target.checked) AdminState.selected.add(event.target.dataset.selectBatch); else AdminState.selected.delete(event.target.dataset.selectBatch) })
-    byId('batchRows').addEventListener('click', function (event) { var button = event.target.closest('[data-action="detail"]'); if (button) openDetail(decodeURIComponent(button.dataset.batchId)) })
+    byId('batchRows').addEventListener('click', function (event) {
+      var detail = event.target.closest('[data-action="detail"]')
+      var migrate = event.target.closest('[data-action="migrate-sop"]')
+      if (detail) openDetail(decodeURIComponent(detail.dataset.batchId))
+      if (migrate) openSopMigration(decodeURIComponent(migrate.dataset.batchId), migrate.dataset.userId)
+    })
+    byId('migrationTemplateId').addEventListener('change', loadMigrationPreview)
+    byId('migrationForm').addEventListener('submit', submitSopMigration)
     byId('accountRefreshButton').addEventListener('click', function () { loadUsers(true) })
     byId('accountRows').addEventListener('click', function (event) { var button = event.target.closest('[data-delete-user]'); if (button) deleteUser(button.dataset.deleteUser) })
     byId('accountCreateForm').addEventListener('submit', async function (event) {

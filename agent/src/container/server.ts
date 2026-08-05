@@ -30,6 +30,7 @@ import { withMetadataTrace } from "../observability/langsmith.js";
 import {
   APPROVED_FEEDING_TOOL_NAMES,
   createFeedingTools,
+  type AgentObservation,
 } from "./tools.js";
 import {
   DEFAULT_MAX_OUTPUT_TOKENS,
@@ -100,6 +101,27 @@ function restoredMessages(
     }
     return [];
   });
+}
+
+function normalizeChatObservation(raw: unknown): AgentObservation | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const source = raw as Record<string, unknown>;
+  const diarrheaGrade = source.diarrheaGrade == null ? undefined : String(source.diarrheaGrade);
+  if (diarrheaGrade !== undefined &&
+      !["none", "mild", "moderate", "severe"].includes(diarrheaGrade)) {
+    throw new Error("NBJ_AGENT_OBSERVATION_INVALID");
+  }
+  const actual = source.actualPowderGrams;
+  const actualPowderGrams = actual == null || actual === "" ? null : Number(actual);
+  if (actualPowderGrams !== null &&
+      (!Number.isFinite(actualPowderGrams) || actualPowderGrams < 0)) {
+    throw new Error("NBJ_AGENT_OBSERVATION_INVALID");
+  }
+  const normalizedGrade = diarrheaGrade as AgentObservation["diarrheaGrade"];
+  return {
+    ...(normalizedGrade && normalizedGrade !== "none" ? { diarrheaGrade: normalizedGrade } : {}),
+    actualPowderGrams,
+  };
 }
 
 interface ContainerEnv {
@@ -228,6 +250,7 @@ async function handleChat(
     sessionId?: string;
     message?: string;
     clientMessageId?: string;
+    observation?: unknown;
   };
   try {
     body = JSON.parse(await readBody(request)) as typeof body;
@@ -241,6 +264,14 @@ async function handleChat(
   }
   if (body.clientMessageId && body.clientMessageId.length > 128) {
     response.writeHead(400).end(JSON.stringify({ code: "NBJ_AGENT_CLIENT_MESSAGE_ID_INVALID" }));
+    return;
+  }
+  let observation: AgentObservation | undefined;
+  try {
+    observation = normalizeChatObservation(body.observation);
+  } catch {
+    response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
+    response.end(JSON.stringify({ code: "NBJ_AGENT_OBSERVATION_INVALID" }));
     return;
   }
 
@@ -267,6 +298,7 @@ async function handleChat(
     batchId: body.batchId,
     sessionId: body.sessionId,
     evidence,
+    observation,
   };
   let identity: { messageId: string; clientMessageId: string } = {
     messageId: crypto.randomUUID(),

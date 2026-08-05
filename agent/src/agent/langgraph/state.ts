@@ -47,6 +47,18 @@ export interface KnowledgeResultRef {
   score: number;
 }
 
+export interface DiarrheaPreviewSummary {
+  worstGrade: "mild" | "moderate" | "severe";
+  mode: "timed_quantity";
+  remainingDailyPowderGrams: number;
+  singlePowderGrams: number;
+  mealCount: number;
+  timedMeals: Array<{ timeLocal: string; powderGrams: number }>;
+  manualDispositionRequired: boolean;
+  cumulativePowderGrams: number;
+  cumulativeSource: "observation" | "request" | "latest_record" | "assumed_zero";
+}
+
 /**
  * Checkpoint-safe graph state. It deliberately holds references and digests,
  * never raw tool inputs/results, credentials, or the full message body.
@@ -85,6 +97,7 @@ export interface AgentGraphStateContract {
   batchSummary?: CurrentBatchSummary;
   todayOperations?: TodayOperationSummary;
   knowledgeResults?: KnowledgeResultRef[];
+  diarrheaPreview?: DiarrheaPreviewSummary;
   dailyOperations?: {
     planId: string;
     businessDate: string;

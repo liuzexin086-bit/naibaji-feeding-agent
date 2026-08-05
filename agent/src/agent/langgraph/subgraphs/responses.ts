@@ -1,6 +1,7 @@
 import type {
   AgentIntentKind,
   CurrentBatchSummary,
+  DiarrheaPreviewSummary,
   KnowledgeResultRef,
   TodayOperationSummary,
 } from "../state.js";
@@ -65,7 +66,7 @@ export function deterministicResponse(
       : "当前批次的已验证摘要未返回，系统不会推测设备设定。";
   }
   if (intent === "exception") {
-    return "该情况已进入异常人工处置路径。请补充现场观察；系统不会直接更改设备程序。";
+    return `${batchPrefix(summary)}该情况已进入异常人工处置路径。请补充现场观察；系统不会直接更改设备程序。`;
   }
   if (intent === "laggard") {
     return "弱仔处置需独立留痕和人工确认；第三日去留不会并入今日常规操作确认。";
@@ -94,6 +95,26 @@ export function deterministicResponse(
     return "已限定在批次冻结 SOP 知识范围内检索；若无同一摘要的知识证据，将返回不可用而不会读取最新模板。";
   }
   return "我会基于当前批次的冻结 SOP 和确定性证据协助说明；设备数值与变更不会由对话直接生成或执行。";
+}
+
+/** Deterministic rendering of a verified diarrhea adjustment preview. */
+export function deterministicDiarrheaResponse(
+  summary: CurrentBatchSummary | undefined,
+  preview: DiarrheaPreviewSummary,
+): string {
+  const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
+  const prefix = batchPrefix(summary);
+  if (preview.manualDispositionRequired) {
+    return `${prefix}严重腹泻：暂停常规增量，执行现场检查并进入人工处置；系统不提供常规增量建议，也不会自动更改设备程序。`;
+  }
+  if (preview.cumulativeSource === "assumed_zero") {
+    return `${prefix}已识别${gradeLabel}腹泻，但未录入设备实际累计下粉量。为避免超喂，不能给出可执行粉量；请先录入当日实际总量，或按现场人工处置原则执行。`;
+  }
+  const times = preview.timedMeals
+    .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
+    .join("、");
+  const base = `${prefix}已生成${gradeLabel}腹泻调整预览：设备切换为定时定量；剩余 ${preview.mealCount} 餐：${times}；剩余程序总量 ${preview.remainingDailyPowderGrams}g，单次最大下粉 ${preview.singlePowderGrams}g。`;
+  return `${base}该预览不会自动生效，需人工确认后写入设备。`;
 }
 
 /** Deterministic rendering of verified knowledge retrieved from the frozen SOP. */

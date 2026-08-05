@@ -134,6 +134,7 @@ describe("Agent V2 deterministic gateway", () => {
     expect(server).toContain("最终回复只直接回答现场问题");
     expect(server).not.toContain("必须先调用 preview_diarrhea_adjustment");
     expect(server).toContain("严重异常必须进入人工处置");
+    expect(server).toContain("NBJ_AGENT_OBSERVATION_INVALID");
   });
 
   it("wires runtime timeout and output budget without logging credentials", () => {

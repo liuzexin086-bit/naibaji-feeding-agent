@@ -49,6 +49,13 @@ describe("local frontend contract", () => {
     expect(html).toContain("creepValue");
   });
 
+  it("persists the daily observation from the quick save form", () => {
+    expect(html).toContain("保存当日记录");
+    expect(html).toContain("'/api/batches/' + encodeURIComponent(batchId) + '/records'");
+    expect(html).toContain("saveQuickBtn");
+    expect(html).toContain("当日记录已保存");
+  });
+
   it("hides the single amount and shows a 12-meal suggestion for free-feeding", () => {
     expect(html).toContain('id="singlePowderStat"');
     expect(html).toContain('id="dailyPowderLabel"');
@@ -119,6 +126,30 @@ describe("local frontend contract", () => {
     expect(html).not.toContain("/sop/today");
   });
 
+  it("shows the active batch context in the Agent header and sends the current observation", () => {
+    expect(html).toContain("$('agentStatus').textContent");
+    expect(html).toContain("' · 第' + dayNumber() + '天 · 日龄' + age()");
+    expect(html).toContain("observation: observationPayload()");
+    expect(html).toContain("已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻");
+  });
+
+  it("captures diarrhea before restoring the draft and keeps Agent usable without a batch", () => {
+    expect(html).toContain("var savedDiarrheaGrade = $('diarrhea').value");
+    const saveSource = html.slice(html.indexOf("async function saveData"), html.indexOf("async function login"));
+    const captureAt = saveSource.indexOf("var savedDiarrheaGrade");
+    const restoreAt = saveSource.indexOf("restoreDraft()");
+    const triggerAt = saveSource.indexOf("openAgent('已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻'");
+    expect(captureAt).toBeGreaterThanOrEqual(0);
+    expect(restoreAt).toBeGreaterThan(captureAt);
+    expect(triggerAt).toBeGreaterThan(restoreAt);
+    expect(html).toContain(": '未选择批次'");
+    expect(html).toContain("当前账号没有批次，无法读取批次上下文；请先创建批次。");
+    const openSource = html.slice(html.indexOf("function openAgent"), html.indexOf("function saveTableImage"));
+    expect(openSource).not.toContain("if (!state.batch) { showToast('请先选择批次'); return; }");
+    expect(openSource).toContain("renderAgentMessages()");
+    expect(html).toContain("if (!message || !state.batch) return;");
+  });
+
   it("switches only the selected feeding mode with revision and idempotency guards", () => {
     expect(html).toContain('id="selectedModeLabel"');
     expect(html).toContain('data-mode="timed_quantity"');
@@ -146,6 +177,17 @@ describe("local frontend contract", () => {
     expect(adminJs).toContain("template.indexError");
     expect(adminJs).toContain("navigator.clipboard.writeText(source)");
     expect(adminJs).toContain("navigator.clipboard.readText()");
+  });
+
+  it("exposes administrator batch SOP migration with preview and phrase confirmation", () => {
+    expect(adminHtml).toContain('id="migrationModal"');
+    expect(adminHtml).toContain('id="migrationTemplateId"');
+    expect(adminHtml).toContain("迁移会把该批次冻结到目标已发布 SOP");
+    expect(adminJs).toContain("api('/api/admin/batches')");
+    expect(adminJs).toContain("/sop-migration/preview");
+    expect(adminJs).toContain("confirmationPhrase: phrase");
+    expect(adminJs).toContain("迁移 SOP");
+    expect(adminJs).toContain("data-action=\"migrate-sop\"");
   });
 
   it("edits, validates, copies, and publishes exactly eight free-feeding slots", () => {

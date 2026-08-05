@@ -184,4 +184,40 @@ describe("local deterministic tools", () => {
       store.close();
     }
   });
+
+  it("previews diarrhea adjustment from the current observation and keeps a frozen receipt", async () => {
+    const { store, context } = contextFor("user-a");
+    try {
+      const previewContext = {
+        ...context,
+        evidence: new Map<string, unknown>(),
+        observation: { diarrheaGrade: "mild" as const, actualPowderGrams: 120 },
+      };
+      const tool = createFeedingTools(previewContext)
+        .find((item) => item.name === "preview_diarrhea_adjustment");
+      if (!tool) throw new Error("missing preview tool");
+      const output = await tool.execute(
+        "call-1",
+        { observedAt: "2026-08-05T10:00:00.000Z" },
+        new AbortController().signal,
+      );
+      const details = output.details as {
+        data: {
+          worstGrade: string;
+          cumulativePowderGrams: number;
+          cumulativeSource: string;
+          deviceOperation: { mode: string; manualDispositionRequired: boolean };
+        };
+        evidenceReceipt: { receiptId: string };
+      };
+      expect(details.data.worstGrade).toBe("mild");
+      expect(details.data.cumulativePowderGrams).toBe(120);
+      expect(details.data.cumulativeSource).toBe("observation");
+      expect(details.data.deviceOperation.mode).toBe("timed_quantity");
+      expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
+      expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
+    } finally {
+      store.close();
+    }
+  });
 });

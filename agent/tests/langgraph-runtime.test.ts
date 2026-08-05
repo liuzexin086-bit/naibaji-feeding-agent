@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { AIMessage } from "@langchain/core/messages";
+import { AIMessage, SystemMessage, type BaseMessage } from "@langchain/core/messages";
 import { RunnableLambda } from "@langchain/core/runnables";
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -14,7 +14,7 @@ import {
   createAgentGraphRuntime,
   graphThreadId,
 } from "../src/agent/langgraph/runtime.js";
-import { classifyDeterministicIntent, staticEvidencePlan } from "../src/agent/langgraph/router.js";
+import { classifyDeterministicIntent, staticEvidencePlan, staticToolArguments } from "../src/agent/langgraph/router.js";
 import type { FeedingTool } from "../src/container/tools.js";
 
 const tempDirs: string[] = [];
@@ -85,6 +85,244 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(staticEvidencePlan("timeline_or_today_operations")).toEqual({
       requiredTools: ["get_today_timeline"], responseKind: "deterministic",
     });
+  });
+
+  it("routes diarrhea exceptions to the deterministic preview tool", () => {
+    expect(staticEvidencePlan("exception", "已录入轻度腹泻，请给出具体设备操作。")).toEqual({
+      requiredTools: ["preview_diarrhea_adjustment"], responseKind: "deterministic",
+    });
+    expect(staticEvidencePlan("exception", "设备堵塞了")).toEqual({
+      requiredTools: ["check_data_quality"], responseKind: "deterministic",
+    });
+    expect(staticToolArguments("preview_diarrhea_adjustment", "已录入重度腹泻，请给出具体设备操作。"))
+      .toMatchObject({ grades: ["severe"] });
+    expect(String(staticToolArguments("preview_diarrhea_adjustment", "已录入轻度腹泻，请给出具体设备操作。").observedAt))
+      .toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}\+08:00$/);
+    expect(staticToolArguments("preview_diarrhea_adjustment", "已下粉120g，轻度腹泻"))
+      .toMatchObject({ grades: ["mild"], cumulativePowderGrams: 120 });
+    expect(staticToolArguments("preview_diarrhea_adjustment", "已下粉120，轻度腹泻"))
+      .toMatchObject({ grades: ["mild"], cumulativePowderGrams: 120 });
+    expect(staticToolArguments("preview_diarrhea_adjustment", "已下粉120克，轻度腹泻"))
+      .toMatchObject({ grades: ["mild"], cumulativePowderGrams: 120 });
+    expect(staticToolArguments("preview_diarrhea_adjustment", "轻度腹泻"))
+      .not.toHaveProperty("cumulativePowderGrams");
+  });
+
+  it("returns a concrete diarrhea adjustment preview with batch day and age", async () => {
+    const contextData = {
+      batch: { current_day_index: 1, config: { name: "批次 A" } },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "mild",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 150,
+          singlePowderGrams: 25,
+          mealCount: 6,
+          timedMeals: [
+            { timeLocal: "10:00", powderGrams: 25 },
+            { timeLocal: "14:00", powderGrams: 25 },
+          ],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 150,
+        singlePowderGrams: 25,
+        timedMeals: [
+          { timeLocal: "10:00", powderGrams: 25 },
+          { timeLocal: "14:00", powderGrams: 25 },
+        ],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: false,
+      },
+      cumulativePowderGrams: 120,
+      cumulativeSource: "observation",
+      severeException: null,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 14, 25, 30, 120, 150],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 14, 25, 120, 150],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("已录入轻度腹泻，请给出具体设备操作。"));
+    expect(result).toMatchObject({ intent: "exception", status: "completed" });
+    expect(result.text).toContain("批次 A");
+    expect(result.text).toContain("第2天");
+    expect(result.text).toContain("日龄4");
+    expect(result.text).toContain("轻度腹泻调整预览");
+    expect(result.text).toContain("10:00 25g");
+    expect(result.text).toContain("人工确认");
+  });
+
+  it("gives every general turn the verified batch context", async () => {
+    let seen: BaseMessage[] = [];
+    const model = {
+      bindTools: () => new RunnableLambda({
+        func: async (messages: BaseMessage[]) => {
+          seen = messages;
+          return new AIMessage("明白");
+        },
+      }),
+    };
+    const runtime = createAgentGraphRuntime({
+      model: model as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
+          batch: { current_day_index: 0, config: { name: "批次 B" } },
+          canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+          selectedDecision: { setting: { dayAge: 3, timedMeals: [], freeWindows: [] } },
+        }, 3, [0, 3])),
+      ],
+    });
+    const result = await runtime.run(input("你好"));
+    expect(result.status).toBe("completed");
+    const contextMessage = seen.find((message) =>
+      message instanceof SystemMessage && String(message.content).includes("已核实现场上下文：\n批次"));
+    expect(String(contextMessage?.content ?? "")).toContain("第1天");
+    expect(String(contextMessage?.content ?? "")).toContain("日龄3");
+  });
+
+  it("does not output executable diarrhea numbers when cumulative powder is missing", async () => {
+    const contextData = {
+      batch: { current_day_index: 1, config: { name: "批次 A" } },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "mild",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 150,
+          singlePowderGrams: 25,
+          mealCount: 6,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 25 }],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 150,
+        singlePowderGrams: 25,
+        timedMeals: [{ timeLocal: "10:00", powderGrams: 25 }],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: false,
+      },
+      cumulativePowderGrams: 0,
+      cumulativeSource: "assumed_zero",
+      severeException: null,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 25, 150],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 25, 150],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("已录入轻度腹泻，请给出具体设备操作。"));
+    expect(result.status).toBe("completed");
+    expect(result.text).toContain("未录入");
+    expect(result.text).not.toContain("剩余程序总量");
+    expect(result.text).not.toContain("单次最大下粉");
+  });
+
+  it("keeps severe diarrhea responses manual-only", async () => {
+    const contextData = {
+      batch: { current_day_index: 1, config: { name: "批次 A" } },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "severe",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 100,
+          singlePowderGrams: 20,
+          mealCount: 3,
+          timedMeals: [],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 100,
+        singlePowderGrams: 20,
+        timedMeals: [],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: true,
+      },
+      cumulativePowderGrams: 120,
+      cumulativeSource: "observation",
+      severeException: "严重异常：暂停常规增量，执行现场检查并进入人工处置。",
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 20, 30, 100, 120],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 20, 30, 100, 120],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("已录入重度腹泻，请给出具体设备操作。"));
+    expect(result.status).toBe("completed");
+    expect(result.text).toContain("严重腹泻");
+    expect(result.text).toContain("人工处置");
+    expect(result.text).not.toContain("剩余程序总量");
+    expect(result.text).not.toContain("单次最大下粉");
+  });
+
+  it("asks for the diarrhea grade when the preview cannot derive one", async () => {
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true })),
+        tool("preview_diarrhea_adjustment", async () => {
+          throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
+        }),
+      ],
+    });
+    const result = await runtime.run(input("腹泻了怎么办"));
+    expect(result).toMatchObject({ intent: "exception", status: "safe_block" });
+    expect(result.text).toContain("请补充腹泻档位");
+    expect(result.text).toContain("累计下粉量请在页面“今日数据”录入并保存");
+    expect(result.text).toContain("120g");
   });
 
   it("uses the static timeline evidence plan instead of model-selected tool calls", async () => {
