@@ -89,9 +89,7 @@ describe("LangGraph v2 deterministic runtime", () => {
 
   it("uses the static timeline evidence plan instead of model-selected tool calls", async () => {
     const execution: string[] = [];
-    const model = fakeModel([new AIMessage({ content: "", tool_calls: [
-      { id: "must-not-run", name: "shell", args: {}, type: "tool_call" },
-    ] })]);
+    const model = fakeModel([new AIMessage("43 克")]);
     const runtime = createAgentGraphRuntime({
       model: model as never,
       tools: [
@@ -114,7 +112,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("今天有哪些今日操作和巡栏任务？"));
     expect(execution).toEqual(["context", "timeline"]);
-    expect(model.calls).toBe(0);
+    expect(model.calls).toBe(1);
     expect(result).toMatchObject({
       intent: "timeline_or_today_operations",
       status: "completed",
@@ -142,7 +140,7 @@ describe("LangGraph v2 deterministic runtime", () => {
       },
     };
     const runtime = createAgentGraphRuntime({
-      model: fakeModel([new AIMessage("unused")]) as never,
+      model: fakeModel([new AIMessage("43 克"), new AIMessage("43 克")]) as never,
       tools: [
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 9, 10, 12, 18, 186, 1860],
@@ -166,7 +164,7 @@ describe("LangGraph v2 deterministic runtime", () => {
 
   it("renders today operation titles from the verified timeline receipt", async () => {
     const runtime = createAgentGraphRuntime({
-      model: fakeModel([new AIMessage("unused")]) as never,
+      model: fakeModel([new AIMessage("43 克")]) as never,
       tools: [
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
           batch: { current_day_index: 1, config: { name: "批次 A" } },
@@ -194,7 +192,7 @@ describe("LangGraph v2 deterministic runtime", () => {
   it("answers first-day SOP flow from frozen knowledge results", async () => {
     const execution: string[] = [];
     const runtime = createAgentGraphRuntime({
-      model: fakeModel([new AIMessage("unused")]) as never,
+      model: fakeModel([new AIMessage("断奶第 1 天：17:00 第一次教奶；每 3 小时供奶一次；第二天切换自由采食。以现场执行台显示为准。")]) as never,
       tools: [
         tool("get_batch_context", async () => {
           execution.push("context");
@@ -228,7 +226,60 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.status).toBe("completed");
     expect(result.text).toContain("断奶第 1 天");
     expect(result.text).toContain("17:00 第一次教奶");
-    expect(result.text).toContain("冻结 SOP");
+  });
+
+  it("adopts a valid narrated device plan when every number is whitelisted", async () => {
+    const contextData = {
+      batch: { current_day_index: 1, config: { name: "批次 A" } },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 5,
+          singlePowderGrams: 35,
+          dailyPowderGrams: 210,
+          mealCount: 3,
+          timedMeals: [
+            { timeLocal: "10:00" },
+            { timeLocal: "14:00" },
+            { timeLocal: "16:00" },
+          ],
+          freeWindows: [],
+        },
+      },
+    };
+    const narration = "当前批次为定时定量模式：单次下粉 35g，程序总量 210g，配奶时间点 10:00、14:00、16:00。以现场执行台显示为准。";
+    const model = fakeModel([new AIMessage(narration)]);
+    const runtime = createAgentGraphRuntime({
+      model: model as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 3, 5, 10, 14, 16, 35, 210],
+        )),
+        tool("compute_production_plan", async () => receiptResult(
+          "compute_production_plan", "b", { safe: true }, 3, [0, 3, 5, 10, 14, 16, 35, 210],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("当前批次的设备怎么设置"));
+    expect(result).toMatchObject({
+      intent: "device_plan_or_mode",
+      status: "completed",
+      text: narration,
+    });
+    expect(model.calls).toBe(1);
+  });
+
+  it("rejects a narration model that tries to call a tool under a narration intent", async () => {
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage({ content: "", tool_calls: [
+        { id: "must-not-run", name: "shell", args: {}, type: "tool_call" },
+      ] })]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true }, 3)),
+        tool("compute_production_plan", async () => receiptResult("compute_production_plan", "b", { value: 42 }, 3)),
+      ],
+    });
+    await expect(runtime.run(input("当前批次的设备怎么设置"))).rejects.toThrow("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
   });
 
   it("blocks a narration model that tries to choose a tool", async () => {

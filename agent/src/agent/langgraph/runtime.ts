@@ -29,6 +29,14 @@ import type {
 
 export const LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2";
 
+const NARRATION_SYSTEM_PROMPT = `你是奶爸机现场执行助手。请用自然、简洁的中文回答现场问题。
+规则：
+1. 只能使用“已核实现场上下文”中的信息，不得使用上下文之外的数据。
+2. 不得编造或推算任何数值；回答中出现的每个数字必须能在上下文中找到。
+3. 设备方案类回答保持简短：单次下粉量、程序总量、配奶时间点；以现场执行台显示为准。
+4. 若上下文缺少答案所需信息，明确说明“当前未提供该信息”，不要猜测。
+5. 不得提及内部工具名、证据摘要、版本或元数据。`;
+
 interface EvidenceReceipt {
   receiptId: string;
   batchId: string;
@@ -175,6 +183,104 @@ function validateNumericResponse(text: string, numericWhitelist: number[]): void
 
 function safeBlockText(errorCode?: string): string {
   return `当前批次的冻结 SOP、设备方案或确定性证据不可用（${errorCode ?? "NBJ_AGENT_SAFE_BLOCK"}）。系统不会提供设备数值或执行变更。`;
+}
+
+function narrationModeLabel(mode?: CurrentBatchSummary["effectiveMode"]): string {
+  return mode === "free_feeding" ? "自由采食" : mode === "timed_quantity" ? "定时定量" : "未返回";
+}
+
+function narrationContextText(state: AgentGraphState): string {
+  const parts: string[] = [];
+  const summary = state.batchSummary;
+  if (summary) {
+    const fields: string[] = [];
+    if (summary.name) fields.push(`批次名称：${summary.name}`);
+    if (summary.dayNumber !== undefined) fields.push(`第${summary.dayNumber}天`);
+    if (summary.dayAge !== undefined) fields.push(`日龄${summary.dayAge}`);
+    fields.push(`生效模式：${narrationModeLabel(summary.effectiveMode ?? summary.selectedMode)}`);
+    if (summary.singlePowderGrams !== undefined) fields.push(`单次下粉：${summary.singlePowderGrams}g`);
+    if (summary.dailyPowderGrams !== undefined) fields.push(`程序总量：${summary.dailyPowderGrams}g`);
+    if (summary.mealCount !== undefined) fields.push(`餐次：${summary.mealCount}`);
+    if (summary.mealTimes.length) fields.push(`配奶时间点：${summary.mealTimes.join("、")}`);
+    if (summary.freeWindows.length) {
+      fields.push(`自由采食时段：${summary.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`).join("、")}`);
+    }
+    parts.push(`批次：${fields.join("；")}`);
+  }
+  if (state.todayOperations) {
+    const today = state.todayOperations;
+    const status = today.status === "confirmed" ? "已确认" : today.status === "pending" ? "待确认" : "未返回";
+    const items = today.operations.map((operation) => {
+      const window = operation.startLocal && operation.endLocal
+        ? `${operation.startLocal}–${operation.endLocal} `
+        : "";
+      return `${window}${operation.title}`;
+    });
+    parts.push(`今日操作：日期${today.businessDate ?? "未返回"}；状态${status}；条目：${items.join("；")}`);
+  }
+  if (state.knowledgeResults && state.knowledgeResults.length > 0) {
+    const rows = state.knowledgeResults.map((row) => `- ${row.title}：${row.text}`).join("\n");
+    parts.push(`冻结SOP检索：\n${rows}`);
+  }
+  parts.push("以上数字均已通过确定性证据校验。");
+  return parts.join("\n");
+}
+
+function narrationWhitelist(state: AgentGraphState): number[] {
+  const values = new Set(state.numericWhitelist);
+  const summary = state.batchSummary;
+  if (summary) {
+    for (const value of [
+      summary.dayNumber,
+      summary.dayAge,
+      summary.singlePowderGrams,
+      summary.dailyPowderGrams,
+      summary.mealCount,
+      summary.suggestedDailyPowderGrams,
+      summary.suggestedDailyMealCount,
+    ]) {
+      if (value !== undefined) values.add(value);
+    }
+    for (const time of summary.mealTimes) {
+      for (const value of responseNumbers(time)) values.add(value);
+    }
+    for (const window of summary.freeWindows) {
+      for (const value of responseNumbers(window.startLocal)) values.add(value);
+      for (const value of responseNumbers(window.endLocal)) values.add(value);
+    }
+  }
+  const today = state.todayOperations;
+  if (today) {
+    if (today.businessDate) {
+      for (const value of responseNumbers(today.businessDate)) values.add(value);
+    }
+    for (const operation of today.operations) {
+      for (const value of responseNumbers(operation.title)) values.add(value);
+      if (operation.startLocal) {
+        for (const value of responseNumbers(operation.startLocal)) values.add(value);
+      }
+      if (operation.endLocal) {
+        for (const value of responseNumbers(operation.endLocal)) values.add(value);
+      }
+    }
+  }
+  for (const row of state.knowledgeResults ?? []) {
+    for (const value of responseNumbers(row.title)) values.add(value);
+    for (const value of responseNumbers(row.text)) values.add(value);
+  }
+  return [...values];
+}
+
+function deterministicFallbackText(state: AgentGraphState): string {
+  if (state.intent.kind === "knowledge" && state.knowledgeResults && state.knowledgeResults.length > 0) {
+    return knowledgeResponseText(state.knowledgeResults);
+  }
+  return deterministicResponse(
+    state.intent.kind,
+    state.intent.requestsMutation,
+    state.batchSummary,
+    state.todayOperations,
+  );
 }
 
 function dailyOperationRef(result: unknown): AgentGraphStateContract["dailyOperations"] {
@@ -538,14 +644,18 @@ const dailyOperationGateNode = async (state: AgentGraphState) => {
   return {};
 };
 
+const NARRATION_INTENTS = new Set<AgentIntentKind>([
+  "batch_overview",
+  "device_plan_or_mode",
+  "timeline_or_today_operations",
+  "knowledge",
+]);
+
 const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig) => {
   if (state.status === "safe_block" || state.status === "stale") {
     return { finalText: safeBlockText(state.errorCode), status: state.status };
   }
-  if (state.intent.kind === "knowledge" && state.knowledgeResults && state.knowledgeResults.length > 0) {
-    return { finalText: knowledgeResponseText(state.knowledgeResults) };
-  }
-  if (state.intent.kind !== "general") {
+  if (state.intent.kind === "exception" || state.intent.kind === "laggard") {
     return { finalText: deterministicResponse(
       state.intent.kind,
       state.intent.requestsMutation,
@@ -554,28 +664,48 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
     ) };
   }
   const run = runContextFromConfig(config);
-  const response = await run.narrationModel.invoke([
-    new SystemMessage(run.systemPrompt),
-    ...run.history,
-    new HumanMessage(run.message),
-    new SystemMessage("仅回答一般说明；不得调用工具、生成设备数值、审批或设备控制命令。"),
-  ], { signal: run.signal, callbacks: [] });
+  if (!NARRATION_INTENTS.has(state.intent.kind)) {
+    const response = await run.narrationModel.invoke([
+      new SystemMessage(run.systemPrompt),
+      ...run.history,
+      new HumanMessage(run.message),
+      new SystemMessage("仅回答一般说明；不得调用工具、生成设备数值、审批或设备控制命令。"),
+    ], { signal: run.signal, callbacks: [] });
+    const ai = response instanceof AIMessage ? response : new AIMessage(response.content);
+    if ((ai.tool_calls ?? []).length > 0) throw new Error("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+    return { finalText: messageText(ai) || deterministicResponse("general", false) };
+  }
+  let response: BaseMessage;
+  try {
+    response = await run.narrationModel.invoke([
+      new SystemMessage(NARRATION_SYSTEM_PROMPT),
+      new SystemMessage(`已核实现场上下文：\n${narrationContextText(state)}`),
+      ...run.history,
+      new HumanMessage(run.message),
+    ], { signal: run.signal, callbacks: [] });
+  } catch {
+    return { finalText: deterministicFallbackText(state) };
+  }
   const ai = response instanceof AIMessage ? response : new AIMessage(response.content);
   if ((ai.tool_calls ?? []).length > 0) throw new Error("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
-  return { finalText: messageText(ai) || deterministicResponse("general", false) };
+  const text = messageText(ai);
+  if (!text) return { finalText: deterministicFallbackText(state) };
+  try {
+    validateNumericResponse(text, narrationWhitelist(state));
+  } catch {
+    return { finalText: deterministicFallbackText(state) };
+  }
+  return { finalText: text };
 };
 
 const validateResponseNode = async (state: AgentGraphState) => {
-  if (state.intent.kind === "knowledge" && state.knowledgeResults && state.knowledgeResults.length > 0) {
-    return {};
-  }
+  const whitelist = state.intent.kind === "general"
+    ? state.numericWhitelist
+    : narrationWhitelist(state);
   try {
-    validateNumericResponse(state.finalText, state.numericWhitelist);
+    validateNumericResponse(state.finalText, whitelist);
   } catch (error) {
     if (state.intent.kind !== "general") throw error;
-    // General chat must not hard-fail the whole turn over an
-    // unverified number: refuse gracefully while keeping the numeric
-    // safety gate intact for every other response path.
     return {
       finalText: "抱歉，我无法提供未经核实的具体数值。设备设定、餐次和粉量请以现场执行台显示的批次方案为准。",
       status: "completed" as const,
