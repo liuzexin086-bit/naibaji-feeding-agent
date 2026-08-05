@@ -62,6 +62,7 @@ services:
       - agent_gateway_secret
     ports:
       - "127.0.0.1:${INGRESS_PORT:-8788}:8080"
+      - "127.0.0.1:8787:8080"
     networks:
       - edge
       - backend
