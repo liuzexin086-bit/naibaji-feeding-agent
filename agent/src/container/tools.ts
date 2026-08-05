@@ -776,15 +776,6 @@ export function createFeedingTools(
         observedAt?: string;
         remainingMealTimes?: string[];
       };
-      const observedGrade = context.observation?.diarrheaGrade &&
-        context.observation.diarrheaGrade !== "none"
-        ? context.observation.diarrheaGrade
-        : undefined;
-      const grades = observedGrade
-        ? [observedGrade]
-        : (params.grades ?? []).filter((grade): grade is DiarrheaGrade =>
-          grade === "mild" || grade === "moderate" || grade === "severe");
-      if (!grades.length) throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
       const batch = await loadBatch(context);
       const records = Array.isArray(batch?.records) ? batch.records : [];
       const sortedRecords = [...records].sort((left, right) => {
@@ -793,6 +784,26 @@ export function createFeedingTools(
         return leftAt.localeCompare(rightAt);
       });
       const latestRecord = sortedRecords[sortedRecords.length - 1] as Record<string, unknown> | undefined;
+      const observedGrade = context.observation?.diarrheaGrade &&
+        context.observation.diarrheaGrade !== "none"
+        ? context.observation.diarrheaGrade
+        : undefined;
+      const requestedGrades = (params.grades ?? []).filter((grade): grade is DiarrheaGrade =>
+        grade === "mild" || grade === "moderate" || grade === "severe");
+      const recordGradeRaw = latestRecord?.diarrheaGrade;
+      const recordGrade = typeof recordGradeRaw === "string" &&
+        recordGradeRaw !== "none" &&
+        ["mild", "moderate", "severe"].includes(recordGradeRaw)
+        ? recordGradeRaw as DiarrheaGrade
+        : undefined;
+      const grades = observedGrade
+        ? [observedGrade]
+        : requestedGrades.length
+          ? requestedGrades
+          : recordGrade
+            ? [recordGrade]
+            : [];
+      if (!grades.length) throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
       const recordActualRaw = latestRecord?.actualPowderGrams;
       const recordActual = recordActualRaw == null || recordActualRaw === ""
         ? Number.NaN

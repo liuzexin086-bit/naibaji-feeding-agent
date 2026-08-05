@@ -73,7 +73,7 @@ function frozenConfig() {
   };
 }
 
-function contextFor(userId: string) {
+function contextFor(userId: string, records: Array<Record<string, unknown>> = []) {
   const store = openLocalAgentStore(":memory:");
   store.createBatch({
     userId: "user-a",
@@ -82,7 +82,7 @@ function contextFor(userId: string) {
     currentDay: 0,
     data: {
       config: frozenConfig(),
-      records: [],
+      records,
       current_day_index: 0,
       control_start_day: -1,
     },
@@ -216,6 +216,33 @@ describe("local deterministic tools", () => {
       expect(details.data.deviceOperation.mode).toBe("timed_quantity");
       expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
       expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
+    } finally {
+      store.close();
+    }
+  });
+
+  it("falls back to the latest record grade when observation and params carry none", async () => {
+    const { store, context } = contextFor("user-a", [
+      { recordedAt: "2026-08-05T08:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 80 },
+      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 100 },
+    ]);
+    try {
+      const tool = createFeedingTools(context)
+        .find((item) => item.name === "preview_diarrhea_adjustment");
+      if (!tool) throw new Error("missing preview tool");
+      const output = await tool.execute("call-1", {}, new AbortController().signal);
+      const details = output.details as {
+        data: {
+          worstGrade: string;
+          cumulativePowderGrams: number;
+          cumulativeSource: string;
+          deviceOperation: { manualDispositionRequired: boolean };
+        };
+      };
+      expect(details.data.worstGrade).toBe("mild");
+      expect(details.data.cumulativePowderGrams).toBe(100);
+      expect(details.data.cumulativeSource).toBe("latest_record");
+      expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
     } finally {
       store.close();
     }
