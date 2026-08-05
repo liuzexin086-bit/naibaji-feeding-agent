@@ -1,25 +1,6 @@
-import type { AgentIntentKind } from "../state.js";
+import type { AgentIntentKind, CurrentBatchSummary, TodayOperationSummary } from "../state.js";
 
-export interface CurrentBatchSummary {
-  name?: string;
-  dayNumber?: number;
-  dayAge?: number;
-  selectedMode?: "timed_quantity" | "free_feeding";
-  effectiveMode?: "timed_quantity" | "free_feeding";
-  singlePowderGrams?: number;
-  dailyPowderGrams?: number;
-  mealCount?: number;
-  suggestedDailyPowderGrams?: number;
-  suggestedDailyMealCount?: number;
-  mealTimes: string[];
-  freeWindows: Array<{ startLocal: string; endLocal: string }>;
-}
-
-export interface TodayOperationSummary {
-  businessDate?: string;
-  status?: "pending" | "confirmed";
-  operations: Array<{ title: string; startLocal?: string; endLocal?: string }>;
-}
+export type { CurrentBatchSummary, TodayOperationSummary } from "../state.js";
 
 function modeLabel(mode?: CurrentBatchSummary["effectiveMode"]): string {
   return mode === "free_feeding" ? "自由采食" : mode === "timed_quantity" ? "定时定量" : "未返回";

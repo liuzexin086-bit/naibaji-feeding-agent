@@ -92,7 +92,8 @@ describe("Agent security boundary", () => {
     expect(server).toContain("NBJ_AGENT_SESSION_BATCH_MISMATCH");
     expect(server).toContain("storedRows.reverse()");
     expect(server).toContain("history,");
-    expect(graphRuntime).toContain("...input.history");
+    expect(graphRuntime).toContain("...run.history");
+    expect(graphRuntime).toContain("NBJ_AGENT_RESUME_INPUT_MISMATCH");
   });
 
   it("uses deterministic complete curves for concrete device advice", () => {

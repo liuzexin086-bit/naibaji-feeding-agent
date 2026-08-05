@@ -40,12 +40,12 @@ describe("Agent V2 deterministic gateway", () => {
   it("uses the v2 fixed route/evidence graph rather than a free ReAct tool loop", () => {
     expect(graphRuntime).toContain('LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2"');
     expect(graphRuntime).toContain('addNode("load_turn_scope"');
-    expect(graphRuntime).toContain('addNode("verify_frozen_snapshot"');
-    expect(graphRuntime).toContain('addNode("safety_preflight"');
-    expect(graphRuntime).toContain('addNode("classify_intent"');
-    expect(graphRuntime).toContain('addNode("build_evidence_plan"');
+    expect(graphRuntime).toContain('addNode("plan_turn"');
+    expect(graphRuntime).toContain('addNode("execute_evidence"');
     expect(graphRuntime).toContain('addNode("validate_evidence"');
+    expect(graphRuntime).toContain('addNode("action_gate"');
     expect(graphRuntime).toContain('addNode("daily_operation_gate"');
+    expect(graphRuntime).toContain('addNode("render_response"');
     expect(graphRuntime).toContain('addNode("validate_response"');
     expect(graphRuntime).toContain('addNode("persist_response"');
     expect(graphRuntime).toContain("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
@@ -108,7 +108,7 @@ describe("Agent V2 deterministic gateway", () => {
   it("emits finalized assistant messages and sanitizes public tool evidence", () => {
     expect(server).toContain("const assistantText = graphResult.text");
     expect(server).toContain('writeChatSse(response, "delta", identity, { text: assistantText })');
-    expect(graphRuntime).toContain('addNode("finalize"');
+    expect(graphRuntime).toContain('addNode("persist_response"');
     expect(server).toContain("completed: true");
     expect(server).toContain("name: event.name");
     expect(server).not.toContain("args: event");

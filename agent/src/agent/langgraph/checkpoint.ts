@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { resolve } from "node:path";
 import type { RunnableConfig } from "@langchain/core/runnables";
 import {
   BaseCheckpointSaver,
@@ -209,6 +210,31 @@ export class NodeSqliteCheckpointSaver extends BaseCheckpointSaver<number> {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+}
+
+const sharedCheckpointers = new Map<string, NodeSqliteCheckpointSaver>();
+
+/** Returns one long-lived saver per database path; callers must not close it per request. */
+export function getSharedCheckpointSaver(filename: string): NodeSqliteCheckpointSaver {
+  const key = resolve(filename);
+  const existing = sharedCheckpointers.get(key);
+  if (existing) return existing;
+  const saver = new NodeSqliteCheckpointSaver(filename);
+  sharedCheckpointers.set(key, saver);
+  return saver;
+}
+
+export function closeSharedCheckpointSavers(): void {
+  // Call only after the server stops accepting requests and drains in-flight
+  // runs (e.g. in the server "close" event) so no graph touches a closed DB.
+  for (const [filename, saver] of [...sharedCheckpointers]) {
+    try {
+      saver.close();
+      sharedCheckpointers.delete(filename);
+    } catch {
+      // Keep the entry so a later close retries instead of leaking a live handle.
     }
   }
 }

@@ -17,7 +17,10 @@ import {
 } from "../agent/local-message-store.js";
 import type { SqliteLocalStore } from "../local-db/index.js";
 import { writeChatSse } from "../agent/sse.js";
-import { NodeSqliteCheckpointSaver } from "../agent/langgraph/checkpoint.js";
+import {
+  closeSharedCheckpointSavers,
+  getSharedCheckpointSaver,
+} from "../agent/langgraph/checkpoint.js";
 import { createLangChainModel } from "../agent/langgraph/models.js";
 import {
   createAgentGraphRuntime,
@@ -302,7 +305,6 @@ async function handleChat(
     clientMessageId: body.clientMessageId?.trim() || crypto.randomUUID(),
   };
   const abortController = new AbortController();
-  let checkpointer: NodeSqliteCheckpointSaver | undefined;
   let messageStarted = false;
   const abortAgent = () => abortController.abort();
   request.once("aborted", abortAgent);
@@ -425,7 +427,7 @@ async function handleChat(
       },
     });
 
-    checkpointer = new NodeSqliteCheckpointSaver(
+    const checkpointer = getSharedCheckpointSaver(
       env.AGENT_CHECKPOINT_DB_PATH ?? "/checkpoints/agent-checkpoints.db",
     );
     const tools = createFeedingTools({
@@ -475,7 +477,7 @@ async function handleChat(
       batchId: body.batchId!,
       sessionId: body.sessionId!,
       clientMessageId: identity.clientMessageId,
-      message: body.message!,
+      message: interruptedUser ? String(interruptedUser.content ?? body.message ?? "") : body.message!,
       history,
       systemPrompt: SYSTEM_PROMPT,
       signal: runSignal,
@@ -512,7 +514,6 @@ async function handleChat(
     }
     writeChatSse(response, "error", identity, { code });
   } finally {
-    checkpointer?.close();
     clearInterval(heartbeat);
     if (!response.writableEnded && !response.destroyed) response.end();
   }
@@ -699,6 +700,7 @@ const server = createServer(async (request, response) => {
 
 server.once("close", () => {
   if (storage.backend === "local") storage.store.close();
+  closeSharedCheckpointSavers();
 });
 
 function shutdown(): void {

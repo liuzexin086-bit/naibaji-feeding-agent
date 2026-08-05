@@ -6,17 +6,25 @@ import {
   SystemMessage,
   type BaseMessage,
 } from "@langchain/core/messages";
-import { Annotation, END, START, StateGraph } from "@langchain/langgraph";
+import type { RunnableConfig } from "@langchain/core/runnables";
+import {
+  Annotation,
+  END,
+  START,
+  StateGraph,
+} from "@langchain/langgraph";
 import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { FeedingTool } from "../../container/tools.js";
 import { classifyDeterministicIntent, staticEvidencePlan, staticToolArguments } from "./router.js";
 import { selectSopSubgraph } from "./subgraphs/handlers.js";
-import {
-  deterministicResponse,
-  type CurrentBatchSummary,
-  type TodayOperationSummary,
-} from "./subgraphs/responses.js";
-import type { AgentEvidenceRef, AgentGraphStateContract, AgentIntentKind } from "./state.js";
+import { deterministicResponse } from "./subgraphs/responses.js";
+import type {
+  AgentEvidenceRef,
+  AgentGraphStateContract,
+  AgentIntentKind,
+  CurrentBatchSummary,
+  TodayOperationSummary,
+} from "./state.js";
 
 export const LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2";
 
@@ -52,14 +60,11 @@ const GraphState = Annotation.Root({
   graphVersion: Annotation<string>({ reducer: (_left, right) => right, default: () => LANGGRAPH_RUNTIME_VERSION }),
   batchId: Annotation<string>({ reducer: (_left, right) => right, default: () => "" }),
   sessionId: Annotation<string>({ reducer: (_left, right) => right, default: () => "" }),
+  inputDigest: Annotation<string>({ reducer: (_left, right) => right, default: () => "" }),
   snapshot: Annotation<AgentGraphStateContract["snapshot"]>({ reducer: (_left, right) => right, default: () => ({}) }),
   intent: Annotation<AgentGraphStateContract["intent"]>({
     reducer: (_left, right) => right,
     default: () => ({ kind: "general", asksForExplanation: false, requestsMutation: false, confidence: 0 }),
-  }),
-  safety: Annotation<AgentGraphStateContract["safety"]>({
-    reducer: (_left, right) => right,
-    default: () => ({ exceptionMode: false, blockers: [], missingFields: [] }),
   }),
   subgraph: Annotation<AgentGraphStateContract["subgraph"]>({ reducer: (_left, right) => right, default: () => "general_subgraph" }),
   evidencePlan: Annotation<AgentGraphStateContract["evidencePlan"]>({
@@ -67,6 +72,8 @@ const GraphState = Annotation.Root({
     default: () => ({ requiredTools: [], nextToolIndex: 0, responseKind: "general" }),
   }),
   evidenceRefs: Annotation<AgentEvidenceRef[]>({ reducer: (left, right) => left.concat(right), default: () => [] }),
+  batchSummary: Annotation<CurrentBatchSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
+  todayOperations: Annotation<TodayOperationSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   dailyOperations: Annotation<AgentGraphStateContract["dailyOperations"]>({ reducer: (_left, right) => right, default: () => undefined }),
   approval: Annotation<AgentGraphStateContract["approval"]>({ reducer: (_left, right) => right, default: () => null }),
   toolExecutions: Annotation<number>({ reducer: (_left, right) => right, default: () => 0 }),
@@ -330,232 +337,305 @@ function publicToolEvidence(refs: AgentEvidenceRef[]): AgentToolEvidence[] {
   return refs.map((ref) => ({ name: ref.toolName, isError: ref.isError, ...(ref.receiptId ? { receiptId: ref.receiptId } : {}) }));
 }
 
+interface NarrationModel {
+  invoke(input: BaseMessage[], options?: Record<string, unknown>): Promise<BaseMessage>;
+}
+
+interface RunContext {
+  userId: string;
+  batchId: string;
+  sessionId: string;
+  clientMessageId: string;
+  message: string;
+  history: BaseMessage[];
+  systemPrompt: string;
+  signal: AbortSignal;
+  tools: Map<string, FeedingTool>;
+  narrationModel: NarrationModel;
+  onToolResult?: (name: string, result: unknown) => void;
+  onToolEvidence?: (event: AgentToolEvidence) => void;
+}
+
+function runContextFromConfig(config: RunnableConfig): RunContext {
+  const context = config.configurable?.nbj_run as RunContext | undefined;
+  if (!context) throw new Error("NBJ_AGENT_RUN_CONTEXT_REQUIRED");
+  return context;
+}
+
+function computeInputDigest(input: AgentGraphRunInput): string {
+  const historyText = input.history
+    .map((message) => `${message.getType()}:${messageText(message)}`)
+    .join("\u001f");
+  return createHash("sha256").update([
+    "nbj-langgraph-v2-input",
+    input.userId,
+    input.batchId,
+    input.sessionId,
+    input.clientMessageId,
+    input.message,
+    historyText,
+    input.systemPrompt,
+  ].join("\u001f"), "utf8").digest("hex");
+}
+
+const loadTurnScopeNode = async (_state: AgentGraphState, config: RunnableConfig) => {
+  const run = runContextFromConfig(config);
+  const tool = run.tools.get("get_batch_context");
+  if (!tool) throw new Error("NBJ_AGENT_CONTEXT_TOOL_REQUIRED");
+  try {
+    const result = await tool.execute(randomUUID(), {}, run.signal);
+    const receipt = verifyReceipt(tool.name, run.batchId, result);
+    if (!receipt) throw new Error("NBJ_AGENT_FROZEN_SNAPSHOT_REQUIRED");
+    run.onToolResult?.(tool.name, result);
+    run.onToolEvidence?.({ name: tool.name, isError: false, receiptId: receipt.receiptId });
+    return {
+      snapshot: snapshotFromContext(result, receipt),
+      batchSummary: batchSummaryFromContext(result),
+      frozenReceiptBinding: receipt.binding,
+      numericWhitelist: receipt.numericWhitelist,
+      evidenceRefs: [{
+        toolName: tool.name,
+        receiptId: receipt.receiptId,
+        inputDigest: receipt.inputDigest,
+        frozenBinding: receipt.binding,
+        isError: false,
+      }],
+    };
+  } catch (error) {
+    const code = error instanceof Error && error.message.startsWith("NBJ_")
+      ? error.message : "NBJ_AGENT_FROZEN_SNAPSHOT_REQUIRED";
+    run.onToolEvidence?.({ name: tool.name, isError: true });
+    return {
+      evidenceRefs: [{ toolName: tool.name, isError: true }],
+      status: "safe_block" as const,
+      errorCode: code,
+    };
+  }
+};
+
+const planTurnNode = async (state: AgentGraphState, config: RunnableConfig) => {
+  const run = runContextFromConfig(config);
+  const intent = classifyDeterministicIntent(run.message);
+  return {
+    intent,
+    evidencePlan: { ...staticEvidencePlan(intent.kind), nextToolIndex: 0 },
+    subgraph: selectSopSubgraph(intent.kind, state.snapshot.selectedMode, state.snapshot.currentDayIndex),
+  };
+};
+
+const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfig) => {
+  const run = runContextFromConfig(config);
+  const name = state.evidencePlan.requiredTools[state.evidencePlan.nextToolIndex];
+  if (!name) return {};
+  const tool = run.tools.get(name);
+  if (!tool) throw new Error("NBJ_AGENT_TOOL_NOT_ALLOWED");
+  try {
+    const result = await tool.execute(
+      `nbj-${state.turnId}-${name}-${state.evidencePlan.nextToolIndex}`,
+      staticToolArguments(name, run.message),
+      run.signal,
+    );
+    const receipt = verifyReceipt(name, run.batchId, result);
+    if ((name === "compute_production_plan" || name === "get_today_timeline") && !receipt) {
+      throw new Error("NBJ_AGENT_EVIDENCE_RECEIPT_REQUIRED");
+    }
+    if (receipt && receipt.binding !== state.frozenReceiptBinding) {
+      throw new Error("NBJ_AGENT_EVIDENCE_RECEIPT_STALE");
+    }
+    run.onToolResult?.(name, result);
+    run.onToolEvidence?.({ name, isError: false, ...(receipt ? { receiptId: receipt.receiptId } : {}) });
+    return {
+      evidencePlan: { ...state.evidencePlan, nextToolIndex: state.evidencePlan.nextToolIndex + 1 },
+      toolExecutions: state.toolExecutions + 1,
+      numericWhitelist: receipt?.numericWhitelist ?? [],
+      evidenceRefs: [{
+        toolName: name,
+        ...(receipt ? {
+          receiptId: receipt.receiptId,
+          inputDigest: receipt.inputDigest,
+          frozenBinding: receipt.binding,
+        } : {}),
+        isError: false,
+      }],
+      ...(dailyOperationRef(result) ? { dailyOperations: dailyOperationRef(result) } : {}),
+      ...(name === "get_today_timeline" ? { todayOperations: todayOperationSummaryFromToolResult(result) } : {}),
+    };
+  } catch (error) {
+    const code = error instanceof Error && error.message.startsWith("NBJ_") ? error.message : "NBJ_AGENT_TOOL_FAILED";
+    run.onToolEvidence?.({ name, isError: true });
+    return {
+      evidencePlan: { ...state.evidencePlan, nextToolIndex: state.evidencePlan.nextToolIndex + 1 },
+      toolExecutions: state.toolExecutions + 1,
+      evidenceRefs: [{ toolName: name, isError: true }],
+      status: "safe_block" as const,
+      errorCode: code,
+    };
+  }
+};
+
+const validateEvidenceNode = async (state: AgentGraphState) => {
+  const required = state.evidencePlan.requiredTools;
+  const successful = new Set(state.evidenceRefs.filter((ref) => !ref.isError).map((ref) => ref.toolName));
+  if (state.status === "safe_block" || required.some((name) => !successful.has(name))) {
+    return { status: "safe_block" as const, errorCode: state.errorCode ?? "NBJ_AGENT_EVIDENCE_REQUIRED" };
+  }
+  if (state.evidenceRefs.some((ref) => ref.frozenBinding && ref.frozenBinding !== state.frozenReceiptBinding)) {
+    return { status: "stale" as const, errorCode: "NBJ_AGENT_EVIDENCE_RECEIPT_STALE" };
+  }
+  return {};
+};
+
+const actionGateNode = async (state: AgentGraphState) => {
+  if (state.status === "safe_block" || state.status === "stale") return {};
+  // Daily confirmation is intentionally graph-out: only the dedicated
+  // authenticated API may perform it. Mutation requests stay advisory.
+  const digest = actionDigest(state.turnId, state.subgraph);
+  if (state.intent.requestsMutation && state.intent.kind !== "timeline_or_today_operations") {
+    return {
+      approval: {
+        approvalId: `nbj-approval-${digest.slice(0, 24).toLowerCase()}`,
+        status: "draft_required" as const,
+        basedOnRevision: state.snapshot.batchRevision,
+        actionDigest: digest,
+      },
+    };
+  }
+  return { approval: { status: "not_required" as const, actionDigest: digest } };
+};
+
+const dailyOperationGateNode = async (state: AgentGraphState) => {
+  if (state.intent.kind === "timeline_or_today_operations" && !state.dailyOperations) {
+    return { status: "safe_block" as const, errorCode: "NBJ_AGENT_DAILY_OPERATION_PLAN_REQUIRED" };
+  }
+  // This node is read-only by construction. Confirmation remains the
+  // dedicated authenticated API, never a graph interrupt or tool loop.
+  return {};
+};
+
+const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig) => {
+  if (state.status === "safe_block" || state.status === "stale") {
+    return { finalText: safeBlockText(state.errorCode), status: state.status };
+  }
+  if (state.intent.kind !== "general") {
+    return { finalText: deterministicResponse(
+      state.intent.kind,
+      state.intent.requestsMutation,
+      state.batchSummary,
+      state.todayOperations,
+    ) };
+  }
+  const run = runContextFromConfig(config);
+  const response = await run.narrationModel.invoke([
+    new SystemMessage(run.systemPrompt),
+    ...run.history,
+    new HumanMessage(run.message),
+    new SystemMessage("仅回答一般说明；不得调用工具、生成设备数值、审批或设备控制命令。"),
+  ], { signal: run.signal, callbacks: [] });
+  const ai = response instanceof AIMessage ? response : new AIMessage(response.content);
+  if ((ai.tool_calls ?? []).length > 0) throw new Error("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+  return { finalText: messageText(ai) || deterministicResponse("general", false) };
+};
+
+const validateResponseNode = async (state: AgentGraphState) => {
+  try {
+    validateNumericResponse(state.finalText, state.numericWhitelist);
+  } catch (error) {
+    if (state.intent.kind !== "general") throw error;
+    // General chat must not hard-fail the whole turn over an
+    // unverified number: refuse gracefully while keeping the numeric
+    // safety gate intact for every other response path.
+    return {
+      finalText: "抱歉，我无法提供未经核实的具体数值。设备设定、餐次和粉量请以现场执行台显示的批次方案为准。",
+      status: "completed" as const,
+      errorCode: "NBJ_AGENT_NUMERIC_EVIDENCE_REQUIRED",
+    };
+  }
+  return {};
+};
+
+const persistResponseNode = async (state: AgentGraphState) => ({
+  status: state.status === "running" ? "completed" as const : state.status,
+});
+
+function compileAgentGraphImpl(checkpointer?: BaseCheckpointSaver) {
+  return new StateGraph(GraphState)
+    .addNode("load_turn_scope", loadTurnScopeNode)
+    .addNode("plan_turn", planTurnNode)
+    .addNode("execute_evidence", executeEvidenceNode)
+    .addNode("validate_evidence", validateEvidenceNode)
+    .addNode("action_gate", actionGateNode)
+    .addNode("daily_operation_gate", dailyOperationGateNode)
+    .addNode("render_response", renderResponseNode)
+    .addNode("validate_response", validateResponseNode)
+    .addNode("persist_response", persistResponseNode)
+    .addEdge(START, "load_turn_scope")
+    .addConditionalEdges("load_turn_scope", (state) => state.status === "safe_block" ? "render_response" : "plan_turn")
+    .addConditionalEdges("plan_turn", (state) =>
+      state.evidencePlan.requiredTools.length ? "execute_evidence" : "validate_evidence")
+    .addConditionalEdges("execute_evidence", (state) =>
+      state.status === "safe_block" ? "validate_evidence" :
+        state.evidencePlan.nextToolIndex < state.evidencePlan.requiredTools.length ? "execute_evidence" : "validate_evidence")
+    .addEdge("validate_evidence", "action_gate")
+    .addEdge("action_gate", "daily_operation_gate")
+    .addEdge("daily_operation_gate", "render_response")
+    .addEdge("render_response", "validate_response")
+    .addEdge("validate_response", "persist_response")
+    .addEdge("persist_response", END)
+    .compile({ checkpointer });
+}
+
+type CompiledAgentGraph = ReturnType<typeof compileAgentGraphImpl>;
+
+const compiledGraphs = new WeakMap<object, CompiledAgentGraph>();
+const noCheckpointerGraphKey = {};
+
+function compileAgentGraph(checkpointer?: BaseCheckpointSaver): CompiledAgentGraph {
+  const key: object = checkpointer ?? noCheckpointerGraphKey;
+  const cached = compiledGraphs.get(key);
+  if (cached) return cached;
+  const graph = compileAgentGraphImpl(checkpointer);
+  compiledGraphs.set(key, graph);
+  return graph;
+}
+
 /**
  * Creates a closed-loop v2 graph. Tool selection and parameters come only from
  * `router.ts`; the language model is never bound to tools and cannot select a
- * device action or enter a ReAct loop.
+ * device action or enter a ReAct loop. The compiled graph is cached per
+ * checkpointer, and per-request inputs flow through `config.configurable`
+ * so they never enter checkpointed state.
  */
 export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
   const tools = new Map(options.tools.map((tool) => [tool.name, tool]));
+  const narrationModel = options.model.bindTools
+    ? options.model.bindTools([], { tool_choice: "none" } as never)
+    : options.model;
+  const graph = compileAgentGraph(options.checkpointer);
 
   return {
     async run(input: AgentGraphRunInput): Promise<AgentGraphRunResult> {
-      let currentBatchSummary: CurrentBatchSummary | undefined;
-      let todayOperationSummary: TodayOperationSummary | undefined;
-      const narrationModel = options.model.bindTools
-        ? options.model.bindTools([], { tool_choice: "none" } as never)
-        : options.model;
-      const graph = new StateGraph(GraphState)
-        .addNode("load_turn_scope", async () => {
-          const tool = tools.get("get_batch_context");
-          if (!tool) throw new Error("NBJ_AGENT_CONTEXT_TOOL_REQUIRED");
-          try {
-            const result = await tool.execute(randomUUID(), {}, input.signal);
-            const receipt = verifyReceipt(tool.name, input.batchId, result);
-            if (!receipt) throw new Error("NBJ_AGENT_FROZEN_SNAPSHOT_REQUIRED");
-            currentBatchSummary = batchSummaryFromContext(result);
-            options.onToolResult?.(tool.name, result);
-            options.onToolEvidence?.({ name: tool.name, isError: false, receiptId: receipt.receiptId });
-            return {
-              snapshot: snapshotFromContext(result, receipt),
-              frozenReceiptBinding: receipt.binding,
-              numericWhitelist: receipt.numericWhitelist,
-              evidenceRefs: [{
-                toolName: tool.name,
-                receiptId: receipt.receiptId,
-                inputDigest: receipt.inputDigest,
-                frozenBinding: receipt.binding,
-                isError: false,
-              }],
-            };
-          } catch (error) {
-            const code = error instanceof Error && error.message.startsWith("NBJ_")
-              ? error.message : "NBJ_AGENT_FROZEN_SNAPSHOT_REQUIRED";
-            options.onToolEvidence?.({ name: tool.name, isError: true });
-            return {
-              evidenceRefs: [{ toolName: tool.name, isError: true }],
-              status: "safe_block" as const,
-              errorCode: code,
-            };
-          }
-        })
-        .addNode("verify_frozen_snapshot", async (state) => {
-          if (state.status === "safe_block" || !state.frozenReceiptBinding ||
-              !state.snapshot.sopSourceSha256 || !state.snapshot.devicePlanSha256) {
-            return { status: "safe_block" as const, errorCode: state.errorCode ?? "NBJ_AGENT_FROZEN_SNAPSHOT_REQUIRED" };
-          }
-          return {};
-        })
-        .addNode("safety_preflight", async (state) => {
-          const intent = classifyDeterministicIntent(input.message);
-          return {
-            safety: {
-              exceptionMode: intent.kind === "exception",
-              blockers: intent.kind === "exception" ? ["structured_observation_required"] : [],
-              missingFields: intent.kind === "exception" ? ["structured_observation"] : [],
-            },
-          };
-        })
-        .addNode("classify_intent", async () => ({ intent: classifyDeterministicIntent(input.message) }))
-        .addNode("build_evidence_plan", async (state) => {
-          const plan = staticEvidencePlan(state.intent.kind);
-          return { evidencePlan: { ...plan, nextToolIndex: 0 } };
-        })
-        .addNode("route_subgraph", async (state) => ({
-          subgraph: selectSopSubgraph(state.intent.kind, state.snapshot.selectedMode, state.snapshot.currentDayIndex),
-        }))
-        .addNode("execute_evidence", async (state) => {
-          const name = state.evidencePlan.requiredTools[state.evidencePlan.nextToolIndex];
-          if (!name) return {};
-          const tool = tools.get(name);
-          if (!tool) throw new Error("NBJ_AGENT_TOOL_NOT_ALLOWED");
-          try {
-            const result = await tool.execute(
-              `nbj-${state.turnId}-${name}-${state.evidencePlan.nextToolIndex}`,
-              staticToolArguments(name, input.message),
-              input.signal,
-            );
-            const receipt = verifyReceipt(name, input.batchId, result);
-            if ((name === "compute_production_plan" || name === "get_today_timeline") && !receipt) {
-              throw new Error("NBJ_AGENT_EVIDENCE_RECEIPT_REQUIRED");
-            }
-            if (receipt && receipt.binding !== state.frozenReceiptBinding) {
-              throw new Error("NBJ_AGENT_EVIDENCE_RECEIPT_STALE");
-            }
-            options.onToolResult?.(name, result);
-            options.onToolEvidence?.({ name, isError: false, ...(receipt ? { receiptId: receipt.receiptId } : {}) });
-            if (name === "get_today_timeline") todayOperationSummary = todayOperationSummaryFromToolResult(result);
-            return {
-              evidencePlan: { ...state.evidencePlan, nextToolIndex: state.evidencePlan.nextToolIndex + 1 },
-              toolExecutions: state.toolExecutions + 1,
-              numericWhitelist: receipt?.numericWhitelist ?? [],
-              evidenceRefs: [{
-                toolName: name,
-                ...(receipt ? {
-                  receiptId: receipt.receiptId,
-                  inputDigest: receipt.inputDigest,
-                  frozenBinding: receipt.binding,
-                } : {}),
-                isError: false,
-              }],
-              ...(dailyOperationRef(result) ? { dailyOperations: dailyOperationRef(result) } : {}),
-            };
-          } catch (error) {
-            const code = error instanceof Error && error.message.startsWith("NBJ_") ? error.message : "NBJ_AGENT_TOOL_FAILED";
-            options.onToolEvidence?.({ name, isError: true });
-            return {
-              evidencePlan: { ...state.evidencePlan, nextToolIndex: state.evidencePlan.nextToolIndex + 1 },
-              toolExecutions: state.toolExecutions + 1,
-              evidenceRefs: [{ toolName: name, isError: true }],
-              status: "safe_block" as const,
-              errorCode: code,
-            };
-          }
-        })
-        .addNode("validate_evidence", async (state) => {
-          const required = state.evidencePlan.requiredTools;
-          const successful = new Set(state.evidenceRefs.filter((ref) => !ref.isError).map((ref) => ref.toolName));
-          if (state.status === "safe_block" || required.some((name) => !successful.has(name))) {
-            return { status: "safe_block" as const, errorCode: state.errorCode ?? "NBJ_AGENT_EVIDENCE_REQUIRED" };
-          }
-          if (state.evidenceRefs.some((ref) => ref.frozenBinding && ref.frozenBinding !== state.frozenReceiptBinding)) {
-            return { status: "stale" as const, errorCode: "NBJ_AGENT_EVIDENCE_RECEIPT_STALE" };
-          }
-          return {};
-        })
-        .addNode("action_gate", async (state) => {
-          if (state.status === "safe_block" || state.status === "stale") return {};
-          // Daily confirmation is intentionally graph-out: only the dedicated
-          // authenticated API may perform it. Mutation requests stay advisory.
-          const digest = actionDigest(state.turnId, state.subgraph);
-          if (state.intent.requestsMutation && state.intent.kind !== "timeline_or_today_operations") {
-            return {
-              approval: {
-                approvalId: `nbj-approval-${digest.slice(0, 24).toLowerCase()}`,
-                status: "draft_required" as const,
-                basedOnRevision: state.snapshot.batchRevision,
-                actionDigest: digest,
-              },
-            };
-          }
-          return { approval: { status: "not_required" as const, actionDigest: digest } };
-        })
-        .addNode("daily_operation_gate", async (state) => {
-          if (state.intent.kind === "timeline_or_today_operations" && !state.dailyOperations) {
-            return { status: "safe_block" as const, errorCode: "NBJ_AGENT_DAILY_OPERATION_PLAN_REQUIRED" };
-          }
-          // This node is read-only by construction. Confirmation remains the
-          // dedicated authenticated API, never a graph interrupt or tool loop.
-          return {};
-        })
-        .addNode("render_response", async (state) => {
-          if (state.status === "safe_block" || state.status === "stale") {
-            return { finalText: safeBlockText(state.errorCode), status: state.status };
-          }
-          if (state.intent.kind !== "general") {
-            return { finalText: deterministicResponse(
-              state.intent.kind,
-              state.intent.requestsMutation,
-              currentBatchSummary,
-              todayOperationSummary,
-            ) };
-          }
-          const response = await narrationModel.invoke([
-            new SystemMessage(input.systemPrompt),
-            ...input.history,
-            new HumanMessage(input.message),
-            new SystemMessage("仅回答一般说明；不得调用工具、生成设备数值、审批或设备控制命令。"),
-          ], { signal: input.signal, callbacks: [] });
-          const ai = response instanceof AIMessage ? response : new AIMessage(response.content);
-          if ((ai.tool_calls ?? []).length > 0) throw new Error("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
-          return { finalText: messageText(ai) || deterministicResponse("general", false) };
-        })
-        .addNode("validate_response", async (state) => {
-          try {
-            validateNumericResponse(state.finalText, state.numericWhitelist);
-          } catch (error) {
-            if (state.intent.kind !== "general") throw error;
-            // General chat must not hard-fail the whole turn over an
-            // unverified number: refuse gracefully while keeping the numeric
-            // safety gate intact for every other response path.
-            return {
-              finalText: "抱歉，我无法提供未经核实的具体数值。设备设定、餐次和粉量请以现场执行台显示的批次方案为准。",
-              status: "completed",
-              errorCode: "NBJ_AGENT_NUMERIC_EVIDENCE_REQUIRED",
-            };
-          }
-          return {};
-        })
-        // Kept as a named boundary for SSE/server persistence ordering.
-        .addNode("finalize", async () => ({}))
-        .addNode("persist_response", async (state) => ({ status: state.status === "running" ? "completed" as const : state.status }))
-        .addEdge(START, "load_turn_scope")
-        .addEdge("load_turn_scope", "verify_frozen_snapshot")
-        .addConditionalEdges("verify_frozen_snapshot", (state) => state.status === "safe_block" ? "render_response" : "safety_preflight")
-        .addEdge("safety_preflight", "classify_intent")
-        .addEdge("classify_intent", "build_evidence_plan")
-        .addEdge("build_evidence_plan", "route_subgraph")
-        .addConditionalEdges("route_subgraph", (state) =>
-          state.evidencePlan.requiredTools.length ? "execute_evidence" : "validate_evidence")
-        .addConditionalEdges("execute_evidence", (state) =>
-          state.status === "safe_block" ? "validate_evidence" :
-            state.evidencePlan.nextToolIndex < state.evidencePlan.requiredTools.length ? "execute_evidence" : "validate_evidence")
-        .addEdge("validate_evidence", "action_gate")
-        .addEdge("action_gate", "daily_operation_gate")
-        .addEdge("daily_operation_gate", "render_response")
-        .addEdge("render_response", "validate_response")
-        .addEdge("validate_response", "finalize")
-        .addEdge("finalize", "persist_response")
-        .addEdge("persist_response", END)
-        .compile({ checkpointer: options.checkpointer });
-
-      const config = {
+      const inputDigest = computeInputDigest(input);
+      const config: RunnableConfig = {
         configurable: {
           thread_id: graphThreadId(input.userId, input.batchId, input.sessionId),
           // NodeSqliteCheckpointSaver resolves this to `turn:<clientMessageId>`
           // as its namespace. Do not set LangGraph's internal checkpoint_ns:
           // it is reserved for nested graph tasks and would prevent replay.
           nbj_request_id: `turn:${input.clientMessageId}`,
+          nbj_run: {
+            userId: input.userId,
+            batchId: input.batchId,
+            sessionId: input.sessionId,
+            clientMessageId: input.clientMessageId,
+            message: input.message,
+            history: input.history,
+            systemPrompt: input.systemPrompt,
+            signal: input.signal,
+            tools,
+            narrationModel,
+            onToolResult: options.onToolResult,
+            onToolEvidence: options.onToolEvidence,
+          },
         },
         callbacks: [],
         recursionLimit: 40,
@@ -566,6 +646,9 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
         if (checkpoint.values && Object.keys(checkpoint.values).length > 0) {
           resumed = true;
           const state = checkpoint.values as AgentGraphState;
+          if (state.inputDigest && state.inputDigest !== inputDigest) {
+            throw new Error("NBJ_AGENT_RESUME_INPUT_MISMATCH");
+          }
           if (state.finalText) {
             validateNumericResponse(state.finalText, state.numericWhitelist ?? []);
             return {
@@ -594,12 +677,14 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
         graphVersion: LANGGRAPH_RUNTIME_VERSION,
         batchId: input.batchId,
         sessionId: input.sessionId,
+        inputDigest,
         snapshot: {},
         intent: { kind: "general", asksForExplanation: false, requestsMutation: false, confidence: 0 },
-        safety: { exceptionMode: false, blockers: [], missingFields: [] },
         subgraph: "general_subgraph",
         evidencePlan: { requiredTools: [], nextToolIndex: 0, responseKind: "general" },
         evidenceRefs: [],
+        batchSummary: undefined,
+        todayOperations: undefined,
         dailyOperations: undefined,
         approval: null,
         toolExecutions: 0,

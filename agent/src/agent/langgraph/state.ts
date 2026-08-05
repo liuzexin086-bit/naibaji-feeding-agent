@@ -19,6 +19,27 @@ export interface AgentEvidenceRef {
   isError: boolean;
 }
 
+export interface CurrentBatchSummary {
+  name?: string;
+  dayNumber?: number;
+  dayAge?: number;
+  selectedMode?: "timed_quantity" | "free_feeding";
+  effectiveMode?: "timed_quantity" | "free_feeding";
+  singlePowderGrams?: number;
+  dailyPowderGrams?: number;
+  mealCount?: number;
+  suggestedDailyPowderGrams?: number;
+  suggestedDailyMealCount?: number;
+  mealTimes: string[];
+  freeWindows: Array<{ startLocal: string; endLocal: string }>;
+}
+
+export interface TodayOperationSummary {
+  businessDate?: string;
+  status?: "pending" | "confirmed";
+  operations: Array<{ title: string; startLocal?: string; endLocal?: string }>;
+}
+
 /**
  * Checkpoint-safe graph state. It deliberately holds references and digests,
  * never raw tool inputs/results, credentials, or the full message body.
@@ -29,6 +50,7 @@ export interface AgentGraphStateContract {
   graphVersion: string;
   batchId: string;
   sessionId: string;
+  inputDigest: string;
   snapshot: {
     batchRevision?: number;
     currentDayIndex?: number;
@@ -44,11 +66,6 @@ export interface AgentGraphStateContract {
     requestsMutation: boolean;
     confidence: number;
   };
-  safety: {
-    exceptionMode: boolean;
-    blockers: string[];
-    missingFields: string[];
-  };
   subgraph: "first_day_subgraph" | "timed_quantity_subgraph" | "free_feeding_subgraph"
     | "exception_subgraph" | "laggard_subgraph" | "timeline_today_operations_subgraph"
     | "knowledge_subgraph" | "approval_subgraph" | "batch_overview_subgraph" | "general_subgraph";
@@ -58,6 +75,8 @@ export interface AgentGraphStateContract {
     responseKind: "deterministic" | "knowledge" | "general";
   };
   evidenceRefs: AgentEvidenceRef[];
+  batchSummary?: CurrentBatchSummary;
+  todayOperations?: TodayOperationSummary;
   dailyOperations?: {
     planId: string;
     businessDate: string;

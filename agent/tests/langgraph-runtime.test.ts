@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { AIMessage } from "@langchain/core/messages";
 import { RunnableLambda } from "@langchain/core/runnables";
 import { afterEach, describe, expect, it } from "vitest";
-import { NodeSqliteCheckpointSaver } from "../src/agent/langgraph/checkpoint.js";
+import {
+  closeSharedCheckpointSavers,
+  getSharedCheckpointSaver,
+  NodeSqliteCheckpointSaver,
+} from "../src/agent/langgraph/checkpoint.js";
 import {
   createAgentGraphRuntime,
   graphThreadId,
@@ -275,5 +279,33 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(replay).toMatchObject({ text: first.text, resumed: true, status: "completed" });
     expect(contextCalls).toBe(1);
     expect(model.calls).toBe(1);
+  });
+
+  it("rejects resuming a checkpoint with a different input digest", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "nbj-langgraph-v2-"));
+    tempDirs.push(directory);
+    const saver = new NodeSqliteCheckpointSaver(join(directory, "checkpoints.db"));
+    savers.push(saver);
+    const model = fakeModel([new AIMessage("无数值的一般说明")]);
+    const runtime = createAgentGraphRuntime({
+      model: model as never,
+      checkpointer: saver,
+      tools: [tool("get_batch_context", async () =>
+        receiptResult("get_batch_context", "b", { safe: true }))],
+    });
+    const firstInput = { ...input("你好"), clientMessageId: "resume-mismatch" };
+    await runtime.run(firstInput);
+    await expect(runtime.run({ ...firstInput, message: "换一个问题", resume: true }))
+      .rejects.toThrow("NBJ_AGENT_RESUME_INPUT_MISMATCH");
+  });
+
+  it("shares one long-lived checkpoint saver per database path", () => {
+    const directory = mkdtempSync(join(tmpdir(), "nbj-langgraph-shared-"));
+    tempDirs.push(directory);
+    const path = join(directory, "shared.db");
+    const first = getSharedCheckpointSaver(path);
+    const second = getSharedCheckpointSaver(resolve(path));
+    expect(second).toBe(first);
+    closeSharedCheckpointSavers();
   });
 });
