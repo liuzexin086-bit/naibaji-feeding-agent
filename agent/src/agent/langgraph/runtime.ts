@@ -511,7 +511,19 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
           return { finalText: messageText(ai) || deterministicResponse("general", false) };
         })
         .addNode("validate_response", async (state) => {
-          validateNumericResponse(state.finalText, state.numericWhitelist);
+          try {
+            validateNumericResponse(state.finalText, state.numericWhitelist);
+          } catch (error) {
+            if (state.intent.kind !== "general") throw error;
+            // General chat must not hard-fail the whole turn over an
+            // unverified number: refuse gracefully while keeping the numeric
+            // safety gate intact for every other response path.
+            return {
+              finalText: "抱歉，我无法提供未经核实的具体数值。设备设定、餐次和粉量请以现场执行台显示的批次方案为准。",
+              status: "completed",
+              errorCode: "NBJ_AGENT_NUMERIC_EVIDENCE_REQUIRED",
+            };
+          }
           return {};
         })
         // Kept as a named boundary for SSE/server persistence ordering.

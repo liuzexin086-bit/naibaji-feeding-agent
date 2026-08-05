@@ -208,8 +208,13 @@ describe("LangGraph v2 deterministic runtime", () => {
       model: fakeModel([new AIMessage("今日总下粉 43 克")]) as never,
       tools,
     });
+    // General chat refuses unverified numbers gracefully instead of failing
+    // the whole turn; the numeric gate still blocks them from being delivered.
     await expect(rejected.run({ ...input("你好"), clientMessageId: "numeric-reject" }))
-      .rejects.toThrow("NBJ_AGENT_NUMERIC_EVIDENCE_REQUIRED");
+      .resolves.toMatchObject({
+        status: "completed",
+        text: expect.stringContaining("未经核实"),
+      });
   });
 
   it("fails closed without exposing numbers when the frozen receipt is missing or tampered", async () => {
