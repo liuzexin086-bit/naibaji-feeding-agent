@@ -40,6 +40,13 @@ export interface TodayOperationSummary {
   operations: Array<{ title: string; startLocal?: string; endLocal?: string }>;
 }
 
+export interface KnowledgeResultRef {
+  sectionId: string;
+  title: string;
+  text: string;
+  score: number;
+}
+
 /**
  * Checkpoint-safe graph state. It deliberately holds references and digests,
  * never raw tool inputs/results, credentials, or the full message body.
@@ -77,6 +84,7 @@ export interface AgentGraphStateContract {
   evidenceRefs: AgentEvidenceRef[];
   batchSummary?: CurrentBatchSummary;
   todayOperations?: TodayOperationSummary;
+  knowledgeResults?: KnowledgeResultRef[];
   dailyOperations?: {
     planId: string;
     businessDate: string;

@@ -17,12 +17,13 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { FeedingTool } from "../../container/tools.js";
 import { classifyDeterministicIntent, staticEvidencePlan, staticToolArguments } from "./router.js";
 import { selectSopSubgraph } from "./subgraphs/handlers.js";
-import { deterministicResponse } from "./subgraphs/responses.js";
+import { deterministicResponse, knowledgeResponseText } from "./subgraphs/responses.js";
 import type {
   AgentEvidenceRef,
   AgentGraphStateContract,
   AgentIntentKind,
   CurrentBatchSummary,
+  KnowledgeResultRef,
   TodayOperationSummary,
 } from "./state.js";
 
@@ -74,6 +75,7 @@ const GraphState = Annotation.Root({
   evidenceRefs: Annotation<AgentEvidenceRef[]>({ reducer: (left, right) => left.concat(right), default: () => [] }),
   batchSummary: Annotation<CurrentBatchSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   todayOperations: Annotation<TodayOperationSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
+  knowledgeResults: Annotation<KnowledgeResultRef[] | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   dailyOperations: Annotation<AgentGraphStateContract["dailyOperations"]>({ reducer: (_left, right) => right, default: () => undefined }),
   approval: Annotation<AgentGraphStateContract["approval"]>({ reducer: (_left, right) => right, default: () => null }),
   toolExecutions: Annotation<number>({ reducer: (_left, right) => right, default: () => 0 }),
@@ -289,6 +291,27 @@ function todayOperationSummaryFromToolResult(result: unknown): TodayOperationSum
   };
 }
 
+function knowledgeResultsFromToolResult(result: unknown): KnowledgeResultRef[] | undefined {
+  const envelope = envelopeFromToolResult(result);
+  const data = object(envelope?.data);
+  if (data?.status !== "ok" || !Array.isArray(data.results)) return undefined;
+  const rows = data.results.slice(0, 3).map((row) => {
+    const item = object(row);
+    if (!item) return null;
+    const title = typeof item.title === "string" ? item.title.trim() : "";
+    const text = typeof item.text === "string" ? item.text.trim() : "";
+    const score = Number(item.score);
+    if (!title || !text || !Number.isFinite(score)) return null;
+    return {
+      sectionId: String(item.sectionId ?? ""),
+      title: title.slice(0, 200),
+      text: text.slice(0, 1_200),
+      score,
+    };
+  }).filter((row): row is KnowledgeResultRef => row !== null);
+  return rows.length ? rows : undefined;
+}
+
 function stableTurnId(input: Pick<AgentGraphRunInput, "userId" | "batchId" | "sessionId" | "clientMessageId">): string {
   return createHash("sha256").update([
     "nbj-langgraph-v2", input.userId, input.batchId, input.sessionId, input.clientMessageId,
@@ -459,6 +482,9 @@ const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfi
       }],
       ...(dailyOperationRef(result) ? { dailyOperations: dailyOperationRef(result) } : {}),
       ...(name === "get_today_timeline" ? { todayOperations: todayOperationSummaryFromToolResult(result) } : {}),
+      ...(name === "search_feeding_knowledge"
+        ? { knowledgeResults: knowledgeResultsFromToolResult(result) }
+        : {}),
     };
   } catch (error) {
     const code = error instanceof Error && error.message.startsWith("NBJ_") ? error.message : "NBJ_AGENT_TOOL_FAILED";
@@ -516,6 +542,9 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
   if (state.status === "safe_block" || state.status === "stale") {
     return { finalText: safeBlockText(state.errorCode), status: state.status };
   }
+  if (state.intent.kind === "knowledge" && state.knowledgeResults && state.knowledgeResults.length > 0) {
+    return { finalText: knowledgeResponseText(state.knowledgeResults) };
+  }
   if (state.intent.kind !== "general") {
     return { finalText: deterministicResponse(
       state.intent.kind,
@@ -537,6 +566,9 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
 };
 
 const validateResponseNode = async (state: AgentGraphState) => {
+  if (state.intent.kind === "knowledge" && state.knowledgeResults && state.knowledgeResults.length > 0) {
+    return {};
+  }
   try {
     validateNumericResponse(state.finalText, state.numericWhitelist);
   } catch (error) {
@@ -685,6 +717,7 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
         evidenceRefs: [],
         batchSummary: undefined,
         todayOperations: undefined,
+        knowledgeResults: undefined,
         dailyOperations: undefined,
         approval: null,
         toolExecutions: 0,

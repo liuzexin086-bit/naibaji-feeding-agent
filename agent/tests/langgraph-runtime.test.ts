@@ -81,6 +81,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(graphThreadId("u1", "b1", "s1")).toBe("nbj:u1:b1:s1");
     expect(classifyDeterministicIntent("腹泻且弱仔拒食").kind).toBe("exception");
     expect(classifyDeterministicIntent("弱仔需要补喂").kind).toBe("laggard");
+    expect(classifyDeterministicIntent("断奶首日要做什么").kind).toBe("knowledge");
     expect(staticEvidencePlan("timeline_or_today_operations")).toEqual({
       requiredTools: ["get_today_timeline"], responseKind: "deterministic",
     });
@@ -188,6 +189,46 @@ describe("LangGraph v2 deterministic runtime", () => {
       status: "completed",
       text: expect.stringContaining("09:00–10:00 日常巡栏"),
     });
+  });
+
+  it("answers first-day SOP flow from frozen knowledge results", async () => {
+    const execution: string[] = [];
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("unused")]) as never,
+      tools: [
+        tool("get_batch_context", async () => {
+          execution.push("context");
+          return receiptResult("get_batch_context", "b", {
+            batch: { current_day_index: 0, config: { name: "批次 A" } },
+            canonicalDecision: { selectedMode: "free_feeding", effectiveMode: "free_feeding" },
+          });
+        }),
+        tool("search_feeding_knowledge", async () => {
+          execution.push("knowledge");
+          return {
+            details: {
+              data: {
+                status: "ok",
+                source: "dense+lexical",
+                results: [{
+                  sectionId: "d0",
+                  title: "断奶第 1 天",
+                  text: "17:00 第一次教奶；每 3 小时供奶一次；第二天切换自由采食。",
+                  score: 0.9,
+                }],
+              },
+            },
+          };
+        }),
+      ],
+    });
+    const result = await runtime.run(input("断奶首日要做什么"));
+    expect(execution).toEqual(["context", "knowledge"]);
+    expect(result.intent).toBe("knowledge");
+    expect(result.status).toBe("completed");
+    expect(result.text).toContain("断奶第 1 天");
+    expect(result.text).toContain("17:00 第一次教奶");
+    expect(result.text).toContain("冻结 SOP");
   });
 
   it("blocks a narration model that tries to choose a tool", async () => {

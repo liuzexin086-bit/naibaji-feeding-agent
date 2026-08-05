@@ -1,4 +1,9 @@
-import type { AgentIntentKind, CurrentBatchSummary, TodayOperationSummary } from "../state.js";
+import type {
+  AgentIntentKind,
+  CurrentBatchSummary,
+  KnowledgeResultRef,
+  TodayOperationSummary,
+} from "../state.js";
 
 export type { CurrentBatchSummary, TodayOperationSummary } from "../state.js";
 
@@ -89,4 +94,16 @@ export function deterministicResponse(
     return "已限定在批次冻结 SOP 知识范围内检索；若无同一摘要的知识证据，将返回不可用而不会读取最新模板。";
   }
   return "我会基于当前批次的冻结 SOP 和确定性证据协助说明；设备数值与变更不会由对话直接生成或执行。";
+}
+
+/** Deterministic rendering of verified knowledge retrieved from the frozen SOP. */
+export function knowledgeResponseText(results: KnowledgeResultRef[]): string {
+  const body = results
+    .map((row) => `## ${row.title}\n${row.text}`)
+    .join("\n\n");
+  return [
+    "以下内容来自本批次冻结 SOP 的检索结果：",
+    body,
+    "设备具体数值与变更以现场执行台显示为准。",
+  ].join("\n\n");
 }

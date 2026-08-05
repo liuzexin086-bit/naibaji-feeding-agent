@@ -16,7 +16,7 @@ const EXCEPTION = /腹泻|拉稀|拒食|空腹|堵料|堵塞|探头|污染|死�
 const LAGGARD = /弱仔|掉队|补喂|去留|laggard|weak pig/u;
 const DEVICE = /设备|模式|奶粉|下粉|餐次|配奶|自由采食|定时定量|device|feed(?:ing)? plan|mode/u;
 const TIMELINE = /今日操作|今日任务|巡栏|维护|流程|时间线|timeline|today operations/u;
-const KNOWLEDGE = /sop|规程|知识|为什么|依据|解释|说明|knowledge/u;
+const KNOWLEDGE = /sop|规程|知识|为什么|依据|解释|说明|断奶首日|首日|第一天|knowledge/u;
 const BATCH_CONTEXT = /当前批次|批次数据|批次情况|当前数据|今日情况|今天情况|批次概览|批次状态/u;
 const MUTATION = /切换|修改|调整|执行|确认|启动|关闭|switch|change|adjust|confirm|start|stop/u;
 
