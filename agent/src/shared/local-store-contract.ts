@@ -42,6 +42,26 @@ export interface LocalSopTemplate {
   indexError: string | null;
 }
 
+export type SopEditTaskStatus = "drafting" | "draft_ready" | "draft_failed" | "published" | "rejected";
+
+export interface SopEditTask {
+  id: string;
+  templateId: string | null;
+  instruction: string;
+  status: SopEditTaskStatus;
+  proposedMarkdown: string | null;
+  proposedConfig: Record<string, unknown> | null;
+  changeSummary: string | null;
+  affectedSections: string[];
+  errorCode: string | null;
+  publishedTemplateId: string | null;
+  createdBy: string;
+  confirmedBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  confirmedAt: string | null;
+}
+
 export interface SopKnowledgeChunk {
   templateId: string;
   chunkId: string;
@@ -446,6 +466,34 @@ export interface LocalStore {
   }): LocalSopTemplate;
   failSopTemplate(templateId: string, error: string): LocalSopTemplate;
   listSopKnowledgeChunks(templateId: string): SopKnowledgeChunk[];
+  createSopEditTask(input: {
+    id?: string;
+    templateId: string | null;
+    instruction: string;
+    createdBy: string;
+  }): SopEditTask;
+  getSopEditTask(taskId: string): SopEditTask | null;
+  listSopEditTasks(limit?: number): SopEditTask[];
+  completeSopEditTaskDraft(input: {
+    taskId: string;
+    proposedMarkdown: string;
+    proposedConfig: Record<string, unknown>;
+    changeSummary: string;
+    affectedSections: string[];
+  }): SopEditTask;
+  failSopEditTaskDraft(input: {
+    taskId: string;
+    errorCode: string;
+  }): SopEditTask;
+  publishSopEditTask(input: {
+    taskId: string;
+    publishedTemplateId: string;
+    confirmedBy: string;
+  }): SopEditTask;
+  rejectSopEditTask(input: {
+    taskId: string;
+    rejectedBy: string;
+  }): SopEditTask;
   commitAdvance(input: CommitAdvanceInput): CommitResult;
   commitRecord(input: CommitRecordInput): CommitResult;
   commitModeSwitch(input: CommitModeSwitchInput): CommitResult;

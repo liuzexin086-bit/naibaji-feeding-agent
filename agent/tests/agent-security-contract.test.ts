@@ -154,11 +154,14 @@ describe("Agent security boundary", () => {
   it("provides separate admin entries for Agent API and immutable SOP versions", () => {
     expect(adminPage).toContain('data-admin-view="apiAdminView"');
     expect(adminPage).toContain('data-admin-view="sopAdminView"');
+    expect(adminPage).toContain('data-admin-view="sopNlAdminView"');
     expect(adminScript).toContain("/api/admin/sop/templates");
     expect(adminPage).toContain('id="sopSourceMarkdown"');
     expect(adminScript).toContain("sourceMarkdown: sourceMarkdown");
     expect(adminScript).toContain("template.sourceSha256");
     expect(adminScript).toContain("template.collectionRevision");
+    expect(adminScript).toContain("/api/admin/sop/natural-language/tasks");
+    expect(adminScript).toContain("confirmationPhrase: '发布 SOP 修改'");
   });
 
   it("keeps operator mode switching revision-safe and template-immutable", () => {
@@ -182,6 +185,6 @@ describe("Agent security boundary", () => {
 
   it("prevents stale public admin bundles after a configuration rollout", () => {
     expect(nginx).toContain('add_header Cache-Control "no-store" always');
-    expect(adminPage).toContain("admin.js?v=20260804-1");
+    expect(adminPage).toContain("admin.js?v=20260805-1");
   });
 });

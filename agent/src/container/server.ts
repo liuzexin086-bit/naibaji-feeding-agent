@@ -35,6 +35,8 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   DEFAULT_RUNTIME_TIMEOUT,
   loadRuntimeAgentConfig,
+  normalizeBaseUrl,
+  normalizeProvider,
   publicRuntimeAgentConfig,
   saveRuntimeAgentConfig,
   type RuntimeAgentConfig,
@@ -124,40 +126,6 @@ interface ContainerEnv {
 type ContainerStorage =
   | { backend: "local"; store: SqliteLocalStore }
   | { backend: "supabase"; runtime: SupabaseRuntime };
-
-function defaultBaseUrl(provider: "anthropic" | "openai"): string {
-  return provider === "openai"
-    ? "https://api.openai.com/v1"
-    : "https://api.anthropic.com/v1";
-}
-
-function normalizeProvider(value: string): "anthropic" | "openai" {
-  if (value !== "anthropic" && value !== "openai") {
-    throw new Error("NBJ_AGENT_PROVIDER_INVALID");
-  }
-  return value;
-}
-
-function normalizeBaseUrl(
-  provider: "anthropic" | "openai",
-  value?: string,
-): string {
-  const parsed = new URL(String(value || defaultBaseUrl(provider)).trim());
-  const loopback =
-    parsed.hostname === "127.0.0.1" ||
-    parsed.hostname === "localhost" ||
-    parsed.hostname === "::1";
-  if (
-    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
-    parsed.username ||
-    parsed.password
-  ) {
-    throw new Error("NBJ_AGENT_BASE_URL_INVALID");
-  }
-  parsed.hash = "";
-  parsed.search = "";
-  return parsed.toString().replace(/\/+$/, "");
-}
 
 async function validateProviderConnection(
   config: RuntimeAgentConfig,

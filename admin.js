@@ -15,7 +15,10 @@
     apiConfigLoaded: false,
     apiConfig: null,
     sopTemplates: [],
-    sopLoaded: false
+    sopLoaded: false,
+    sopNlTasks: [],
+    sopNlTimer: null,
+    sopNlSelectedTask: null
   }
 
   var DEFAULT_SOP_CONFIG = {
@@ -76,6 +79,15 @@
       NBJ_SOP_INDEX_FAILED: 'SOP 建立索引失败，上一已发布版本仍然有效。',
       NBJ_SOP_EMPTY: '请粘贴完整 SOP Markdown 原文。',
       NBJ_SOP_TEMPLATE_NOT_FOUND: '来源 SOP 版本不存在，请刷新后重试。',
+      NBJ_SOP_NL_TASK_NOT_FOUND: 'SOP 自然语言任务不存在。',
+      NBJ_SOP_NL_TASK_NOT_DRAFT_READY: '该任务当前不可确认发布。',
+      NBJ_SOP_NL_CONFIRM_PHRASE_MISMATCH: '确认短语不匹配，未发布。',
+      NBJ_SOP_NL_TEMPLATE_NOT_FOUND: '目标 SOP 模板不存在。',
+      NBJ_SOP_NL_DRAFT_PARSE_FAILED: '模型输出无法解析，草稿生成失败。',
+      NBJ_SOP_NL_DRAFT_INVALID: '模型提案未通过 SOP 校验，草稿生成失败。',
+      NBJ_SOP_NL_DRAFT_UNCHANGED: '提案与当前模板没有实际变化，已标记失败。',
+      NBJ_SOP_NL_MODEL_UNAVAILABLE: 'Agent 模型未配置，无法生成草稿。',
+      NBJ_SOP_NL_DRAFT_FAILED: '草稿生成失败。',
       NBJ_FREE_FEEDING_SLOTS_INVALID: '自由采食必须保留完整的 8 个有效时段。',
       NBJ_FREE_FEEDING_SLOTS_OVERLAP: '已启用的自由采食时段在业务日内重叠。',
       NBJ_FREE_FEEDING_SLOT_ZERO_DURATION: '自由采食时段不能使用相同的开始和结束时间。'
@@ -101,6 +113,7 @@
     if (viewId === 'accountsAdminView') loadUsers(false)
     if (viewId === 'apiAdminView') loadApiConfig(false)
     if (viewId === 'sopAdminView') loadSopTemplates(false)
+    if (viewId === 'sopNlAdminView') { loadSopTemplates(false); loadSopNlTasks(false) }
   }
 
   function renderStats() {
@@ -222,7 +235,103 @@
   function sopStatus(status) { return ({ published: '已发布 · 索引可用', draft: '草稿 · 索引中', failed: '失败 · 未激活' })[status] || '状态未知' }
   function shortDigest(value) { var text = String(value || ''); return text ? text.slice(0, 12) + (text.length > 12 ? '…' : '') : '—' }
   function renderSopTemplates() { var body = byId('sopTemplateRows'); body.innerHTML = AdminState.sopTemplates.map(function (template) { var status = template.status || 'draft'; var digest = template.sourceSha256 || template.source_sha256 || ''; var revision = template.collectionRevision || template.collection_revision || ''; var parser = template.parserVersion || template.parser_version || '—'; var model = template.embeddingModel || template.embedding_model || '—'; var indexError = template.indexError || template.index_error || ''; var enabledSlots = slotRowsFromConfig(template.config || {}).filter(function (slot) { return slot.enabled }).length; return '<tr><td>' + escapeHtml(template.templateKey || template.template_key || template.config && template.config.templateId || '—') + '</td><td>' + escapeHtml(template.version) + '</td><td>' + escapeHtml(template.name) + '</td><td><span class="template-status ' + escapeHtml(status) + '">' + escapeHtml(sopStatus(status)) + '</span></td><td><span class="metadata-code" title="' + escapeHtml(digest) + '">' + escapeHtml(shortDigest(digest)) + '</span></td><td><span class="metadata-code" title="' + escapeHtml(revision) + '">' + escapeHtml(revision || '—') + '</span></td><td>' + escapeHtml(parser) + '<br><span class="metadata-code" title="' + escapeHtml(model) + '">' + escapeHtml(model) + '</span></td><td>' + enabledSlots + ' / 8</td><td>' + escapeHtml(template.chunkCount == null ? (template.chunk_count == null ? '—' : template.chunk_count) : template.chunkCount) + '</td><td>' + escapeHtml(dateText(template.publishedAt || template.published_at)) + '</td><td><div class="index-error">' + escapeHtml(indexError || '—') + '</div></td><td><button class="btn btn-outline" type="button" data-clone-sop="' + escapeHtml(template.id) + '">复制完整版本</button></td></tr>' }).join(''); byId('sopEmptyState').hidden = AdminState.sopTemplates.length !== 0 }
-  async function loadSopTemplates(force) { if (AdminState.sopLoaded && !force) return; notice('sopNotice', '正在读取 SOP 版本……', false); try { var response = await api('/api/admin/sop/templates'); AdminState.sopTemplates = Array.isArray(response.templates) ? response.templates : []; AdminState.sopLoaded = true; renderSopTemplates(); if (!byId('sopBaseTemplateId').value) populateSopEditor(AdminState.sopTemplates.find(function (template) { return template.status === 'published' }) || null); notice('sopNotice', '', false) } catch (error) { notice('sopNotice', errorText(error), true) } }
+  async function loadSopTemplates(force) { if (AdminState.sopLoaded && !force) return; notice('sopNotice', '正在读取 SOP 版本……', false); try { var response = await api('/api/admin/sop/templates'); AdminState.sopTemplates = Array.isArray(response.templates) ? response.templates : []; AdminState.sopLoaded = true; renderSopTemplates(); populateSopNlTemplateSelect(); if (!byId('sopBaseTemplateId').value) populateSopEditor(AdminState.sopTemplates.find(function (template) { return template.status === 'published' }) || null); notice('sopNotice', '', false) } catch (error) { notice('sopNotice', errorText(error), true) } }
+  function populateSopNlTemplateSelect() {
+    var select = byId('sopNlTemplateId'); if (!select) return
+    var selected = select.value
+    select.innerHTML = '<option value="">新建 SOP 模板</option>' + AdminState.sopTemplates.map(function (template) {
+      return '<option value="' + escapeHtml(template.id) + '">' + escapeHtml(template.name + '（' + template.version + '）') + '</option>'
+    }).join('')
+    if (selected && AdminState.sopTemplates.some(function (template) { return String(template.id) === String(selected) })) select.value = selected
+  }
+  function sopNlStatusText(status) { return ({ drafting: '生成中', draft_ready: '待确认', draft_failed: '失败', published: '已发布', rejected: '已拒绝' })[status] || status }
+  function sopNlTargetText(task) {
+    if (!task.templateId) return '新建模板'
+    var template = AdminState.sopTemplates.find(function (item) { return String(item.id) === String(task.templateId) })
+    return template ? template.name + '（' + template.version + '）' : task.templateId
+  }
+  function renderSopNlTasks() {
+    var body = byId('sopNlTaskRows'); if (!body) return
+    var tasks = AdminState.sopNlTasks || []
+    body.innerHTML = tasks.map(function (task) {
+      var instruction = String(task.instruction || '')
+      var summary = String(task.changeSummary || task.change_summary || '')
+      return '<tr><td><span class="template-status ' + escapeHtml(task.status) + '">' + escapeHtml(sopNlStatusText(task.status)) + '</span></td><td>' + escapeHtml(sopNlTargetText(task)) + '</td><td>' + escapeHtml(instruction.length > 80 ? instruction.slice(0, 80) + '…' : instruction) + '</td><td>' + escapeHtml(summary.length > 120 ? summary.slice(0, 120) + '…' : summary || '—') + '</td><td>' + escapeHtml(dateText(task.createdAt || task.created_at)) + '</td><td><button class="btn btn-outline" type="button" data-nl-view="' + escapeHtml(task.id) + '">查看</button></td></tr>'
+    }).join('')
+    byId('sopNlEmptyState').hidden = tasks.length !== 0
+    if (AdminState.sopNlSelectedTask) showSopNlDetail(AdminState.sopNlSelectedTask)
+  }
+  async function loadSopNlTasks(force) {
+    if (AdminState.sopNlTimer) { clearTimeout(AdminState.sopNlTimer); AdminState.sopNlTimer = null }
+    try {
+      var response = await api('/api/admin/sop/natural-language/tasks')
+      AdminState.sopNlTasks = Array.isArray(response.tasks) ? response.tasks : []
+      renderSopNlTasks()
+      var drafting = AdminState.sopNlTasks.some(function (task) { return task.status === 'drafting' })
+      if (AdminState.activeView === 'sopNlAdminView' && drafting) {
+        AdminState.sopNlTimer = setTimeout(function () { loadSopNlTasks(true) }, 3000)
+      }
+    } catch (error) {
+      notice('sopNlNotice', errorText(error), true)
+    }
+  }
+  function showSopNlDetail(taskId) {
+    AdminState.sopNlSelectedTask = String(taskId)
+    var task = AdminState.sopNlTasks.find(function (item) { return String(item.id) === String(taskId) })
+    var panel = byId('sopNlDetailPanel'); var body = byId('sopNlDetailBody')
+    if (!panel || !body) return
+    if (!task) { panel.hidden = true; return }
+    panel.hidden = false
+    byId('sopNlDetailMeta').textContent = '状态：' + sopNlStatusText(task.status) + ' · 目标：' + sopNlTargetText(task)
+    byId('sopNlDetailNotice').textContent = ''
+    if (task.status === 'drafting') {
+      body.innerHTML = '<p class="panel-copy">草稿正在后台生成，请稍候，列表会自动刷新。</p>'
+      return
+    }
+    if (task.status === 'draft_failed') {
+      body.innerHTML = '<div class="index-error">' + escapeHtml(task.errorCode || task.error_code || 'NBJ_SOP_NL_DRAFT_FAILED') + '</div>'
+      return
+    }
+    if (task.status === 'published' || task.status === 'rejected') {
+      var published = task.publishedTemplateId && AdminState.sopTemplates.find(function (item) { return String(item.id) === String(task.publishedTemplateId) })
+      body.innerHTML = '<p class="panel-copy">' + (task.status === 'published' ? '已发布为 ' + escapeHtml(published ? published.name + '（' + published.version + '）' : (task.publishedTemplateId || '新版本')) : '任务已拒绝，未发布。') + '</p>'
+      return
+    }
+    var template = task.templateId ? AdminState.sopTemplates.find(function (item) { return String(item.id) === String(task.templateId) }) : null
+    var defaultVersion = template ? template.version + '-nl-' + new Date().toISOString().slice(0, 10).replace(/-/g, '') : ''
+    var sections = Array.isArray(task.affectedSections) ? task.affectedSections.map(function (section) { return '<li>' + escapeHtml(section) + '</li>' }).join('') : ''
+    var configJson = task.proposedConfig ? JSON.stringify(task.proposedConfig, null, 2) : '{}'
+    body.innerHTML = '<p class="panel-copy">' + escapeHtml(task.changeSummary || '') + '</p>' + (sections ? '<p class="panel-copy">影响章节：</p><ul>' + sections + '</ul>' : '') + '<div class="config-grid"><label class="field">新版本号<input id="sopNlVersion" type="text" maxlength="160" value="' + escapeHtml(defaultVersion) + '" required></label><label class="field">版本名称<input id="sopNlName" type="text" maxlength="200" value="' + escapeHtml(template ? template.name : '') + '" required></label></div><div class="config-grid"><label class="field span-2">提案 Markdown（只读）<textarea id="sopNlProposedMarkdown" readonly spellcheck="false">' + escapeHtml(task.proposedMarkdown || '') + '</textarea></label><label class="field span-2">提案配置（只读）<textarea id="sopNlProposedConfig" readonly spellcheck="false">' + escapeHtml(configJson) + '</textarea></label></div><div class="form-actions"><button class="btn btn-primary" type="button" data-nl-confirm="' + escapeHtml(task.id) + '">确认并发布</button><button class="btn btn-danger" type="button" data-nl-reject="' + escapeHtml(task.id) + '">拒绝</button></div>'
+  }
+  async function confirmSopNlTask(taskId) {
+    var version = byId('sopNlVersion') && byId('sopNlVersion').value.trim()
+    var name = byId('sopNlName') && byId('sopNlName').value.trim()
+    if (!version || !name) { notice('sopNlDetailNotice', '请填写新版本号和版本名称。', true); return }
+    var button = byId('sopNlDetailBody').querySelector('[data-nl-confirm]')
+    if (button) button.disabled = true
+    notice('sopNlDetailNotice', '正在解析、索引并发布……', false)
+    try {
+      var response = await api('/api/admin/sop/natural-language/tasks/' + encodeURIComponent(taskId) + '/confirm', { method: 'POST', body: { version: version, name: name, confirmationPhrase: '发布 SOP 修改' } })
+      AdminState.sopTemplates = [response.template].concat(AdminState.sopTemplates.filter(function (item) { return String(item.id) !== String(response.template.id) }))
+      AdminState.sopLoaded = true
+      renderSopTemplates(); populateSopNlTemplateSelect()
+      notice('sopNlDetailNotice', '已发布并激活新版本。', false)
+      await loadSopNlTasks(true)
+    } catch (error) {
+      notice('sopNlDetailNotice', errorText(error), true)
+      if (button) button.disabled = false
+    }
+  }
+  async function rejectSopNlTask(taskId) {
+    if (!window.confirm('确认拒绝该 SOP 草稿？不会发布任何版本。')) return
+    try {
+      await api('/api/admin/sop/natural-language/tasks/' + encodeURIComponent(taskId) + '/reject', { method: 'POST' })
+      notice('sopNlNotice', '草稿已拒绝。', false)
+      await loadSopNlTasks(true)
+    } catch (error) {
+      notice('sopNlNotice', errorText(error), true)
+    }
+  }
   function validateSopConfig(config) { if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('配置必须是 JSON 对象'); if (!config.version) throw new Error('版本号不能为空'); if (Number(config.adaptationMaxHours) < Number(config.adaptationMinHours)) throw new Error('适应期范围无效'); if (!Array.isArray(config.customTasks)) throw new Error('customTasks 必须是数组'); if (config.teachingQuantitySource !== 'sop') throw new Error('数量权威必须设置为 SOP'); if (JSON.stringify(config.quantityAuthorityOrder) !== JSON.stringify(['sop_direct', 'sop_indirect', 'production_model'])) throw new Error('数量权威顺序无效') }
 
   function openDetail(batchId) { var row = AdminState.rows.find(function (item) { return String(item.id || item.batch && item.batch.id) === String(batchId) }); if (!row) return; var batch = row.batch || row; var pairs = [['批次 ID', batch.id], ['名称', batch.name || batch.config && batch.config.name], ['栏位', batch.room || batch.config && batch.config.farmRoom], ['日龄', (batch.currentDayIndex || 0) + (batch.startAge || 1)], ['头数', batch.effectiveHeads || batch.initialHeads], ['revision', batch.revision], ['状态', batch.status]]; byId('detailBody').innerHTML = pairs.map(function (pair) { return '<div class="detail-row"><dt>' + escapeHtml(pair[0]) + '</dt><dd>' + escapeHtml(valueText(pair[1])) + '</dd></div>' }).join(''); byId('detailModal').hidden = false }
@@ -268,6 +377,36 @@
     byId('sopTemplateRows').addEventListener('click', function (event) { var button = event.target.closest('[data-clone-sop]'); if (!button) return; var template = AdminState.sopTemplates.find(function (item) { return String(item.id) === String(button.dataset.cloneSop) }); if (template) { populateSopEditor(template); byId('sopVersion').focus() } })
     byId('sopResetButton').addEventListener('click', function () { var base = AdminState.sopTemplates.find(function (item) { return String(item.id) === String(byId('sopBaseTemplateId').value) }); populateSopEditor(base || null) })
     byId('sopEditor').addEventListener('submit', async function (event) { event.preventDefault(); var button = byId('sopPublishButton'); var originalLabel = button.textContent; var sourceMarkdown = byId('sopSourceMarkdown').value; if (!sourceMarkdown.trim()) { notice('sopNotice', '请粘贴完整 SOP Markdown 原文后再发布。', true); byId('sopSourceMarkdown').focus(); return } button.disabled = true; button.textContent = '正在解析、索引并校验……'; notice('sopNotice', '正在建立不可变 SOP 版本，请勿关闭页面……', false); try { var config = configFromFriendlyFields(); validateSopConfig(config); var response = await api('/api/admin/sop/templates', { method: 'POST', body: { version: byId('sopVersion').value.trim(), name: byId('sopName').value.trim(), config: config, sourceMarkdown: sourceMarkdown, copyFromId: byId('sopBaseTemplateId').value || undefined } }); AdminState.sopTemplates = [response.template].concat(AdminState.sopTemplates.filter(function (item) { return String(item.id) !== String(response.template.id) })); renderSopTemplates(); populateSopEditor(response.template); notice('sopNotice', '新版本已发布，索引校验通过并已激活。', false) } catch (error) { await loadSopTemplates(true).catch(function () {}); notice('sopNotice', errorText(error), true) } finally { button.disabled = false; button.textContent = originalLabel } })
+    byId('sopNlForm').addEventListener('submit', async function (event) {
+      event.preventDefault()
+      var button = byId('sopNlCreateButton')
+      button.disabled = true
+      notice('sopNlNotice', '正在创建草稿任务……', false)
+      try {
+        var response = await api('/api/admin/sop/natural-language/tasks', { method: 'POST', body: { templateId: byId('sopNlTemplateId').value || undefined, instruction: byId('sopNlInstruction').value.trim() } })
+        byId('sopNlInstruction').value = ''
+        AdminState.sopNlTasks = [response.task].concat(AdminState.sopNlTasks)
+        AdminState.sopNlSelectedTask = response.task.id
+        renderSopNlTasks()
+        notice('sopNlNotice', '草稿任务已创建，正在后台生成。', false)
+        loadSopNlTasks(true)
+      } catch (error) {
+        notice('sopNlNotice', errorText(error), true)
+      } finally {
+        button.disabled = false
+      }
+    })
+    byId('sopNlRefreshButton').addEventListener('click', function () { loadSopNlTasks(true) })
+    byId('sopNlTaskRows').addEventListener('click', function (event) {
+      var button = event.target.closest('[data-nl-view]')
+      if (button) showSopNlDetail(button.dataset.nlView)
+    })
+    byId('sopNlDetailBody').addEventListener('click', function (event) {
+      var confirmButton = event.target.closest('[data-nl-confirm]')
+      var rejectButton = event.target.closest('[data-nl-reject]')
+      if (confirmButton) confirmSopNlTask(confirmButton.dataset.nlConfirm)
+      if (rejectButton) rejectSopNlTask(rejectButton.dataset.nlReject)
+    })
   }
 
   async function boot() {

@@ -16,6 +16,40 @@ const MAX_RUNTIME_TIMEOUT = 120_000;
 const MIN_MAX_OUTPUT_TOKENS = 1;
 const MAX_MAX_OUTPUT_TOKENS = 131_072;
 
+export function defaultProviderBaseUrl(provider: "anthropic" | "openai"): string {
+  return provider === "openai"
+    ? "https://api.openai.com/v1"
+    : "https://api.anthropic.com/v1";
+}
+
+export function normalizeProvider(value: string): "anthropic" | "openai" {
+  if (value !== "anthropic" && value !== "openai") {
+    throw new Error("NBJ_AGENT_PROVIDER_INVALID");
+  }
+  return value;
+}
+
+export function normalizeBaseUrl(
+  provider: "anthropic" | "openai",
+  value?: string,
+): string {
+  const parsed = new URL(String(value || defaultProviderBaseUrl(provider)).trim());
+  const loopback =
+    parsed.hostname === "127.0.0.1" ||
+    parsed.hostname === "localhost" ||
+    parsed.hostname === "::1";
+  if (
+    (parsed.protocol !== "https:" && !(parsed.protocol === "http:" && loopback)) ||
+    parsed.username ||
+    parsed.password
+  ) {
+    throw new Error("NBJ_AGENT_BASE_URL_INVALID");
+  }
+  parsed.hash = "";
+  parsed.search = "";
+  return parsed.toString().replace(/\/+$/, "");
+}
+
 export interface RuntimeAgentConfig {
   enabled: boolean;
   provider: "anthropic" | "openai";

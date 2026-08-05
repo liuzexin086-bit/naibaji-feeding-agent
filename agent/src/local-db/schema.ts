@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 5;
+export const MIGRATION_VERSION = 6;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -215,6 +215,28 @@ CREATE TABLE IF NOT EXISTS sop_knowledge_chunks (
   FOREIGN KEY (template_id) REFERENCES sop_templates(id) ON DELETE CASCADE
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS sop_edit_tasks (
+  id TEXT PRIMARY KEY,
+  template_id TEXT,
+  instruction TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('drafting', 'draft_ready', 'draft_failed', 'published', 'rejected')),
+  proposed_markdown TEXT,
+  proposed_config_json TEXT CHECK (proposed_config_json IS NULL OR json_valid(proposed_config_json)),
+  change_summary TEXT,
+  affected_sections_json TEXT CHECK (affected_sections_json IS NULL OR json_valid(affected_sections_json)),
+  error_code TEXT,
+  published_template_id TEXT,
+  created_by TEXT NOT NULL,
+  confirmed_by TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  confirmed_at TEXT,
+  FOREIGN KEY (template_id) REFERENCES sop_templates(id) ON DELETE SET NULL,
+  FOREIGN KEY (published_template_id) REFERENCES sop_templates(id) ON DELETE SET NULL,
+  FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
+  FOREIGN KEY (confirmed_by) REFERENCES users(id) ON DELETE SET NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS operation_results (
   user_id TEXT NOT NULL,
   batch_id TEXT NOT NULL,
@@ -249,4 +271,6 @@ CREATE INDEX IF NOT EXISTS sop_templates_created_idx
   ON sop_templates(created_at DESC);
 CREATE INDEX IF NOT EXISTS sop_knowledge_chunks_digest_idx
   ON sop_knowledge_chunks(source_sha256, collection_revision);
+CREATE INDEX IF NOT EXISTS sop_edit_tasks_created_idx
+  ON sop_edit_tasks(created_at DESC);
 `;

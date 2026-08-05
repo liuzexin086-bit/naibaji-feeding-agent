@@ -32,6 +32,7 @@ import type {
   LocalUser,
   LocalUserRole,
   SaveDecisionInput,
+  SopEditTask,
 } from "../shared/local-store-contract.js";
 import { INITIAL_SCHEMA, MIGRATION_VERSION } from "./schema.js";
 
@@ -251,6 +252,38 @@ function sopTemplateFromRow(row: Row): LocalSopTemplate {
     publishedAt: nullableString(row.published_at ?? null, "sop_templates.published_at"),
     indexError: nullableString(row.index_error ?? null, "sop_templates.index_error"),
   };
+}
+
+function sopEditTaskFromRow(row: Row): SopEditTask {
+  return {
+    id: stringValue(row.id, "sop_edit_tasks.id"),
+    templateId: nullableString(row.template_id, "sop_edit_tasks.template_id"),
+    instruction: stringValue(row.instruction, "sop_edit_tasks.instruction"),
+    status: stringValue(row.status, "sop_edit_tasks.status") as SopEditTask["status"],
+    proposedMarkdown: nullableString(row.proposed_markdown ?? null, "sop_edit_tasks.proposed_markdown"),
+    proposedConfig: row.proposed_config_json == null
+      ? null
+      : jsonObject(row.proposed_config_json, "sop_edit_tasks.proposed_config_json"),
+    changeSummary: nullableString(row.change_summary ?? null, "sop_edit_tasks.change_summary"),
+    affectedSections: row.affected_sections_json == null
+      ? []
+      : stringArrayValue(row.affected_sections_json, "sop_edit_tasks.affected_sections_json"),
+    errorCode: nullableString(row.error_code ?? null, "sop_edit_tasks.error_code"),
+    publishedTemplateId: nullableString(row.published_template_id, "sop_edit_tasks.published_template_id"),
+    createdBy: stringValue(row.created_by, "sop_edit_tasks.created_by"),
+    confirmedBy: nullableString(row.confirmed_by, "sop_edit_tasks.confirmed_by"),
+    createdAt: stringValue(row.created_at, "sop_edit_tasks.created_at"),
+    updatedAt: stringValue(row.updated_at, "sop_edit_tasks.updated_at"),
+    confirmedAt: nullableString(row.confirmed_at ?? null, "sop_edit_tasks.confirmed_at"),
+  };
+}
+
+function stringArrayValue(value: unknown, field: string): string[] {
+  const parsed: unknown = JSON.parse(stringValue(value, field));
+  if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string")) {
+    throw new Error(`Invalid database ${field}`);
+  }
+  return parsed;
 }
 
 function businessDate(value: string, field: string): string {
@@ -1103,6 +1136,9 @@ export class SqliteLocalStore implements LocalStore {
       this.#database.prepare(
         "UPDATE sop_templates SET created_by = ? WHERE created_by = ?",
       ).run(actor.id, target.id);
+      this.#database.prepare(
+        "UPDATE sop_edit_tasks SET created_by = ? WHERE created_by = ?",
+      ).run(actor.id, target.id);
       // Explicitly remove sessions so deletion invalidates every token even
       // if a future migration changes the users FK action.
       this.#database.prepare("DELETE FROM auth_sessions WHERE user_id = ?").run(target.id);
@@ -1388,6 +1424,162 @@ export class SqliteLocalStore implements LocalStore {
       ORDER BY section_id ASC, chunk_index ASC
     `).all(requiredText(templateId, "templateId")) as Row[];
     return rows.map(sopChunkFromRow);
+  }
+
+  createSopEditTask(input: {
+    id?: string;
+    templateId: string | null;
+    instruction: string;
+    createdBy: string;
+  }): SopEditTask {
+    this.#ensureOpen();
+    const instruction = requiredText(input.instruction, "instruction");
+    const createdBy = requiredText(input.createdBy, "createdBy");
+    if (!this.getUserById(createdBy)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "creator not found");
+    }
+    const templateId = input.templateId === null
+      ? null
+      : requiredText(input.templateId ?? "", "templateId");
+    if (templateId && !this.getSopTemplate(templateId)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP template not found");
+    }
+    const id = input.id ?? randomUUID();
+    const now = new Date().toISOString();
+    this.#database.prepare(`
+      INSERT INTO sop_edit_tasks (id, template_id, instruction, status, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, 'drafting', ?, ?, ?)
+    `).run(id, templateId, instruction, createdBy, now, now);
+    const row = this.#database.prepare(
+      "SELECT * FROM sop_edit_tasks WHERE id = ?",
+    ).get(id) as Row;
+    return sopEditTaskFromRow(row);
+  }
+
+  getSopEditTask(taskId: string): SopEditTask | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(
+      "SELECT * FROM sop_edit_tasks WHERE id = ?",
+    ).get(requiredText(taskId, "taskId")) as Row | undefined;
+    return row ? sopEditTaskFromRow(row) : null;
+  }
+
+  listSopEditTasks(limit = 100): SopEditTask[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT * FROM sop_edit_tasks
+      ORDER BY created_at DESC, id DESC
+      LIMIT ?
+    `).all(Math.min(nonNegativeInteger(limit, "limit"), 500)) as Row[];
+    return rows.map(sopEditTaskFromRow);
+  }
+
+  completeSopEditTaskDraft(input: {
+    taskId: string;
+    proposedMarkdown: string;
+    proposedConfig: Record<string, unknown>;
+    changeSummary: string;
+    affectedSections: string[];
+  }): SopEditTask {
+    this.#ensureOpen();
+    const taskId = requiredText(input.taskId, "taskId");
+    const proposedMarkdown = requiredText(input.proposedMarkdown, "proposedMarkdown");
+    const changeSummary = requiredText(input.changeSummary, "changeSummary");
+    if (!Array.isArray(input.affectedSections) ||
+        input.affectedSections.some((section) => typeof section !== "string")) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "affectedSections must be strings");
+    }
+    const now = new Date().toISOString();
+    const result = this.#database.prepare(`
+      UPDATE sop_edit_tasks SET
+        status = 'draft_ready',
+        proposed_markdown = ?,
+        proposed_config_json = ?,
+        change_summary = ?,
+        affected_sections_json = ?,
+        error_code = NULL,
+        updated_at = ?
+      WHERE id = ? AND status = 'drafting'
+    `).run(
+      proposedMarkdown,
+      serializeObject(input.proposedConfig, "proposedConfig"),
+      changeSummary,
+      JSON.stringify(input.affectedSections),
+      now,
+      taskId,
+    );
+    if (result.changes === 0) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP edit task is not drafting");
+    }
+    return this.getSopEditTask(taskId)!;
+  }
+
+  failSopEditTaskDraft(input: { taskId: string; errorCode: string }): SopEditTask {
+    this.#ensureOpen();
+    const taskId = requiredText(input.taskId, "taskId");
+    const errorCode = requiredText(input.errorCode, "errorCode").slice(0, 200);
+    const now = new Date().toISOString();
+    const result = this.#database.prepare(`
+      UPDATE sop_edit_tasks SET status = 'draft_failed', error_code = ?, updated_at = ?
+      WHERE id = ? AND status = 'drafting'
+    `).run(errorCode, now, taskId);
+    if (result.changes === 0) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP edit task is not drafting");
+    }
+    return this.getSopEditTask(taskId)!;
+  }
+
+  publishSopEditTask(input: {
+    taskId: string;
+    publishedTemplateId: string;
+    confirmedBy: string;
+  }): SopEditTask {
+    this.#ensureOpen();
+    const taskId = requiredText(input.taskId, "taskId");
+    const publishedTemplateId = requiredText(input.publishedTemplateId, "publishedTemplateId");
+    const confirmedBy = requiredText(input.confirmedBy, "confirmedBy");
+    if (!this.getUserById(confirmedBy)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "confirmer not found");
+    }
+    if (!this.getSopTemplate(publishedTemplateId)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "published SOP template not found");
+    }
+    const now = new Date().toISOString();
+    const result = this.#database.prepare(`
+      UPDATE sop_edit_tasks SET
+        status = 'published',
+        published_template_id = ?,
+        confirmed_by = ?,
+        confirmed_at = ?,
+        updated_at = ?
+      WHERE id = ? AND status = 'draft_ready'
+    `).run(publishedTemplateId, confirmedBy, now, now, taskId);
+    if (result.changes === 0) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP edit task is not draft_ready");
+    }
+    return this.getSopEditTask(taskId)!;
+  }
+
+  rejectSopEditTask(input: { taskId: string; rejectedBy: string }): SopEditTask {
+    this.#ensureOpen();
+    const taskId = requiredText(input.taskId, "taskId");
+    const rejectedBy = requiredText(input.rejectedBy, "rejectedBy");
+    if (!this.getUserById(rejectedBy)) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "rejecting user not found");
+    }
+    const now = new Date().toISOString();
+    const result = this.#database.prepare(`
+      UPDATE sop_edit_tasks SET
+        status = 'rejected',
+        confirmed_by = ?,
+        confirmed_at = ?,
+        updated_at = ?
+      WHERE id = ? AND status IN ('drafting', 'draft_ready', 'draft_failed')
+    `).run(rejectedBy, now, now, taskId);
+    if (result.changes === 0) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "SOP edit task is already terminal");
+    }
+    return this.getSopEditTask(taskId)!;
   }
 
   commitAdvance(input: CommitAdvanceInput): CommitResult {

@@ -16,6 +16,7 @@ import {
 } from "../operations/daily-operation-plan.js";
 import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
+import { createLangChainModel } from "../agent/langgraph/models.js";
 import type { FeedingMode } from "../shared/agent-v2-contract.js";
 import type {
   DevicePlanSnapshot,
@@ -44,6 +45,19 @@ import {
   setSessionCookie,
   validatePassword,
 } from "./local-auth.js";
+import {
+  DEFAULT_MAX_OUTPUT_TOKENS,
+  DEFAULT_RUNTIME_TIMEOUT,
+  loadRuntimeAgentConfig,
+  normalizeBaseUrl,
+  normalizeProvider,
+} from "./runtime-config.js";
+import {
+  confirmSopEdit,
+  draftSopEdit,
+  SOP_NL_INSTRUCTION_MAX,
+  type SopEditModel,
+} from "../sop/natural-language.js";
 
 export const CREEP_VALUES = {
   none: 0,
@@ -97,6 +111,34 @@ interface LocalApiEnv {
   CHROMA_URL?: string;
   EMBEDDING_BASE_URL?: string;
   EMBEDDING_MODEL?: string;
+  CONFIG_ENCRYPTION_KEY?: string;
+  AGENT_CONFIG_PATH?: string;
+  LLM_PROVIDER?: string;
+  LLM_MODEL?: string;
+  OPENAI_API_KEY?: string;
+  ANTHROPIC_API_KEY?: string;
+}
+
+export interface LocalApiDeps {
+  /** Test seam; defaults to the same runtime model configuration as the Agent. */
+  createSopEditModel?: (env: LocalApiEnv) => Promise<SopEditModel> | SopEditModel;
+}
+
+async function defaultSopEditModel(env: LocalApiEnv): Promise<SopEditModel> {
+  const runtimeConfig = await loadRuntimeAgentConfig(env);
+  const provider = normalizeProvider(runtimeConfig?.provider ?? env.LLM_PROVIDER ?? "openai");
+  const apiKey = runtimeConfig?.apiKey ??
+    (provider === "openai" ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY);
+  if (!apiKey) throw new Error("NBJ_SOP_NL_MODEL_UNAVAILABLE");
+  return createLangChainModel({
+    provider,
+    model: runtimeConfig?.model ?? env.LLM_MODEL ?? "gpt-5.6-luna",
+    apiKey,
+    baseUrl: normalizeBaseUrl(provider, runtimeConfig?.baseUrl),
+    apiMode: runtimeConfig?.apiMode ?? "responses",
+    timeout: runtimeConfig?.timeout ?? DEFAULT_RUNTIME_TIMEOUT,
+    maxOutputTokens: runtimeConfig?.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
+  }) as SopEditModel;
 }
 
 function json(response: ServerResponse, body: unknown, status = 200, extra?: Record<string, string>): void {
@@ -743,6 +785,7 @@ export async function handleLocalApi(
   response: ServerResponse,
   store: SqliteLocalStore,
   env: LocalApiEnv = {},
+  deps: LocalApiDeps = {},
 ): Promise<boolean> {
   const url = new URL(request.url ?? "/", "http://container");
   if (!url.pathname.startsWith("/api/")) return false;
@@ -1160,6 +1203,82 @@ export async function handleLocalApi(
           name, config, sourceMarkdown, createdBy: admin.user.id, sourceTemplateId: sourceId,
           embeddingModel: env.EMBEDDING_MODEL ?? DEFAULT_EMBEDDING_MODEL });
         json(response, { template }, 201);
+        return true;
+      }
+      throw new Error("NBJ_METHOD_NOT_ALLOWED");
+    }
+    const sopNlBase = "/api/admin/sop/natural-language/tasks";
+    if (url.pathname === sopNlBase || url.pathname.startsWith(`${sopNlBase}/`)) {
+      const admin = requireLocalAdmin(request, store);
+      if (request.method === "POST" && url.pathname === sopNlBase) {
+        const body = await readJson(request);
+        const instruction = text(body.instruction, "instruction", SOP_NL_INSTRUCTION_MAX);
+        const templateId = body.templateId == null || body.templateId === ""
+          ? null
+          : text(body.templateId, "template_id", 128);
+        if (templateId && !store.getSopTemplate(templateId)) {
+          throw new Error("NBJ_SOP_NL_TEMPLATE_NOT_FOUND");
+        }
+        const model = await (deps.createSopEditModel ?? defaultSopEditModel)(env);
+        const task = store.createSopEditTask({
+          templateId,
+          instruction,
+          createdBy: admin.user.id,
+        });
+        // draftSopEdit records draft_failed itself; this catch only prevents
+        // an unexpected rejection from becoming an unhandled async error.
+        void draftSopEdit({ store, model, taskId: task.id }).catch(() => undefined);
+        json(response, { task }, 202);
+        return true;
+      }
+      if (request.method === "GET" && url.pathname === sopNlBase) {
+        json(response, { tasks: store.listSopEditTasks(100) });
+        return true;
+      }
+      const rejectMatch = url.pathname.match(
+        /^\/api\/admin\/sop\/natural-language\/tasks\/([^/]+)\/reject$/,
+      );
+      if (request.method === "POST" && rejectMatch) {
+        json(response, {
+          task: store.rejectSopEditTask({
+            taskId: rejectMatch[1],
+            rejectedBy: admin.user.id,
+          }),
+        });
+        return true;
+      }
+      const confirmMatch = url.pathname.match(
+        /^\/api\/admin\/sop\/natural-language\/tasks\/([^/]+)\/confirm$/,
+      );
+      if (request.method === "POST" && confirmMatch) {
+        const body = await readJson(request);
+        const index = env.CHROMA_URL && env.EMBEDDING_BASE_URL
+          ? new ChromaKnowledgeIndex({
+              chromaUrl: env.CHROMA_URL,
+              embeddingBaseUrl: env.EMBEDDING_BASE_URL,
+            })
+          : new MemoryKnowledgeIndex();
+        const result = await confirmSopEdit({
+          store,
+          index,
+          taskId: confirmMatch[1],
+          version: text(body.version, "version", 160),
+          name: text(body.name, "name", 200),
+          confirmationPhrase: typeof body.confirmationPhrase === "string"
+            ? body.confirmationPhrase
+            : "",
+          confirmedBy: admin.user.id,
+        });
+        json(response, { task: result.task, template: result.template });
+        return true;
+      }
+      const detailMatch = url.pathname.match(
+        /^\/api\/admin\/sop\/natural-language\/tasks\/([^/]+)$/,
+      );
+      if (request.method === "GET" && detailMatch) {
+        const task = store.getSopEditTask(detailMatch[1]);
+        if (!task) throw new Error("NBJ_SOP_NL_TASK_NOT_FOUND");
+        json(response, { task });
         return true;
       }
       throw new Error("NBJ_METHOD_NOT_ALLOWED");

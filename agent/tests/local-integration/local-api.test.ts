@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { handleLocalApi } from "../../src/container/local-api.js";
+import { AIMessage } from "@langchain/core/messages";
+import { handleLocalApi, type LocalApiDeps } from "../../src/container/local-api.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
 
@@ -13,14 +14,14 @@ afterEach(() => {
   for (const cleanup of cleanups.splice(0).reverse()) cleanup();
 });
 
-async function startApi(): Promise<{ store: SqliteLocalStore; base: string }> {
+async function startApi(options: { env?: Record<string, string>; deps?: LocalApiDeps } = {}): Promise<{ store: SqliteLocalStore; base: string }> {
   const directory = mkdtempSync(join(tmpdir(), "naibaji-local-api-"));
   cleanups.push(() => rmSync(directory, { recursive: true, force: true }));
   const store = createLocalStore({ filename: join(directory, "local.sqlite") }) as SqliteLocalStore;
   store.migrate();
   initializeLocalAdmin(store, "admin@example.com", "correct-horse-battery");
   const server: Server = createServer((request, response) => {
-    void handleLocalApi(request, response, store);
+    void handleLocalApi(request, response, store, options.env || {}, options.deps || {});
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
@@ -341,6 +342,11 @@ describe("local execution API", () => {
       config: {},
       createdBy: createdBody.user.id,
     });
+    const operatorNlTask = store.createSopEditTask({
+      templateId: null,
+      instruction: "operator-owned SOP edit task",
+      createdBy: createdBody.user.id,
+    });
 
     const mismatch = await request(base, `/api/admin/users/${encodeURIComponent(createdBody.user.id)}`, {
       method: "DELETE",
@@ -360,6 +366,7 @@ describe("local execution API", () => {
     expect(store.getUserById(createdBody.user.id)).toBeNull();
     expect(store.getBatch(createdBody.user.id, operatorBatchBody.batch.id)).toBeNull();
     expect(store.listSopTemplates().find((template) => template.id === "operator-owned-template")?.createdBy).toBe(adminId);
+    expect(store.getSopEditTask(operatorNlTask.id)?.createdBy).toBe(adminId);
 
     const selfDelete = await request(base, `/api/admin/users/${encodeURIComponent(adminId)}`, {
       method: "DELETE",
@@ -367,5 +374,111 @@ describe("local execution API", () => {
       body: JSON.stringify({ confirmEmail: "admin@example.com" }),
     });
     expect(selfDelete.status).toBe(400);
+  });
+
+  it("creates, confirms and rejects SOP natural-language draft tasks", async () => {
+    const proposal = {
+      proposedMarkdown: "# 新 SOP\n\n每日巡栏。",
+      config: { teachingFirstLocal: "17:00" },
+      changeSummary: "新增模板",
+      affectedSections: [],
+    };
+    const { base } = await startApi({
+      deps: {
+        createSopEditModel: async () => ({
+          invoke: async () => new AIMessage(JSON.stringify(proposal)),
+        }),
+      },
+    });
+    const unauthenticated = await request(base, "/api/admin/sop/natural-language/tasks", {
+      method: "POST",
+      body: JSON.stringify({ instruction: "不应允许" }),
+    });
+    expect(unauthenticated.status).toBe(401);
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+
+    const created = await request(base, "/api/admin/sop/natural-language/tasks", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ instruction: "新建一份简单 SOP" }),
+    });
+    expect(created.status).toBe(202);
+    const createdBody = await created.json() as { task: { id: string; status: string } };
+    const taskId = createdBody.task.id;
+    expect(createdBody.task.status).toBe("drafting");
+
+    let task: { id: string; status: string } | null = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const listed = await request(base, "/api/admin/sop/natural-language/tasks", {
+        headers: { cookie },
+      });
+      const listedBody = await listed.json() as {
+        tasks: Array<{ id: string; status: string }>;
+      };
+      task = listedBody.tasks.find((item) => item.id === taskId) || null;
+      if (task && task.status !== "drafting") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(task?.status).toBe("draft_ready");
+
+    const wrong = await request(base, `/api/admin/sop/natural-language/tasks/${taskId}/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ version: "v1", name: "新模板", confirmationPhrase: "错误" }),
+    });
+    expect(wrong.status).toBe(400);
+
+    const confirmed = await request(base, `/api/admin/sop/natural-language/tasks/${taskId}/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ version: "v1", name: "新模板", confirmationPhrase: "发布 SOP 修改" }),
+    });
+    expect(confirmed.status).toBe(200);
+    const confirmedBody = await confirmed.json() as {
+      task: { status: string; publishedTemplateId: string };
+      template: { id: string; version: string; status: string };
+    };
+    expect(confirmedBody.task.status).toBe("published");
+    expect(confirmedBody.template.status).toBe("published");
+    expect(confirmedBody.task.publishedTemplateId).toBe(confirmedBody.template.id);
+
+    const templates = await request(base, "/api/admin/sop/templates", { headers: { cookie } });
+    const templatesBody = await templates.json() as {
+      templates: Array<{ id: string; status: string }>;
+    };
+    expect(templatesBody.templates.find((item) => item.id === confirmedBody.template.id)?.status)
+      .toBe("published");
+
+    const created2 = await request(base, "/api/admin/sop/natural-language/tasks", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ instruction: "生成一个随后拒绝的草稿" }),
+    });
+    const created2Body = await created2.json() as { task: { id: string } };
+    let task2: { id: string; status: string } | null = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      const listed = await request(base, "/api/admin/sop/natural-language/tasks", {
+        headers: { cookie },
+      });
+      const listedBody = await listed.json() as {
+        tasks: Array<{ id: string; status: string }>;
+      };
+      task2 = listedBody.tasks.find((item) => item.id === created2Body.task.id) || null;
+      if (task2 && task2.status !== "drafting") break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    expect(task2?.status).toBe("draft_ready");
+    const rejected = await request(
+      base,
+      `/api/admin/sop/natural-language/tasks/${created2Body.task.id}/reject`,
+      { method: "POST", headers: { cookie } },
+    );
+    expect(rejected.status).toBe(200);
+    const rejectedBody = await rejected.json() as { task: { status: string } };
+    expect(rejectedBody.task.status).toBe("rejected");
   });
 });

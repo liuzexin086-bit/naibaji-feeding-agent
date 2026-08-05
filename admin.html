@@ -59,6 +59,7 @@
       <button class="admin-tab" id="accountsAdminTab" role="tab" aria-selected="false" aria-controls="accountsAdminView" data-admin-view="accountsAdminView" type="button">账号管理</button>
       <button class="admin-tab" id="apiAdminTab" role="tab" aria-selected="false" aria-controls="apiAdminView" data-admin-view="apiAdminView" type="button">Agent API</button>
       <button class="admin-tab" id="sopAdminTab" role="tab" aria-selected="false" aria-controls="sopAdminView" data-admin-view="sopAdminView" type="button">SOP 版本</button>
+      <button class="admin-tab" id="sopNlAdminTab" role="tab" aria-selected="false" aria-controls="sopNlAdminView" data-admin-view="sopNlAdminView" type="button">SOP 自然语言</button>
     </nav>
     <div id="batchAdminView" class="admin-view" role="tabpanel" aria-labelledby="batchAdminTab">
     <section class="stats" aria-label="统计概览">
@@ -160,12 +161,33 @@
         </form>
       </section>
     </div>
+
+    <div id="sopNlAdminView" class="admin-view" role="tabpanel" aria-labelledby="sopNlAdminTab" hidden>
+      <section class="panel" style="margin-top:0">
+        <div class="panel-head"><div><h2>SOP 自然语言修改</h2><p class="panel-copy">用自然语言起草 SOP 修改或新模板；草稿在后台生成，管理员确认后才发布，发布前不会影响当前生效版本。</p></div><div id="sopNlNotice" class="notice" aria-live="polite"></div></div>
+        <form id="sopNlForm" class="config-card">
+          <div class="config-grid">
+            <label class="field span-2">目标模板<select id="sopNlTemplateId"><option value="">新建 SOP 模板</option></select><span class="secret-hint">选择现有模板进行修改，或新建模板。</span></label>
+            <label class="field span-2">自然语言指令<textarea id="sopNlInstruction" maxlength="4000" required placeholder="例如：把第 2 天教奶次数从 6 次改为 5 次，并补充 09:00 巡栏检查料槽。"></textarea></label>
+          </div>
+          <div class="form-actions"><button id="sopNlCreateButton" class="btn btn-primary" type="submit">创建草稿任务</button></div>
+        </form>
+      </section>
+      <section class="panel">
+        <div class="panel-head"><div><h3>草稿任务</h3><p class="panel-copy">任务在后台生成；只有“待确认”的任务可以发布。</p></div><button id="sopNlRefreshButton" class="btn btn-outline" type="button">刷新</button></div>
+        <div class="table-wrap"><table><thead><tr><th>状态</th><th>目标</th><th>指令</th><th>变更摘要</th><th>创建时间</th><th>操作</th></tr></thead><tbody id="sopNlTaskRows"></tbody></table><div id="sopNlEmptyState" class="empty" hidden>暂无任务。</div></div>
+      </section>
+      <section class="panel" id="sopNlDetailPanel" hidden>
+        <div class="panel-head"><div><h3>草稿预览</h3><p class="panel-copy" id="sopNlDetailMeta"></p></div><div id="sopNlDetailNotice" class="notice" aria-live="polite"></div></div>
+        <div id="sopNlDetailBody"></div>
+      </section>
+    </div>
   </main>
 </section>
 
 <div id="detailModal" class="modal" hidden><div class="modal-card"><div class="modal-head"><h2>批次详情（只读）</h2><button class="btn btn-outline" data-close="detailModal" type="button">关闭</button></div><div id="detailBody" class="modal-body"></div></div></div>
 <div id="editModal" class="modal" hidden><form id="editForm" class="modal-card"><div class="modal-head"><h2>修改批次</h2><button class="btn btn-outline" data-close="editModal" type="button">关闭</button></div><div class="modal-body"><p class="modal-note">保存会使用当前 revision 原子更新。若用户或其他管理员已更新，本次保存将被拒绝。</p><input id="editUserId" type="hidden"><input id="editBatchId" type="hidden"><input id="editRevision" type="hidden"><div class="edit-grid"><label class="field span-3">config（JSON）<textarea id="editConfig" required></textarea></label><label class="field span-3">records（JSON 数组）<textarea id="editRecords" required></textarea></label><label class="field">当前进度（current_day_index）<input id="editCurrentDay" type="number" min="0" required></label><label class="field">状态<select id="editStatus"><option value="active">进行中</option><option value="completed">已完成</option></select></label><label class="field">配置锁定<select id="editConfigLocked"><option value="false">否</option><option value="true">是</option></select></label><label class="field">控奶开始日（control_start_day）<input id="editControlStartDay" type="number" min="-1" required></label></div><div id="editMessage" class="notice" role="alert"></div></div><div class="modal-foot"><button class="btn btn-outline" data-close="editModal" type="button">取消</button><button id="editSaveButton" class="btn btn-primary" type="submit">保存修改</button></div></form></div>
 <div id="exportProgress" hidden role="status"></div>
-<script src="admin.js?v=20260804-1"></script>
+<script src="admin.js?v=20260805-1"></script>
 </body>
 </html>
