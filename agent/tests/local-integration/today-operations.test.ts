@@ -263,6 +263,14 @@ describe("today operations API", () => {
       evidence: { modelVersion: "daily-operation-confirmation@1" },
     });
     expect(store.getBatch(userId, batchId)?.revision).toBe(1);
+
+    const batchAfter = await request(base, `/api/batches/${batchId}`, { headers: { cookie } });
+    const batchAfterBody = await batchAfter.json() as {
+      today: { setting: { dailyPowderGrams: number; singlePowderGrams: number; mealCount: number } };
+    };
+    expect(batchAfterBody.today.setting.dailyPowderGrams).toBe(confirmedBody.confirmation.deviceSetting.dailyPowderGrams);
+    expect(batchAfterBody.today.setting.singlePowderGrams).toBe(confirmedBody.confirmation.deviceSetting.singlePowderGrams);
+    expect(batchAfterBody.today.setting.mealCount).toBe(confirmedBody.confirmation.deviceSetting.mealCount);
   });
 
   it("materializes creep-control feedback into the next day plan after sustained creep", async () => {

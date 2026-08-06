@@ -97,6 +97,10 @@ describe("local frontend contract", () => {
     expect(html).toContain("overflow-x: auto");
     expect(html).toContain("长按 0.65 秒保存");
     expect(html).toContain("saveTableImage");
+    expect(html).toContain("<th>头均采食</th>");
+    expect(html).toContain("g/头");
+    expect(html).toContain("function bindLongPress() { var target = $('dailyTable')");
+    expect(html).toContain("confirmedSetting.dailyPowderGrams");
   });
 
   it("anchors the batch menu below its trigger and has one new-batch action", () => {

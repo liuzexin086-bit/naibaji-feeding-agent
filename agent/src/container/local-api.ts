@@ -469,10 +469,10 @@ function batchPublic(batch: LocalBatch): JsonObject {
   };
 }
 
-function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = batch.revision): JsonObject {
+function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = batch.revision, confirmedDecision?: JsonObject): JsonObject {
   const context = frozenContextOf(batch);
   const canonical = computeFrozenBatchDecision(context, dayIndex, revision);
-  const decision = canonical.decision as unknown as JsonObject;
+  const decision = (confirmedDecision ?? canonical.decision) as unknown as JsonObject;
   const setting = object(decision.setting, "decision_setting");
   const exceptionActions = Array.isArray(decision.exceptionActions)
     ? decision.exceptionActions
@@ -481,7 +481,9 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
   return {
     ...decision,
     selectedMode: canonical.selectedMode,
-    effectiveMode: canonical.effectiveMode,
+    effectiveMode: setting.mode === "timed_quantity" || setting.mode === "free_feeding"
+      ? setting.mode
+      : canonical.effectiveMode,
     sopRef: canonical.sopRef,
     devicePlanRef: canonical.devicePlanRef,
     freeFeedingBlockers: canonical.freeFeedingBlockers,
@@ -510,6 +512,17 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     waterState: dayAge < Number(context.sop.config.waterClosedUntilDayAge) ? "closed" : "open",
     planWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
   };
+}
+
+function confirmedDecisionFor(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject | null {
+  const context = frozenContextOf(batch);
+  const canonical = computeFrozenBatchDecision(context, batch.currentDay, batch.revision);
+  const active = store.getActiveDecision(userId, batch.batchId, canonical.decision.dateLocal);
+  return active ? active as unknown as JsonObject : null;
+}
+
+function decisionForToday(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject {
+  return decisionFor(batch, batch.currentDay, batch.revision, confirmedDecisionFor(store, userId, batch) ?? undefined);
 }
 
 function dailyOperationPlanInputFor(userId: string, batch: LocalBatch): EnsureDailyOperationPlanInput {
@@ -951,7 +964,7 @@ export async function handleLocalApi(
         const session = agentSessionPublic(store, auth.user.id, batchId);
         json(response, {
           batch: batchPublic(batch),
-          today: decisionFor(batch),
+          today: decisionForToday(store, auth.user.id, batch),
           records: allRecords(batch),
           agentSession: session,
           messages: session.messages,
@@ -1027,7 +1040,7 @@ export async function handleLocalApi(
         } as LocalBatch;
         const result = {
           batch: batchPublic(nextBatch),
-          today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
+          today: decisionForToday(store, auth.user.id, nextBatch),
           records: allRecords(nextBatch),
         };
         const committed = store.commitModeSwitch({
@@ -1071,7 +1084,7 @@ export async function handleLocalApi(
             revision: batch.revision + 1,
             data: nextData,
           } as LocalBatch;
-          const nextToday = decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision);
+          const nextToday = decisionForToday(store, auth.user.id, nextBatch);
           const session = agentSessionPublic(store, auth.user.id, batchId);
           const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
           const result = {
@@ -1102,7 +1115,7 @@ export async function handleLocalApi(
         const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
         const result = {
           batch: batchPublic(nextBatch),
-          today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
+          today: decisionForToday(store, auth.user.id, nextBatch),
           records: allRecords(nextBatch),
           committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
           feedback: feedbackResult ? feedbackPublic(feedbackResult) : null,
@@ -1162,7 +1175,7 @@ export async function handleLocalApi(
       const previousPlan = store.getDailyOperationPlan(userId, batchId, nextPlanInput.businessDate);
       const result = {
         batch: batchPublic(nextBatch),
-        today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
+        today: decisionForToday(store, auth.user.id, nextBatch),
         records: allRecords(nextBatch),
       };
       const committed = store.commitSopMigration({

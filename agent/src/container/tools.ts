@@ -364,11 +364,17 @@ async function productionDecisionsForBatch(
   overrides: Parameters<typeof batchDecisionState>[1] = {},
 ) {
   const state = await batchDecisionState(context, overrides);
+  const activeDecision = context.storage.backend === "local"
+    ? context.storage.store.getActiveDecision(context.userId, context.batchId, state.dateLocal)
+    : null;
   const curve = computeFrozenBatchCurve(state.frozenContext);
   const selectedCurve = curve.selectedCurve.map((entry) => entry.decision);
   const timedQuantity = curve.timedQuantity.map((entry) => entry.decision);
   const freeFeeding = curve.freeFeeding.map((entry) => entry.decision);
-  const selectedDecision = curve.selected.decision;
+  const selectedDecision = activeDecision ?? curve.selected.decision;
+  const canonicalDecision = activeDecision
+    ? { ...curve.selected, decision: activeDecision }
+    : curve.selected;
   return {
     state,
     fullFeedingCurve: selectedCurve,
@@ -377,7 +383,7 @@ async function productionDecisionsForBatch(
       free_feeding: freeFeeding,
     },
     selectedDecision,
-    canonicalDecision: curve.selected,
+    canonicalDecision,
     singlePowderGrams: selectedDecision.setting.singlePowderGrams,
     quantityAuthorityPriority: QUANTITY_AUTHORITY,
     evidence: selectedDecision.evidence,
