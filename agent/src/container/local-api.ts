@@ -992,6 +992,7 @@ export async function handleLocalApi(
         json(response, {
           plan,
           confirmation: store.getDailyOperationConfirmation(auth.user.id, batchId, plan.businessDate),
+          amendments: store.getDailyOperationAmendments(auth.user.id, batchId, plan.businessDate),
         });
         return true;
       }
@@ -1023,6 +1024,49 @@ export async function handleLocalApi(
           return true;
         }
         throw new Error("NBJ_METHOD_NOT_ALLOWED");
+      }
+      const amendmentDecisionMatch = suffix.match(
+        /^amendments\/([^/]+)\/(confirm|reject|apply)$/,
+      );
+      if (amendmentDecisionMatch && request.method === "POST") {
+        const amendmentId = decodeURIComponent(amendmentDecisionMatch[1]);
+        const action = amendmentDecisionMatch[2] as "confirm" | "reject" | "apply";
+        const body = await readJson(request);
+        const amendment = store.getDailyOperationAmendment(
+          auth.user.id,
+          batchId,
+          amendmentId,
+        );
+        if (!amendment) throw new Error("NBJ_AMENDMENT_NOT_FOUND");
+        const committed = store.decideDailyOperationAmendment({
+          userId: auth.user.id,
+          batchId,
+          amendmentId,
+          action,
+          decidedBy: auth.user.id,
+          expectedRevision: integer(
+            body.expectedRevision,
+            "expected_revision",
+            0,
+            Number.MAX_SAFE_INTEGER,
+          ),
+          expectedAmendmentSha256: text(
+            body.expectedAmendmentSha256,
+            "expected_amendment_sha256",
+            64,
+          ).toUpperCase(),
+          idempotencyKey: text(body.idempotencyKey, "idempotency_key", 160),
+        });
+        json(response, {
+          amendment: committed.amendment,
+          replayed: committed.replayed,
+          amendments: store.getDailyOperationAmendments(
+            auth.user.id,
+            batchId,
+            amendment.businessDate,
+          ),
+        });
+        return true;
       }
       if (suffix === "mode") {
         if (request.method !== "POST") throw new Error("NBJ_METHOD_NOT_ALLOWED");

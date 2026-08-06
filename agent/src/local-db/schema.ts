@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 7;
+export const MIGRATION_VERSION = 8;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -197,6 +197,34 @@ CREATE TABLE IF NOT EXISTS daily_operation_confirmations (
   FOREIGN KEY (confirmed_by) REFERENCES users(id) ON DELETE RESTRICT
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS daily_operation_amendments (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  batch_id TEXT NOT NULL,
+  business_date TEXT NOT NULL,
+  base_plan_id TEXT NOT NULL,
+  base_confirmation_id TEXT,
+  origin_id TEXT NOT NULL,
+  origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+  severity TEXT NOT NULL CHECK (severity IN ('mild', 'moderate', 'severe')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
+  operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+  proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+  decision_id TEXT,
+  amendment_sha256 TEXT NOT NULL,
+  based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+  idempotency_key TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  decided_at TEXT,
+  decided_by TEXT,
+  UNIQUE (user_id, origin_id),
+  UNIQUE (user_id, idempotency_key),
+  FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+  FOREIGN KEY (base_plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+  FOREIGN KEY (base_confirmation_id) REFERENCES daily_operation_confirmations(id) ON DELETE SET NULL,
+  FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS sop_publication_state (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   active_template_id TEXT NOT NULL,
@@ -260,6 +288,8 @@ CREATE INDEX IF NOT EXISTS daily_operation_plans_batch_business_date_idx
   ON daily_operation_plans(user_id, batch_id, business_date DESC);
 CREATE INDEX IF NOT EXISTS daily_operation_confirmations_plan_idx
   ON daily_operation_confirmations(plan_id, confirmed_at DESC);
+CREATE INDEX IF NOT EXISTS daily_operation_amendments_batch_date_idx
+  ON daily_operation_amendments(user_id, batch_id, business_date DESC);
 CREATE INDEX IF NOT EXISTS feeding_decisions_batch_date_revision_idx
   ON feeding_decisions(user_id, batch_id, date_local, revision DESC);
 CREATE INDEX IF NOT EXISTS feeding_decisions_active_idx

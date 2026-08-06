@@ -36,6 +36,15 @@
 - Updated `observation-feedback.ts`, `container/tools.ts`, LangGraph state/runtime/responses, local API observed-at handling, and tests.
 - Verified `npm run check`, full `npm test` (32 files / 277 tests), and P1-3 targeted suites.
 
+### P1-4 persist post-confirmation amendments — complete
+
+- Added `daily_operation_amendments` migration version 8 with unique origin/idempotency keys, base plan/confirmation foreign keys, status, operations/proposal JSON, SHA-256 digest, and audit metadata.
+- Removed the confirmed-plan `skipped: true` path from `materializeObservationFeedbackPlan()`; new observations now create or reuse a pending amendment without modifying the confirmed plan.
+- Added store methods and local API routes for amendment creation/listing/confirm/reject/apply with stale revision/digest protection and audit events.
+- `GET today-operations` now returns amendments; `agent/ui/liquid-index.html` displays amendment status/severity/proposal state.
+- Added `tests/local-integration/amendments.test.ts` and migration/data-count coverage in `tests/local-db/local-store.test.ts`.
+- Verified `npm run check` and full `npm test` (33 files / 281 tests after adding migration count test; targeted amendment suite also passes).
+
 ## Session: 2026-08-04
 
 ### Plan authoring

@@ -321,6 +321,61 @@ export interface DailyOperationConfirmation {
   decisionId: string | null;
 }
 
+export type DailyOperationAmendmentStatus =
+  | "pending"
+  | "confirmed"
+  | "rejected"
+  | "applied";
+
+export interface DailyOperationAmendment {
+  id: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  basePlanId: string;
+  baseConfirmationId: string | null;
+  originId: string;
+  originKind: FeedbackOriginKind;
+  severity: "mild" | "moderate" | "severe";
+  status: DailyOperationAmendmentStatus;
+  operations: DailyOperationItem[];
+  proposal: FeedbackDeviceProposal | null;
+  decisionId: string | null;
+  amendmentSha256: string;
+  basedOnBatchRevision: number;
+  idempotencyKey: string;
+  createdAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+}
+
+export interface EnsureDailyOperationAmendmentInput {
+  id?: string;
+  userId: string;
+  batchId: string;
+  businessDate: string;
+  basePlanId: string;
+  baseConfirmationId: string;
+  originId: string;
+  originKind: FeedbackOriginKind;
+  severity: "mild" | "moderate" | "severe";
+  operations: DailyOperationItem[];
+  proposal?: FeedbackDeviceProposal | null;
+  basedOnBatchRevision: number;
+  idempotencyKey: string;
+}
+
+export interface DecideDailyOperationAmendmentInput {
+  userId: string;
+  batchId: string;
+  amendmentId: string;
+  action: "confirm" | "reject" | "apply";
+  decidedBy: string;
+  expectedRevision: number;
+  expectedAmendmentSha256: string;
+  idempotencyKey: string;
+}
+
 export interface EnsureDailyOperationPlanInput {
   id?: string;
   userId: string;
@@ -464,6 +519,22 @@ export interface LocalStore {
     confirmation: DailyOperationConfirmation;
     replayed: boolean;
   };
+  getDailyOperationAmendments(
+    userId: string,
+    batchId: string,
+    businessDate: string,
+  ): DailyOperationAmendment[];
+  getDailyOperationAmendment(
+    userId: string,
+    batchId: string,
+    amendmentId: string,
+  ): DailyOperationAmendment | null;
+  ensureDailyOperationAmendment(
+    input: EnsureDailyOperationAmendmentInput,
+  ): { amendment: DailyOperationAmendment; replayed: boolean };
+  decideDailyOperationAmendment(
+    input: DecideDailyOperationAmendmentInput,
+  ): { amendment: DailyOperationAmendment; replayed: boolean };
   createBatch(input: CreateBatchInput): LocalBatch;
   appendDailyObservation(input: AppendDailyObservationInput): DailyObservation;
   saveDecision(input: SaveDecisionInput): FeedingDecision;

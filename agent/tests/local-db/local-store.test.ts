@@ -109,6 +109,7 @@ describe("SQLite local store", () => {
       "daily_observations",
       "daily_operation_plans",
       "daily_operation_confirmations",
+      "daily_operation_amendments",
       "feeding_decisions",
       "agent_sessions",
       "agent_messages",
@@ -124,6 +125,7 @@ describe("SQLite local store", () => {
       "daily_observations_batch_date_revision_idx",
       "daily_operation_plans_batch_business_date_idx",
       "daily_operation_confirmations_plan_idx",
+      "daily_operation_amendments_batch_date_idx",
       "feeding_decisions_batch_date_revision_idx",
       "agent_messages_session_batch_idx",
     ]));
@@ -201,6 +203,66 @@ describe("SQLite local store", () => {
       config: batch.data.config as Record<string, unknown>,
       records: batch.data.records as Record<string, unknown>[],
     }).devicePlan.templates.free_feeding.windows).toEqual([{ startLocal: "00:00", endLocal: "23:59" }]);
+    upgraded.close();
+  });
+
+  it("migrates schema version 7 to 8 while preserving business data counts", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-v7",
+      revision: 4,
+      currentDay: 1,
+      data: { config: {}, records: [] },
+    });
+    const operations = dailyOperations();
+    const plan = store.ensureDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v7",
+      businessDate: "2026-08-06",
+      basedOnBatchRevision: 4,
+      sopTemplateId: "sop-v7",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v7",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity",
+      effectiveMode: "timed_quantity",
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+    });
+    store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v7",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-v7-base",
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(`
+      DROP TABLE daily_operation_amendments;
+      DELETE FROM schema_migrations WHERE version = 8;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-06T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const counts = (table: string): number =>
+      Number((database.prepare(`SELECT count(*) AS count FROM ${table}`).get() as { count: number }).count);
+    expect(counts("users")).toBeGreaterThanOrEqual(1);
+    expect(counts("batches")).toBe(1);
+    expect(counts("daily_operation_plans")).toBe(1);
+    expect(counts("daily_operation_confirmations")).toBe(1);
+    expect(counts("audit_events")).toBe(1);
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 8").get())
+      .toEqual({ count: 1 });
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    database.close();
     upgraded.close();
   });
 
@@ -521,7 +583,7 @@ describe("SQLite local store", () => {
     database.close();
   });
 
-  it("adds v7 feedback columns to an existing daily operations database", () => {
+  it("adds v8 feedback columns and amendment table to an existing daily operations database", () => {
     const { filename, store } = fileStore();
     store.close();
     const legacy = new DatabaseSync(filename);
@@ -541,6 +603,9 @@ describe("SQLite local store", () => {
       .map((row) => String(row.name));
     const confirmationColumns = database.prepare("PRAGMA table_info(daily_operation_confirmations)").all()
       .map((row) => String(row.name));
+    const amendmentTables = database.prepare(`
+      SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'daily_operation_amendments'
+    `).all();
     expect(planColumns).toEqual(expect.arrayContaining([
       "proposed_setting_json",
       "feedback_origin_json",
@@ -549,7 +614,8 @@ describe("SQLite local store", () => {
       "device_setting_json",
       "decision_id",
     ]));
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(7);
+    expect(amendmentTables).toHaveLength(1);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(8);
     database.close();
     upgraded.close();
   });

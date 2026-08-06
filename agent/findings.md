@@ -32,6 +32,14 @@
 - Deterministic facts include `adjustedProgramTotal`, `cumulativeActual`, `remainingDeliverable`, `targetSlot`, and `targetAlreadyHappened`.
 - Agent/local API/UI/feedback paths were updated to carry the new result kinds; full Agent suite passes 32 files / 277 tests.
 
+## P1-4 Post-confirmation amendments
+
+- Added SQLite migration version 8 and `daily_operation_amendments` with origin/idempotency uniqueness, base plan/confirmation FKs, status, proposal, digest, revision, audit actor/time.
+- `materializeObservationFeedbackPlan()` no longer silently skips confirmed plans; new diarrhea/anomaly observations create or reuse a canonical amendment while the confirmed `DailyOperationPlan` remains immutable.
+- `GET /api/batches/:id/today-operations` returns `amendments`; independent confirm/reject/apply APIs were added and audited.
+- UI “今日操作” card renders confirmed-plan amendment status, severity, proposal availability, and digest.
+- Tests cover canonical idempotency/concurrent ensure, original plan immutability, stale revision/digest rejection, severe proposal-less amendments, migration 7→8 data-count preservation, and audit events.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

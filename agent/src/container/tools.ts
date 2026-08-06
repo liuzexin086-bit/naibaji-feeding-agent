@@ -462,11 +462,19 @@ export function createFeedingTools(
           observation: context.observation as Record<string, unknown> | undefined,
         });
         const plan = materialized.plan;
+        const amendments = context.storage.backend === "local"
+          ? context.storage.store.getDailyOperationAmendments(
+              context.userId,
+              context.batchId,
+              plan.businessDate,
+            )
+          : [];
         return record(context, "get_today_timeline", {
           calculationDate: state.dateLocal,
           sopVersion: state.sopVersion,
           dailyOperationPlan: plan,
           tasks: plan.operations,
+          amendments,
           feedback: materialized.feedback
             ? {
                 kind: materialized.feedback.kind,
@@ -933,10 +941,20 @@ export function createFeedingTools(
         batch: localBatch,
         observation: context.observation as Record<string, unknown> | undefined,
       });
+      const amendments = context.storage.backend === "local"
+        ? context.storage.store.getDailyOperationAmendments(
+            context.userId,
+            context.batchId,
+            materialized.plan.businessDate,
+          )
+        : [];
       return record(context, "sync_observation_feedback", {
-        status: materialized.skipped ? "skipped" : "ok",
-        reason: materialized.skipped ? "confirmed" : materialized.feedback?.reason ?? null,
-        materialized: !materialized.skipped,
+        status: materialized.amendment ? "amendment" : "ok",
+        reason: materialized.amendment
+          ? "amendment_created_or_reused"
+          : materialized.feedback?.reason ?? null,
+        materialized: Boolean(materialized.amendment ?? materialized.feedback),
+        amendments,
         feedbackOrigin: materialized.plan.feedbackOrigin,
         proposedSetting: materialized.plan.proposedSetting,
         dailyOperationPlan: materialized.plan,

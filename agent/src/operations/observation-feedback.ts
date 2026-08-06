@@ -17,6 +17,7 @@ import {
   loadFrozenBatchDecisionContext,
 } from "../decision/batch-decision-service.js";
 import type {
+  DailyOperationAmendment,
   DailyOperationItem,
   DailyOperationPlan,
   EnsureDailyOperationPlanInput,
@@ -383,7 +384,7 @@ export function mergeFeedbackOperations(
 export interface FeedbackMaterialization {
   plan: DailyOperationPlan;
   feedback: FeedbackEngineResult | null;
-  skipped: boolean;
+  amendment?: DailyOperationAmendment;
 }
 
 export function materializeObservationFeedbackPlan(input: {
@@ -423,9 +424,6 @@ export function materializeObservationFeedbackPlan(input: {
     operationsSha256: digestDailyOperationItems(baseOperations),
   };
   const existing = input.store.getDailyOperationPlan(input.userId, batch.batchId, baseInput.businessDate);
-  if (existing?.status === "confirmed") {
-    return { plan: existing, feedback: null, skipped: true };
-  }
   const result = evaluateObservationFeedback({
     observation: input.observation,
     records: recordsOf(batch),
@@ -441,6 +439,42 @@ export function materializeObservationFeedbackPlan(input: {
     freeReductionPriority: context.devicePlan.templates.free_feeding.reductionPriority,
   });
   const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
+  if (existing?.status === "confirmed") {
+    if (!result?.operations.length) {
+      return { plan: existing, feedback: null };
+    }
+    const confirmation = input.store.getDailyOperationConfirmation(
+      input.userId,
+      batch.batchId,
+      baseInput.businessDate,
+    );
+    if (!confirmation) {
+      throw new Error("NBJ_AMENDMENT_CONFIRMATION_REQUIRED");
+    }
+    const severity = result.feedbackOrigin.sourceObservation.diarrheaGrade ?? "mild";
+    if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+      throw new Error("NBJ_AMENDMENT_SEVERITY_INVALID");
+    }
+    const amendmentResult = input.store.ensureDailyOperationAmendment({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      basePlanId: existing.id,
+      baseConfirmationId: confirmation.id,
+      originId: result.feedbackOrigin.id,
+      originKind: result.kind,
+      severity,
+      operations: result.operations,
+      proposal: result.proposedSetting,
+      basedOnBatchRevision: batch.revision,
+      idempotencyKey: `daily-operation-amendment:${result.feedbackOrigin.id}`,
+    });
+    return {
+      plan: existing,
+      feedback: result,
+      amendment: amendmentResult.amendment,
+    };
+  }
   const plan = input.store.ensureDailyOperationPlan({
     ...baseInput,
     operations,
@@ -451,6 +485,5 @@ export function materializeObservationFeedbackPlan(input: {
   return {
     plan,
     feedback: result?.operations.length ? result : null,
-    skipped: false,
   };
 }

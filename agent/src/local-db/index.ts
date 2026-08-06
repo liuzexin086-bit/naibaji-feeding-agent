@@ -20,10 +20,13 @@ import type {
   CommitResult,
   CreateBatchInput,
   CreateSessionInput,
+  DailyOperationAmendment,
   DailyOperationConfirmation,
   DailyOperationItem,
   DailyOperationPlan,
   DailyObservation,
+  DecideDailyOperationAmendmentInput,
+  EnsureDailyOperationAmendmentInput,
   FeedbackDeviceProposal,
   FeedbackOrigin,
   ConfirmDailyOperationPlanInput,
@@ -50,6 +53,9 @@ export type LocalStoreErrorCode =
   | "LOCAL_STORE_BATCH_NOT_FOUND"
   | "LOCAL_STORE_BATCH_TERMINAL"
   | "LOCAL_STORE_DAILY_OPERATION_CONFIRMED"
+  | "LOCAL_STORE_AMENDMENT_STALE"
+  | "LOCAL_STORE_AMENDMENT_NOT_PENDING"
+  | "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED"
   | "LOCAL_STORE_SESSION_NOT_FOUND"
   | "LOCAL_STORE_STALE_REVISION"
   | "LOCAL_STORE_IDEMPOTENCY_CONFLICT"
@@ -568,6 +574,77 @@ function dailyOperationConfirmationFromRow(row: Row): DailyOperationConfirmation
   };
 }
 
+function dailyOperationAmendmentFromRow(row: Row): DailyOperationAmendment {
+  const originKind = stringValue(row.origin_kind, "daily_operation_amendments.origin_kind");
+  const severity = stringValue(row.severity, "daily_operation_amendments.severity");
+  const status = stringValue(row.status, "daily_operation_amendments.status");
+  if (originKind !== "diarrhea" && originKind !== "creep_control") {
+    throw new Error("Invalid database daily_operation_amendments.origin_kind");
+  }
+  if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+    throw new Error("Invalid database daily_operation_amendments.severity");
+  }
+  if (status !== "pending" && status !== "confirmed" &&
+      status !== "rejected" && status !== "applied") {
+    throw new Error("Invalid database daily_operation_amendments.status");
+  }
+  return {
+    id: stringValue(row.id, "daily_operation_amendments.id"),
+    userId: stringValue(row.user_id, "daily_operation_amendments.user_id"),
+    batchId: stringValue(row.batch_id, "daily_operation_amendments.batch_id"),
+    businessDate: stringValue(row.business_date, "daily_operation_amendments.business_date"),
+    basePlanId: stringValue(row.base_plan_id, "daily_operation_amendments.base_plan_id"),
+    baseConfirmationId: row.base_confirmation_id == null
+      ? null
+      : stringValue(row.base_confirmation_id, "daily_operation_amendments.base_confirmation_id"),
+    originId: stringValue(row.origin_id, "daily_operation_amendments.origin_id"),
+    originKind,
+    severity,
+    status,
+    operations: operationItemsFromJson(
+      row.operations_json,
+      "daily_operation_amendments.operations_json",
+    ),
+    proposal: row.proposal_json == null
+      ? null
+      : feedbackProposalOf(row.proposal_json, "daily_operation_amendments.proposal_json"),
+    decisionId: row.decision_id == null
+      ? null
+      : stringValue(row.decision_id, "daily_operation_amendments.decision_id"),
+    amendmentSha256: stringValue(
+      row.amendment_sha256,
+      "daily_operation_amendments.amendment_sha256",
+    ),
+    basedOnBatchRevision: numberValue(
+      row.based_on_batch_revision,
+      "daily_operation_amendments.based_on_batch_revision",
+    ),
+    idempotencyKey: stringValue(
+      row.idempotency_key,
+      "daily_operation_amendments.idempotency_key",
+    ),
+    createdAt: stringValue(row.created_at, "daily_operation_amendments.created_at"),
+    decidedAt: row.decided_at == null ? null : stringValue(row.decided_at, "daily_operation_amendments.decided_at"),
+    decidedBy: row.decided_by == null ? null : stringValue(row.decided_by, "daily_operation_amendments.decided_by"),
+  };
+}
+
+function amendmentSha256(
+  operations: DailyOperationItem[],
+  proposal: FeedbackDeviceProposal | null,
+  basedOnBatchRevision: number,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      operations,
+      proposal,
+      basedOnBatchRevision,
+      schema: "daily-operation-amendment-v1",
+    }).normalize("NFC"), "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
 function sopChunkFromRow(row: Row): SopKnowledgeChunk {
   const terms = JSON.parse(stringValue(row.lexical_terms_json, "sop_knowledge_chunks.lexical_terms_json")) as unknown;
   if (!Array.isArray(terms) || !terms.every((term) => typeof term === "string")) {
@@ -614,7 +691,7 @@ export class SqliteLocalStore implements LocalStore {
 
   migrate(): void {
     this.#ensureOpen();
-    this.#transaction(() => {
+    return this.#transaction(() => {
       this.#database.exec(INITIAL_SCHEMA);
       const appliesFrozenSopDigestBackfill = !this.#database.prepare(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
@@ -1120,6 +1197,363 @@ export class SqliteLocalStore implements LocalStore {
       ).get(id) as Row | undefined;
       if (!confirmationRow) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation confirmation was not stored");
       return { confirmation: dailyOperationConfirmationFromRow(confirmationRow), replayed: false };
+    });
+  }
+
+  getDailyOperationAmendments(
+    userId: string,
+    batchId: string,
+    businessDateValue: string,
+  ): DailyOperationAmendment[] {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND batch_id = ? AND business_date = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      businessDate(businessDateValue, "businessDate"),
+    ) as Row[];
+    return rows.map(dailyOperationAmendmentFromRow);
+  }
+
+  getDailyOperationAmendment(
+    userId: string,
+    batchId: string,
+    amendmentId: string,
+  ): DailyOperationAmendment | null {
+    this.#ensureOpen();
+    const row = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND batch_id = ? AND id = ?
+    `).get(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      requiredText(amendmentId, "amendmentId"),
+    ) as Row | undefined;
+    return row ? dailyOperationAmendmentFromRow(row) : null;
+  }
+
+  ensureDailyOperationAmendment(
+    input: EnsureDailyOperationAmendmentInput,
+  ): { amendment: DailyOperationAmendment; replayed: boolean } {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const dateLocal = businessDate(input.businessDate, "businessDate");
+    const basePlanId = requiredText(input.basePlanId, "basePlanId");
+    const baseConfirmationId = requiredText(
+      input.baseConfirmationId,
+      "baseConfirmationId",
+    );
+    const originId = requiredText(input.originId, "originId");
+    const originKind = input.originKind;
+    const severity = input.severity;
+    const idempotencyKey = requiredText(input.idempotencyKey, "idempotencyKey");
+    const basedOnBatchRevision = nonNegativeInteger(
+      input.basedOnBatchRevision,
+      "basedOnBatchRevision",
+    );
+    if (originKind !== "diarrhea" && originKind !== "creep_control") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid originKind");
+    }
+    if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid severity");
+    }
+    const operations = dailyOperationItems(input.operations);
+    const proposal = input.proposal ?? null;
+    const digest = amendmentSha256(operations, proposal, basedOnBatchRevision);
+
+    const replay = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, idempotencyKey) as Row | undefined;
+    if (replay) {
+      const amendment = dailyOperationAmendmentFromRow(replay);
+      if (amendment.originId !== originId || amendment.amendmentSha256 !== digest) {
+        this.#idempotencyConflict();
+      }
+      return { amendment, replayed: true };
+    }
+
+    const existing = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND origin_id = ?
+    `).get(userId, originId) as Row | undefined;
+    if (existing) {
+      const amendment = dailyOperationAmendmentFromRow(existing);
+      if (amendment.batchId !== batchId || amendment.businessDate !== dateLocal) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_IDEMPOTENCY_CONFLICT",
+          "origin_id is already bound to another amendment",
+        );
+      }
+      return { amendment, replayed: false };
+    }
+
+    const id = requiredText(input.id ?? randomUUID(), "id");
+    const now = new Date().toISOString();
+    return this.#transaction(() => {
+      const transactionReplay = this.#database.prepare(`
+        SELECT * FROM daily_operation_amendments
+        WHERE user_id = ? AND idempotency_key = ?
+      `).get(userId, idempotencyKey) as Row | undefined;
+      if (transactionReplay) {
+        const amendment = dailyOperationAmendmentFromRow(transactionReplay);
+        if (amendment.originId !== originId || amendment.amendmentSha256 !== digest) {
+          this.#idempotencyConflict();
+        }
+        return { amendment, replayed: true };
+      }
+      const transactionExisting = this.#database.prepare(`
+        SELECT * FROM daily_operation_amendments
+        WHERE user_id = ? AND origin_id = ?
+      `).get(userId, originId) as Row | undefined;
+      if (transactionExisting) return {
+        amendment: dailyOperationAmendmentFromRow(transactionExisting),
+        replayed: false,
+      };
+
+      const batch = this.getBatch(userId, batchId);
+      if (!batch) this.#batchNotFound();
+      if (batch.status !== "active") {
+        throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "amendments require an active batch");
+      }
+      const plan = this.#database.prepare(`
+        SELECT * FROM daily_operation_plans
+        WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+      `).get(basePlanId, userId, batchId, dateLocal) as Row | undefined;
+      if (!plan || String(plan.status) !== "confirmed") {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+          "amendment requires a confirmed daily operation plan",
+        );
+      }
+      const confirmation = this.#database.prepare(`
+        SELECT * FROM daily_operation_confirmations
+        WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+      `).get(baseConfirmationId, userId, batchId, dateLocal) as Row | undefined;
+      if (!confirmation) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+          "base confirmation not found",
+        );
+      }
+      this.#database.prepare(`
+        INSERT INTO daily_operation_amendments (
+          id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+          origin_id, origin_kind, severity, status, operations_json, proposal_json,
+          decision_id, amendment_sha256, based_on_batch_revision, idempotency_key,
+          created_at, decided_at, decided_by
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
+      `).run(
+        id,
+        userId,
+        batchId,
+        dateLocal,
+        basePlanId,
+        baseConfirmationId,
+        originId,
+        originKind,
+        severity,
+        JSON.stringify(operations),
+        proposal ? JSON.stringify(proposal) : null,
+        digest,
+        basedOnBatchRevision,
+        idempotencyKey,
+        now,
+      );
+      this.#database.prepare(`
+        INSERT INTO audit_events (
+          user_id, id, batch_id, action, details_json, idempotency_key, created_at
+        ) VALUES (?, ?, ?, 'daily_operation_amendments.created', ?, ?, ?)
+      `).run(
+        userId,
+        randomUUID(),
+        batchId,
+        JSON.stringify({
+          amendmentId: id,
+          basePlanId,
+          baseConfirmationId,
+          originId,
+          originKind,
+          severity,
+          amendmentSha256: digest,
+          basedOnBatchRevision,
+        }),
+        `daily-operation-amendment-create:${idempotencyKey}`,
+        now,
+      );
+      return {
+        amendment: dailyOperationAmendmentFromRow(this.#database.prepare(
+          "SELECT * FROM daily_operation_amendments WHERE id = ?",
+        ).get(id) as Row),
+        replayed: false,
+      };
+    });
+  }
+
+  decideDailyOperationAmendment(
+    input: DecideDailyOperationAmendmentInput,
+  ): { amendment: DailyOperationAmendment; replayed: boolean } {
+    this.#ensureOpen();
+    const userId = requiredText(input.userId, "userId");
+    const batchId = requiredText(input.batchId, "batchId");
+    const amendmentId = requiredText(input.amendmentId, "amendmentId");
+    const action = input.action;
+    const decidedBy = requiredText(input.decidedBy, "decidedBy");
+    const expectedRevision = nonNegativeInteger(
+      input.expectedRevision,
+      "expectedRevision",
+    );
+    const expectedSha256 = sha256(
+      input.expectedAmendmentSha256,
+      "expectedAmendmentSha256",
+    );
+    const idempotencyKey = requiredText(input.idempotencyKey, "idempotencyKey");
+    if (action !== "confirm" && action !== "reject" && action !== "apply") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid amendment action");
+    }
+    const row = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND batch_id = ? AND id = ?
+    `).get(userId, batchId, amendmentId) as Row | undefined;
+    if (!row) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "amendment not found");
+
+    const replay = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendments
+      WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, idempotencyKey) as Row | undefined;
+    if (replay) {
+      const replayed = dailyOperationAmendmentFromRow(replay);
+      if (replayed.id !== amendmentId || replayed.batchId !== batchId) {
+        this.#idempotencyConflict();
+      }
+      return { amendment: replayed, replayed: true };
+    }
+
+    const stored = dailyOperationAmendmentFromRow(row);
+    const allowed = action === "apply"
+      ? stored.status === "confirmed"
+      : stored.status === "pending";
+    if (!allowed) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+        `amendment status ${stored.status} does not allow ${action}`,
+      );
+    }
+    const batch = this.getBatch(userId, batchId);
+    if (!batch) this.#batchNotFound();
+    if (batch.revision !== expectedRevision) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_AMENDMENT_STALE",
+        `expected revision ${expectedRevision}, current ${batch.revision}`,
+      );
+    }
+    if (stored.amendmentSha256 !== expectedSha256) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_AMENDMENT_STALE",
+        "amendment digest mismatch",
+      );
+    }
+    if (decidedBy !== userId) {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "decidedBy must be the batch owner");
+    }
+
+    const now = new Date().toISOString();
+    return this.#transaction(() => {
+      const transactionRow = this.#database.prepare(`
+        SELECT * FROM daily_operation_amendments
+        WHERE user_id = ? AND batch_id = ? AND id = ?
+      `).get(userId, batchId, amendmentId) as Row | undefined;
+      if (!transactionRow) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "amendment not found");
+      const current = dailyOperationAmendmentFromRow(transactionRow);
+      if (!(action === "apply" ? current.status === "confirmed" : current.status === "pending")) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+          "amendment changed concurrently",
+        );
+      }
+      const nextStatus = action === "confirm"
+        ? "confirmed" as const
+        : action === "reject"
+          ? "rejected" as const
+          : "applied" as const;
+      let decisionId: string | null = null;
+      if (action === "confirm" && current.proposal) {
+        const plan = this.#database.prepare(`
+          SELECT * FROM daily_operation_plans
+          WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+        `).get(current.basePlanId, userId, batchId, current.businessDate) as Row | undefined;
+        const planRef = plan ? dailyOperationPlanFromRow(plan) : null;
+        decisionId = this.#insertActiveDecisionLocked({
+          userId,
+          batchId,
+          dateLocal: current.businessDate,
+          decision: {
+            revision: current.basedOnBatchRevision,
+            batchId,
+            dateLocal: current.businessDate,
+            setting: proposalToDeviceSetting(current.proposal),
+            exceptionActions: [],
+            evidence: {
+              sopVersion: planRef?.sopTemplateId ?? "amendment",
+              modelVersion: "daily-operation-amendment@1",
+              calculationDate: current.businessDate,
+              reasons: ["操作员确认确认后异常修订；原已确认计划保持不变。"],
+              inputs: {
+                amendmentId,
+                originId: current.originId,
+                proposalDigest: current.proposal.proposalDigest,
+                basePlanId: current.basePlanId,
+              },
+              steps: [
+                {
+                  name: "amendment_confirmation",
+                  value: { decidedBy, amendmentSha256: current.amendmentSha256 },
+                  explanation: "确认后异常修订由已认证操作员独立确认。",
+                },
+              ],
+            },
+            status: "active",
+          },
+          now,
+        });
+      }
+      this.#database.prepare(`
+        UPDATE daily_operation_amendments SET
+          status = ?, decided_at = ?, decided_by = ?, decision_id = ?
+        WHERE id = ? AND user_id = ? AND batch_id = ?
+      `).run(nextStatus, now, decidedBy, decisionId, amendmentId, userId, batchId);
+      const actionName = action === "confirm"
+        ? "confirmed"
+        : action === "reject"
+          ? "rejected"
+          : "applied";
+      this.#database.prepare(`
+        INSERT INTO audit_events (
+          user_id, id, batch_id, action, details_json, idempotency_key, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        userId,
+        randomUUID(),
+        batchId,
+        `daily_operation_amendments.${actionName}`,
+        JSON.stringify({
+          amendmentId,
+          action,
+          decidedBy,
+          amendmentSha256: current.amendmentSha256,
+          decisionId,
+        }),
+        `daily-operation-amendment-${actionName}:${idempotencyKey}`,
+        now,
+      );
+      const updated = this.#database.prepare(
+        "SELECT * FROM daily_operation_amendments WHERE id = ?",
+      ).get(amendmentId) as Row;
+      return { amendment: dailyOperationAmendmentFromRow(updated), replayed: false };
     });
   }
 

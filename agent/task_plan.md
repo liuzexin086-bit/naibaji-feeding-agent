@@ -8,7 +8,7 @@
 - P1-1 unify optimizer parameter contract: complete
 - P1-2 make growth calibration identifiable: complete
 - P1-3 enforce diarrhea adjustment safety contract: complete
-- P1-4 persist post-confirmation amendments: pending
+- P1-4 persist post-confirmation amendments: complete
 - P1-5 render protected numeric facts deterministically: pending
 - P1-6 add safety release gates and evidence: pending
 
