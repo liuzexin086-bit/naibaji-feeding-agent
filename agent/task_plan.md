@@ -1,5 +1,19 @@
 # Codex Work Plan: SOP 驱动 LangGraph v2 与“今日操作”
 
+## NBJ-SAFETY-P1 Execution State
+
+执行依据：用户消息中提供的《NBJ-SAFETY-P1-Codex-Plan.md》全文。仓库中未找到同名计划文件，已在 P1-0 证据中记录该事实；后续以消息内计划为准。
+
+- P1-0 baseline and optimizer quarantine: complete
+- P1-1 unify optimizer parameter contract: pending
+- P1-2 make growth calibration identifiable: pending
+- P1-3 enforce diarrhea adjustment safety contract: pending
+- P1-4 persist post-confirmation amendments: pending
+- P1-5 render protected numeric facts deterministically: pending
+- P1-6 add safety release gates and evidence: pending
+
+约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
+
 ## Goal
 
 将当前通用 ReAct LangGraph 升级为 SOP 驱动的确定性编排：每天所有常规人工 SOP 操作汇总到独立“今日操作”栏并且一天只确认一次；管理员可在 SOP 中配置并发布8个自由采食时间段；批次继续冻结 SOP 与设备方案快照。

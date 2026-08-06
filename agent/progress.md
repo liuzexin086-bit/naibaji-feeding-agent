@@ -1,5 +1,17 @@
 # Progress Log
 
+## Session: 2026-08-06（NBJ-SAFETY-P1 第一阶段）
+
+### P1-0 baseline and optimizer quarantine — complete
+
+- Created branch `nbj-safety-p1` from `main` (`a0e9581`); worktree was clean before edits.
+- Recorded Node `v24.16.0`, npm `11.13.0`, Python `3.10.9`, schema `MIGRATION_VERSION=7`, root test pass, agent `npm ci` with engine warning, `npm run check` pass, `npm test` pass (32 files / 273 tests), and `python -m compileall optimizer` pass.
+- Added `EXPERIMENTAL / NOT FOR PRODUCTION / 现有旧参数输出已失效` to `optimizer/README.md`.
+- Added `optimizer/legacy-artifacts-manifest.json` with SHA-256 and `validForProduction=false` for existing simulation JSON outputs.
+- Confirmed by repository scan that no production path outside `optimizer/` reads optimizer JSON.
+- The plan file `NBJ-SAFETY-P1-Codex-Plan.md` was not found in the repo; the user-provided plan text is authoritative and this fact is recorded.
+- P1-0 is committed separately before P1-1.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

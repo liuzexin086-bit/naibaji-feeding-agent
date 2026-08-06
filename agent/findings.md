@@ -1,5 +1,15 @@
 # Findings & Decisions
 
+## NBJ-SAFETY-P1 Baseline — 2026-08-06
+
+- P1 plan file is not present in the repository; the user supplied the complete plan text in the task message and it is being used as the authoritative execution contract.
+- Baseline branch: `nbj-safety-p1` created from `main` at `a0e95818b64224f884acc6bedee6bcf84a032128`; worktree was clean before P1-0 edits.
+- Environment: Node `v24.16.0`, npm `11.13.0`, Python `3.10.9`. The exact `agent/package.json` engine is Node `24.18.0`; `npx node@24.18.0` resolves that runtime for later exact-Node gates, but `npm ci` baseline was executed on `v24.16.0` with an `EBADENGINE` warning.
+- Schema baseline: `MIGRATION_VERSION = 7` in `agent/src/local-db/schema.ts`.
+- Baseline tests: root `npm test` passed; `agent npm run check` passed; `agent npm test` passed 32 files / 273 tests; `python -m compileall optimizer` passed.
+- Optimizer outputs are experimental and must not be imported into production. Existing JSON hashes were recorded in `optimizer/legacy-artifacts-manifest.json` with `validForProduction=false`.
+- Repository scan found no production consumer reading optimizer JSON outside `optimizer/` itself. No additional runtime block was required in P1-0 beyond the quarantine manifest and README freeze.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

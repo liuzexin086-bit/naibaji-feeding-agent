@@ -2,6 +2,10 @@
 
 基于现有模型的纯 NumPy 梯度下降优化器，**不依赖 PyTorch**。
 
+> **EXPERIMENTAL**
+> **NOT FOR PRODUCTION**
+> **现有旧参数输出已失效，禁止导入设备或生产模型。**
+
 ## 架构
 
 ```
