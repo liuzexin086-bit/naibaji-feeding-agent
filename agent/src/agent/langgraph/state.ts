@@ -32,6 +32,11 @@ export interface CurrentBatchSummary {
   suggestedDailyMealCount?: number;
   mealTimes: string[];
   freeWindows: Array<{ startLocal: string; endLocal: string }>;
+  latestDiarrhea?: {
+    grade: "mild" | "moderate" | "severe";
+    actualPowderGrams: number | null;
+    recordedAt: string;
+  };
 }
 
 export interface TodayOperationSummary {

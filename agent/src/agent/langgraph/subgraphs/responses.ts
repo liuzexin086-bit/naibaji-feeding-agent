@@ -110,6 +110,9 @@ export function deterministicDiarrheaResponse(
   if (preview.cumulativeSource === "assumed_zero") {
     return `${prefix}已识别${gradeLabel}腹泻，但未录入设备实际累计下粉量。为避免超喂，不能给出可执行粉量；请先录入当日实际总量，或按现场人工处置原则执行。`;
   }
+  if (preview.remainingDailyPowderGrams === 0 && preview.mealCount === 0) {
+    return `${prefix}今日剩余调整额度已为 0，暂停今日继续下粉；执行现场检查并按兽医/场区 SOP 处置。该预览不会自动生效，需人工确认。`;
+  }
   const times = preview.timedMeals
     .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
     .join("、");

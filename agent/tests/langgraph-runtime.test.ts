@@ -171,6 +171,130 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).toContain("人工确认");
   });
 
+  it("routes a general follow-up to diarrhea preview when the batch has a recorded diarrhea", async () => {
+    const contextData = {
+      batch: {
+        current_day_index: 1,
+        config: { name: "批次 A" },
+        records: [
+          { recordedAt: "2026-08-05T08:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 80 },
+          { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 100 },
+        ],
+      },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "mild",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 150,
+          singlePowderGrams: 25,
+          mealCount: 6,
+          timedMeals: [
+            { timeLocal: "10:00", powderGrams: 25 },
+            { timeLocal: "14:00", powderGrams: 25 },
+          ],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 150,
+        singlePowderGrams: 25,
+        timedMeals: [
+          { timeLocal: "10:00", powderGrams: 25 },
+          { timeLocal: "14:00", powderGrams: 25 },
+        ],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: false,
+      },
+      cumulativePowderGrams: 100,
+      cumulativeSource: "latest_record",
+      severeException: null,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 25, 30, 100, 150],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 25, 30, 100, 150],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("现在怎么办"));
+    expect(result).toMatchObject({ intent: "exception", status: "completed" });
+    expect(result.text).toContain("轻度腹泻调整预览");
+  });
+
+  it("renders zero-allowance diarrhea response without an empty meal list", async () => {
+    const contextData = {
+      batch: {
+        current_day_index: 1,
+        config: { name: "批次 A" },
+        records: [
+          { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "moderate", actualPowderGrams: 500 },
+        ],
+      },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "moderate",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 0,
+          singlePowderGrams: 0,
+          mealCount: 0,
+          timedMeals: [],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 0,
+        singlePowderGrams: 0,
+        timedMeals: [],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: false,
+      },
+      cumulativePowderGrams: 500,
+      cumulativeSource: "observation",
+      severeException: null,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 30, 500],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 30, 500],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("腹泻后设备怎么设"));
+    expect(result.status).toBe("completed");
+    expect(result.text).toContain("剩余调整额度已为 0");
+    expect(result.text).not.toContain("剩余 0 餐：");
+  });
+
   it("gives every general turn the verified batch context", async () => {
     let seen: BaseMessage[] = [];
     const model = {

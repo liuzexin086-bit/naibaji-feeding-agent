@@ -209,6 +209,12 @@ function narrationContextText(state: AgentGraphState): string {
     }
     parts.push(`批次：${fields.join("；")}`);
   }
+  if (summary?.latestDiarrhea) {
+    const latest = summary.latestDiarrhea;
+    const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[latest.grade];
+    const actual = latest.actualPowderGrams;
+    parts.push(`最新腹泻记录：${gradeLabel}；累计实际下粉${actual == null ? "未录入" : `${actual}g`}；记录时间${latest.recordedAt}。`);
+  }
   if (state.todayOperations) {
     const today = state.todayOperations;
     const status = today.status === "confirmed" ? "已确认" : today.status === "pending" ? "待确认" : "未返回";
@@ -364,6 +370,28 @@ function localTime(value: unknown): string | undefined {
   return /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(result) ? result : undefined;
 }
 
+function latestDiarrheaFromRecords(records: unknown): CurrentBatchSummary["latestDiarrhea"] {
+  if (!Array.isArray(records)) return undefined;
+  const sorted = [...records].sort((left, right) => {
+    const leftRow = object(left);
+    const rightRow = object(right);
+    const leftAt = String(leftRow?.recordedAt ?? leftRow?.created_at ?? "");
+    const rightAt = String(rightRow?.recordedAt ?? rightRow?.created_at ?? "");
+    return leftAt.localeCompare(rightAt);
+  });
+  for (let index = sorted.length - 1; index >= 0; index -= 1) {
+    const row = object(sorted[index]);
+    const grade = String(row?.diarrheaGrade ?? "");
+    if (grade === "mild" || grade === "moderate" || grade === "severe") {
+      const rawActual = row?.actualPowderGrams;
+      const actual = rawActual == null || rawActual === "" ? null : finite(rawActual);
+      const recordedAt = String(row?.recordedAt ?? row?.created_at ?? "");
+      return { grade, actualPowderGrams: actual ?? null, recordedAt };
+    }
+  }
+  return undefined;
+}
+
 function batchSummaryFromContext(result: unknown): CurrentBatchSummary | undefined {
   const envelope = envelopeFromToolResult(result);
   const data = object(envelope?.data);
@@ -387,6 +415,7 @@ function batchSummaryFromContext(result: unknown): CurrentBatchSummary | undefin
   const currentDayIndex = finite(batch.current_day_index);
   const selectedMode = canonical?.selectedMode;
   const effectiveMode = canonical?.effectiveMode;
+  const latestDiarrhea = latestDiarrheaFromRecords(batch.records);
   return {
     ...(typeof config?.name === "string" && config.name.trim() ? { name: config.name.trim() } : {}),
     ...(currentDayIndex !== undefined && Number.isSafeInteger(currentDayIndex) && currentDayIndex >= 0 ? { dayNumber: currentDayIndex + 1 } : {}),
@@ -400,6 +429,7 @@ function batchSummaryFromContext(result: unknown): CurrentBatchSummary | undefin
     ...(finite(setting.suggestedDailyMealCount) !== undefined ? { suggestedDailyMealCount: finite(setting.suggestedDailyMealCount) } : {}),
     mealTimes,
     freeWindows,
+    ...(latestDiarrhea ? { latestDiarrhea } : {}),
   };
 }
 
@@ -621,10 +651,18 @@ const loadTurnScopeNode = async (_state: AgentGraphState, config: RunnableConfig
 const planTurnNode = async (state: AgentGraphState, config: RunnableConfig) => {
   const run = runContextFromConfig(config);
   const intent = classifyDeterministicIntent(run.message);
+  const activeDiarrhea = state.batchSummary?.latestDiarrhea;
+  const effectiveIntent = intent.kind === "general" && activeDiarrhea
+    ? { ...intent, kind: "exception" as const }
+    : intent;
+  const evidencePlan = effectiveIntent.kind === "exception" && activeDiarrhea &&
+      !/腹泻|拉稀|diarrhea|loose stool|soft stool/u.test(run.message)
+    ? { requiredTools: ["preview_diarrhea_adjustment"] as const, responseKind: "deterministic" as const, nextToolIndex: 0 }
+    : { ...staticEvidencePlan(effectiveIntent.kind, run.message), nextToolIndex: 0 };
   return {
-    intent,
-    evidencePlan: { ...staticEvidencePlan(intent.kind, run.message), nextToolIndex: 0 },
-    subgraph: selectSopSubgraph(intent.kind, state.snapshot.selectedMode, state.snapshot.currentDayIndex),
+    intent: effectiveIntent,
+    evidencePlan,
+    subgraph: selectSopSubgraph(effectiveIntent.kind, state.snapshot.selectedMode, state.snapshot.currentDayIndex),
   };
 };
 
