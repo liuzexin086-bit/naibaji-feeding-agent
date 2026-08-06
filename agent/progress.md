@@ -53,6 +53,20 @@
 - Added number-swap, unit, Chinese numeral, percent/date/day-age, tool-call, stale receipt, and provider-unavailable regression tests.
 - Verified `npm run check` and full `npm test` (33 files / 285 tests).
 
+### P1-6 add safety release gates and evidence — complete
+
+- Added `p1-safety-gate` to `agent/package.json`; it runs check plus 8 focused suites covering decision core, feedback, migration/store, amendments, local tools, LangGraph runtime, parity, and today operations.
+- Verified under exact Node `24.18.0` by invoking npm-cli with the Node 24.18 binary: `npm ci`, `npm run check`, `npm test` (33 files / 285 tests), `npm run build`, `npm run p0-release-gate` (69 tests), and `npm run p1-safety-gate` (90 tests).
+- Verified root `npm test`, Python 11 tests, `python -m compileall optimizer`, temp SQLite new-database test with `PRAGMA integrity_check=ok`, migration 7→8 data-count preservation, and `docker compose config --quiet`.
+- Final acceptance:
+
+```text
+NBJ-SAFETY-P1: PASS
+Safety Contract Gate: OPEN
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
 ## Session: 2026-08-04
 
 ### Plan authoring

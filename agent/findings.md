@@ -48,6 +48,21 @@
 - `numericWhitelist` is retained as telemetry/compatibility only and is no longer used as the acceptance gate; replay no longer validates against it.
 - Attack tests cover number/unit/time swaps, Chinese numerals, percent/date/day-age injection, tool calls, stale receipts, and provider unavailability.
 
+## P1-6 Integration, release gates, and final acceptance
+
+- Added `agent/package.json` script `p1-safety-gate` covering decision core, observation feedback, local store/migration 7→8, amendments API/store, local tools, LangGraph runtime, Agent/local parity, and today-operations.
+- Exact Node `24.18.0` was used by invoking npm-cli with the Node 24.18 binary; `npm ci`, `npm run check`, `npm test`, `npm run build`, `npm run p0-release-gate`, and `npm run p1-safety-gate` all passed without `EBADENGINE`.
+- Root `npm test`, Python `unittest` (11 tests), `python -m compileall optimizer`, temp SQLite creation/integrity, migration 7→8 count preservation, and `docker compose config` all passed.
+
+Final acceptance record:
+
+```text
+NBJ-SAFETY-P1: PASS
+Safety Contract Gate: OPEN
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

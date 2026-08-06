@@ -10,7 +10,7 @@
 - P1-3 enforce diarrhea adjustment safety contract: complete
 - P1-4 persist post-confirmation amendments: complete
 - P1-5 render protected numeric facts deterministically: complete
-- P1-6 add safety release gates and evidence: pending
+- P1-6 add safety release gates and evidence: complete
 
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
