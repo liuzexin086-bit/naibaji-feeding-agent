@@ -58,6 +58,19 @@ function recordsOf(batch: LocalBatch): JsonObject[] {
     : [];
 }
 
+function observationEventRecords(
+  store: LocalStore,
+  userId: string,
+  batchId: string,
+): JsonObject[] {
+  return store.listObservations(userId, batchId).map((observation) => ({
+    ...(observation.data as JsonObject),
+    observationId: observation.id,
+    idempotencyKey: observation.idempotencyKey,
+    recordedAt: observation.observedAt ?? String(observation.data.recordedAt ?? ""),
+  }));
+}
+
 function sortedRecords(records: JsonObject[]): JsonObject[] {
   return [...records].sort((left, right) => {
     const leftAt = String(left.recordedAt ?? left.created_at ?? "");
@@ -458,11 +471,19 @@ export function materializeObservationFeedbackPlan(input: {
     operationsSha256: digestDailyOperationItems(baseOperations),
   };
   const existing = input.store.getDailyOperationPlan(input.userId, batch.batchId, baseInput.businessDate);
+  const eventRecords = observationEventRecords(
+    input.store,
+    input.userId,
+    batch.batchId,
+  );
+  const feedbackRecords = eventRecords.length > 0
+    ? eventRecords
+    : recordsOf(batch);
   const result = evaluateObservationFeedback({
     userId: input.userId,
     batchId: batch.batchId,
     observation: input.observation,
-    records: recordsOf(batch),
+    records: feedbackRecords,
     businessDate: baseInput.businessDate,
     currentDayIndex: batch.currentDay,
     dayAge: context.modelInput.startAge + batch.currentDay,
@@ -474,14 +495,19 @@ export function materializeObservationFeedbackPlan(input: {
     reductionPriority: context.devicePlan.templates.timed_quantity.reductionPriority,
     freeReductionPriority: context.devicePlan.templates.free_feeding.reductionPriority,
   });
-  const records = recordsOf(batch);
-  const latestDiarrhea = latestDiarrheaStatusRecord(records);
+  const latestDiarrhea = latestDiarrheaStatusRecord(feedbackRecords);
   if (latestDiarrhea?.diarrheaGrade === "none") {
     input.store.supersedeDailyOperationAmendments({
       userId: input.userId,
       batchId: batch.batchId,
       businessDate: baseInput.businessDate,
       originKind: "diarrhea",
+      reason: "explicit_none",
+      sourceObservationId: String(
+        latestDiarrhea.observationId ??
+        latestDiarrhea.id ??
+        "",
+      ),
     });
   }
   const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
@@ -529,6 +555,9 @@ export function materializeObservationFeedbackPlan(input: {
       businessDate: baseInput.businessDate,
       originKind: result.kind,
       excludeAmendmentId: amendmentResult.amendment.id,
+      reason: "newer_observation",
+      sourceObservationId: String(input.observation?.observationId ?? ""),
+      replacementAmendmentId: amendmentResult.amendment.id,
     });
     return {
       plan: existing,

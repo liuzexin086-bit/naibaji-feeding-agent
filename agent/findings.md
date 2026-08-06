@@ -85,6 +85,14 @@ Real Device Control Gate: CLOSED
 - LangGraph `TodayOperationSummary` 增加 amendments 投影；确定性今日操作回复包含待确认/已确认待应用/已应用修订数量。
 - V8→V9 重建 amendment 表后显式恢复 batch/date 索引，并新增真实旧表迁移测试。
 
+## NBJ-SAFETY-P1-R2 — 2026-08-07
+
+- Migration now advances to schema `10`; exact old V9 status contract is rebuilt and supersede works after upgrade.
+- Diarrhea feedback state reads `daily_observations` append-only event history; omitted same-day observations no longer erase an earlier explicit grade.
+- `daily_observations.id` is written into persisted `batch.data.records` as `observationId`, not only into a transient in-transaction copy.
+- Automatic supersede is audited as `daily_operation_amendments.superseded` with `reason`, `sourceObservationId`, and optional `replacementAmendmentId`; `decided_by` stays null for system changes.
+- Added API regression: mild → same-day omitted → pending diarrhea feedback remains active.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

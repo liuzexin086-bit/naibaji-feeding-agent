@@ -334,6 +334,58 @@ describe("today operations API", () => {
       .not.toContain("feedback_diarrhea_confirm");
   });
 
+  it("keeps pending diarrhea feedback after a same-day observation omits diarrheaGrade", async () => {
+    const { base, cookie } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "腹泻事件历史", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+
+    const mild = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "event-history-mild",
+        observation: {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(mild.status).toBe(200);
+
+    const omitted = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "event-history-omitted",
+        observation: {
+          recordedAt: "2026-08-05T14:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          actualPowderGrams: 180,
+        },
+      }),
+    });
+    expect(omitted.status).toBe(200);
+
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { operations: Array<{ code: string }> };
+    };
+    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+  });
+
   it("materializes creep-control feedback into the next day plan after sustained creep", async () => {
     const { base, cookie } = await startApi();
     const created = await request(base, "/api/batches", {

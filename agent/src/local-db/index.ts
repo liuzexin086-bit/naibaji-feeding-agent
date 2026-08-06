@@ -707,7 +707,7 @@ export class SqliteLocalStore implements LocalStore {
     this.#ensureOpen();
     return this.#transaction(() => {
       this.#database.exec(INITIAL_SCHEMA);
-      this.#ensureAmendmentV9();
+      this.#ensureAmendmentV10();
       const appliesFrozenSopDigestBackfill = !this.#database.prepare(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
       ).get(MIGRATION_VERSION);
@@ -784,14 +784,22 @@ export class SqliteLocalStore implements LocalStore {
     });
   }
 
-  #ensureAmendmentV9(): void {
+  #ensureAmendmentV10(): void {
     const columns = new Map(
       (this.#database.prepare("PRAGMA table_info(daily_operation_amendments)").all() as Row[])
         .map((row) => [String(row.name), row]),
     );
     const severity = columns.get("severity");
+    const tableSql = String(
+      (this.#database.prepare(`
+        SELECT sql FROM sqlite_master
+        WHERE type = 'table' AND name = 'daily_operation_amendments'
+      `).get() as Row | undefined)?.sql ?? "",
+    );
     const needsRebuild = !columns.has("priority") ||
-      (severity !== undefined && Number(severity.notnull) === 1);
+      (severity !== undefined && Number(severity.notnull) === 1) ||
+      !tableSql.includes("superseded") ||
+      !tableSql.includes("cancelled");
     if (needsRebuild) {
       this.#database.exec(`
         CREATE TABLE daily_operation_amendments_v9 (
@@ -1339,6 +1347,9 @@ export class SqliteLocalStore implements LocalStore {
     businessDate: string;
     originKind?: "diarrhea" | "creep_control";
     excludeAmendmentId?: string;
+    reason?: "explicit_none" | "newer_observation" | "batch_change";
+    sourceObservationId?: string;
+    replacementAmendmentId?: string | null;
   }): number {
     this.#ensureOpen();
     const userId = requiredText(input.userId, "userId");
@@ -1361,11 +1372,38 @@ export class SqliteLocalStore implements LocalStore {
       params.push(input.excludeAmendmentId);
     }
     const result = this.#database.prepare(`
-      UPDATE daily_operation_amendments
-      SET status = 'superseded', decided_at = ?, decided_by = ?
+      SELECT id FROM daily_operation_amendments
       WHERE ${conditions.join(" AND ")}
-    `).run(now, userId, ...params);
-    return Number(result.changes);
+    `).all(...params) as Row[];
+    if (result.length === 0) return 0;
+    const updateResult = this.#database.prepare(`
+      UPDATE daily_operation_amendments
+      SET status = 'superseded', decided_at = ?, decided_by = NULL
+      WHERE ${conditions.join(" AND ")}
+    `).run(now, ...params);
+    const reason = input.reason ?? "batch_change";
+    const insertAudit = this.#database.prepare(`
+      INSERT INTO audit_events (
+        user_id, id, batch_id, action, details_json, idempotency_key, created_at
+      ) VALUES (?, ?, ?, 'daily_operation_amendments.superseded', ?, ?, ?)
+    `);
+    for (const row of result) {
+      const amendmentId = stringValue(row.id, "daily_operation_amendments.id");
+      insertAudit.run(
+        userId,
+        randomUUID(),
+        batchId,
+        JSON.stringify({
+          reason,
+          sourceObservationId: input.sourceObservationId ?? null,
+          supersededAmendmentId: amendmentId,
+          replacementAmendmentId: input.replacementAmendmentId ?? null,
+        }),
+        `daily-operation-amendment-supersede:${amendmentId}:${input.sourceObservationId ?? now}`,
+        now,
+      );
+    }
+    return Number(updateResult.changes);
   }
 
   ensureDailyOperationAmendment(
@@ -2467,6 +2505,23 @@ export class SqliteLocalStore implements LocalStore {
     return this.getSopEditTask(taskId)!;
   }
 
+  #persistObservationIdInNextData(
+    nextData: Record<string, unknown>,
+    observation: Record<string, unknown>,
+    observationId: string,
+  ): Record<string, unknown> {
+    const result = structuredClone(nextData);
+    const records = Array.isArray(result.records)
+      ? result.records as Array<Record<string, unknown>>
+      : [];
+    result.records = records.map((row) =>
+      Number(row.dayIndex) === Number(observation.dayIndex)
+        ? { ...row, observationId }
+        : row,
+    );
+    return result;
+  }
+
   #materializeFeedbackLocked(input: {
     userId: string;
     batchId: string;
@@ -2477,14 +2532,10 @@ export class SqliteLocalStore implements LocalStore {
     feedbackBatch: LocalBatch;
     result: Record<string, unknown>;
   }): Record<string, unknown> {
-    const nextData = structuredClone(input.nextData);
-    const records = Array.isArray(nextData.records)
-      ? nextData.records as Array<Record<string, unknown>>
-      : [];
-    nextData.records = records.map((row) =>
-      Number(row.dayIndex) === Number(input.observation.dayIndex)
-        ? { ...row, observationId: input.observationId }
-        : row,
+    const nextData = this.#persistObservationIdInNextData(
+      input.nextData,
+      input.observation,
+      input.observationId,
     );
     const batch = {
       ...input.feedbackBatch,
@@ -2540,6 +2591,9 @@ export class SqliteLocalStore implements LocalStore {
         data: observation,
         idempotencyKey: key,
       });
+      const persistedNextData = input.feedbackBatch
+        ? this.#persistObservationIdInNextData(input.nextData, observation, inserted.id)
+        : input.nextData;
       const update = this.#database.prepare(`
         UPDATE batches
         SET revision = ?, current_day = ?, data_json = ?, updated_at = ?
@@ -2547,7 +2601,7 @@ export class SqliteLocalStore implements LocalStore {
       `).run(
         expected + 1,
         nonNegativeInteger(input.nextDayIndex, "nextDayIndex"),
-        serializeObject(input.nextData, "nextData"),
+        serializeObject(persistedNextData, "nextData"),
         now,
         userId,
         batchId,
@@ -2561,7 +2615,7 @@ export class SqliteLocalStore implements LocalStore {
             expectedRevision: expected,
             observationId: inserted.id,
             observation,
-            nextData: input.nextData,
+            nextData: persistedNextData,
             feedbackBatch: input.feedbackBatch,
             result: input.result,
           })
@@ -2601,12 +2655,19 @@ export class SqliteLocalStore implements LocalStore {
         data: { ...input.observation, revision: expected },
         idempotencyKey: key,
       });
+      const persistedNextData = input.feedbackBatch
+        ? this.#persistObservationIdInNextData(
+            input.nextData,
+            { ...input.observation, revision: expected },
+            inserted.id,
+          )
+        : input.nextData;
       const update = this.#database.prepare(`
         UPDATE batches SET revision = ?, data_json = ?, updated_at = ?
         WHERE user_id = ? AND id = ? AND revision = ?
       `).run(
         expected + 1,
-        serializeObject(input.nextData, "nextData"),
+        serializeObject(persistedNextData, "nextData"),
         now,
         userId,
         batchId,
@@ -2620,7 +2681,7 @@ export class SqliteLocalStore implements LocalStore {
             expectedRevision: expected,
             observationId: inserted.id,
             observation: { ...input.observation, revision: expected },
-            nextData: input.nextData,
+            nextData: persistedNextData,
             feedbackBatch: input.feedbackBatch,
             result: input.result,
           })

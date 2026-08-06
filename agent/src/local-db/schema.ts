@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 9;
+export const MIGRATION_VERSION = 10;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (

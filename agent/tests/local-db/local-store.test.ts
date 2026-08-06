@@ -208,7 +208,7 @@ describe("SQLite local store", () => {
     upgraded.close();
   });
 
-  it("migrates schema version 7 to 9 while preserving business data counts", () => {
+  it("migrates schema version 7 to 10 while preserving business data counts", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -246,7 +246,7 @@ describe("SQLite local store", () => {
     const legacy = new DatabaseSync(filename);
     legacy.exec(`
       DROP TABLE daily_operation_amendments;
-      DELETE FROM schema_migrations WHERE version = 9;
+      DELETE FROM schema_migrations WHERE version = 10;
       INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-06T00:00:00.000Z');
     `);
     legacy.close();
@@ -261,14 +261,14 @@ describe("SQLite local store", () => {
     expect(counts("daily_operation_plans")).toBe(1);
     expect(counts("daily_operation_confirmations")).toBe(1);
     expect(counts("audit_events")).toBe(1);
-    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 9").get())
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 10").get())
       .toEqual({ count: 1 });
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
   });
 
-  it("rebuilds v8 amendment tables and restores their indexes during migration to 9", () => {
+  it("rebuilds v8 amendment tables and restores their indexes during migration to 10", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -375,6 +375,131 @@ describe("SQLite local store", () => {
       .toEqual({ count: 1 });
     expect(database.prepare("SELECT count(*) AS count FROM daily_operation_amendment_actions").get())
       .toEqual({ count: 0 });
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    database.close();
+    upgraded.close();
+  });
+
+  it("migrates the exact v9 amendment status contract to v10 without breaking supersede", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-v9-status",
+      revision: 2,
+      data: { config: {}, records: [] },
+    });
+    const operations = dailyOperations();
+    const plan = store.ensureDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v9-status",
+      businessDate: "2026-08-07",
+      basedOnBatchRevision: 2,
+      sopTemplateId: "sop-v9",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v9",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity",
+      effectiveMode: "timed_quantity",
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+    });
+    const confirmation = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v9-status",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-v9-status-base",
+    }).confirmation;
+    store.ensureDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v9-status",
+      businessDate: plan.businessDate,
+      basePlanId: plan.id,
+      baseConfirmationId: confirmation.id,
+      originId: "origin-v9-status",
+      originKind: "diarrhea",
+      severity: "mild",
+      priority: "routine",
+      operations,
+      proposal: null,
+      basedOnBatchRevision: 2,
+      idempotencyKey: "amendment-v9-status",
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(`
+      ALTER TABLE daily_operation_amendments RENAME TO daily_operation_amendments_v10_old;
+      CREATE TABLE daily_operation_amendments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        business_date TEXT NOT NULL,
+        base_plan_id TEXT NOT NULL,
+        base_confirmation_id TEXT,
+        origin_id TEXT NOT NULL,
+        origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+        severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
+        priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
+        operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+        proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+        decision_id TEXT,
+        amendment_sha256 TEXT NOT NULL,
+        based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        UNIQUE (user_id, origin_id),
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (base_plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+        FOREIGN KEY (base_confirmation_id) REFERENCES daily_operation_confirmations(id) ON DELETE SET NULL,
+        FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+      ) STRICT;
+      INSERT INTO daily_operation_amendments (
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, priority, status, operations_json,
+        proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+        idempotency_key, created_at, decided_at, decided_by
+      )
+      SELECT
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, priority, status, operations_json,
+        proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+        idempotency_key, created_at, decided_at, decided_by
+      FROM daily_operation_amendments_v10_old;
+      DROP TABLE daily_operation_amendments_v10_old;
+      DELETE FROM schema_migrations WHERE version = 10;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    expect(upgraded.supersedeDailyOperationAmendments({
+      userId: "user-a",
+      batchId: "batch-v9-status",
+      businessDate: plan.businessDate,
+      originKind: "diarrhea",
+      reason: "explicit_none",
+      sourceObservationId: "observation-v9-none",
+    })).toBe(1);
+    const amendments = upgraded.getDailyOperationAmendments(
+      "user-a",
+      "batch-v9-status",
+      plan.businessDate,
+    );
+    expect(amendments[0]?.status).toBe("superseded");
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const indexes = database.prepare("PRAGMA index_list('daily_operation_amendments')").all()
+      .map((row) => String(row.name));
+    expect(indexes).toContain("daily_operation_amendments_batch_date_idx");
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
+      .toBe(10);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
@@ -719,7 +844,7 @@ describe("SQLite local store", () => {
     database.close();
   });
 
-  it("adds v9 feedback columns and amendment tables to an existing daily operations database", () => {
+  it("adds v10 feedback columns and amendment tables to an existing daily operations database", () => {
     const { filename, store } = fileStore();
     store.close();
     const legacy = new DatabaseSync(filename);
@@ -755,7 +880,7 @@ describe("SQLite local store", () => {
     ]));
     expect(amendmentTables).toHaveLength(1);
     expect(actionTables).toHaveLength(1);
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(9);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(10);
     database.close();
     upgraded.close();
   });

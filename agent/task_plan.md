@@ -34,6 +34,14 @@
 - R1-5 LangGraph amendment 状态投影: complete
 - R1-6 V8→V9 索引迁移测试: complete
 
+## NBJ-SAFETY-P1-R2 Execution State
+
+- R2-1 Schema V9→V10 with superseded/cancelled and exact old V9 migration test: complete
+- R2-2 Diarrhea status from observation event history: complete
+- R2-3 Supersede audit with system action semantics: complete
+- R2-4 Permanent `daily_observations.id` binding: complete
+- R2-5 mild→omitted API integration regression: complete
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

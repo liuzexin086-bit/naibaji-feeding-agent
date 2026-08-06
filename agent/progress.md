@@ -88,6 +88,16 @@ Real Device Control Gate: CLOSED
 - Added real V8→V9 table rebuild/index test.
 - Verified full Agent suite (33 files / 294 tests), `p1-safety-gate` (99 tests), Python 12 tests, root npm test, and agent build.
 
+### NBJ-SAFETY-P1-R2 — 2026-08-07
+
+- Bumped `MIGRATION_VERSION` to 10 and made `#ensureAmendmentV10()` rebuild when the existing amendment status CHECK lacks `superseded/cancelled`.
+- Added exact old V9→V10 migration test that inserts a pending amendment, upgrades, supersedes it, and verifies indexes/integrity.
+- Changed feedback materialization to source diarrhea/creep state from `daily_observations` event history instead of the replaceable daily snapshot.
+- Persisted `observationId` into `batch.data.records` from the real `daily_observations.id` inside the same transaction.
+- Added supersede audit events with system action semantics (`decided_by=NULL`, `reason`, source/replacement IDs).
+- Added API regression for mild followed by same-day omitted `diarrheaGrade`; pending feedback remains.
+- Verified full Agent suite (33 files / 296 tests), `p1-safety-gate` (101 tests), Python 12 tests, root npm test, and agent build.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

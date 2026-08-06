@@ -583,7 +583,7 @@ describe("post-confirmation amendments", () => {
   });
 
   it("supersedes pending diarrhea amendments when an explicit none is recorded", async () => {
-    const { store, base, cookie, userId } = await startApi();
+    const { store, filename, base, cookie, userId } = await startApi();
     const created = await request(base, "/api/batches", {
       method: "POST",
       headers: { cookie },
@@ -653,5 +653,14 @@ describe("post-confirmation amendments", () => {
     );
     expect(amendments).toHaveLength(1);
     expect(amendments[0]?.status).toBe("superseded");
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const audit = database.prepare(`
+      SELECT details_json FROM audit_events
+      WHERE action = 'daily_operation_amendments.superseded'
+      ORDER BY created_at DESC LIMIT 1
+    `).get() as { details_json: string } | undefined;
+    const details = audit ? JSON.parse(audit.details_json) as Record<string, unknown> : null;
+    expect(details).toMatchObject({ reason: "explicit_none" });
+    database.close();
   });
 });

@@ -541,6 +541,9 @@ export interface LocalStore {
     businessDate: string;
     originKind?: FeedbackOriginKind;
     excludeAmendmentId?: string;
+    reason?: "explicit_none" | "newer_observation" | "batch_change";
+    sourceObservationId?: string;
+    replacementAmendmentId?: string | null;
   }): number;
   ensureDailyOperationAmendment(
     input: EnsureDailyOperationAmendmentInput,
