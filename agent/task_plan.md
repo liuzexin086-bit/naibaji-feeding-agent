@@ -6,7 +6,7 @@
 
 - P1-0 baseline and optimizer quarantine: complete
 - P1-1 unify optimizer parameter contract: complete
-- P1-2 make growth calibration identifiable: pending
+- P1-2 make growth calibration identifiable: complete
 - P1-3 enforce diarrhea adjustment safety contract: pending
 - P1-4 persist post-confirmation amendments: pending
 - P1-5 render protected numeric facts deterministically: pending

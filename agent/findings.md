@@ -17,6 +17,13 @@
 - `search.py` now searches six named V3 fields, uses deterministic seeds, and writes `schemaVersion`, `modelVersion`, seed, data digest, metrics, names, and units.
 - Optimizer Python tests: 7 tests pass under `python -m unittest discover -s optimizer/tests -p "test_*.py"`.
 
+## P1-2 Growth calibration identifiability
+
+- `diarOffset` removed from `calibrate.py` and `farm_tune.py`; growth calibration now only emits `scaleFactor` and `peakAdjust`.
+- `predict_error()` uses only eligible batches with at least two valid weight points and positive time span; fewer than 3 eligible batches raises `NBJ_CALIBRATION_INSUFFICIENT_WEIGHT_DATA`.
+- Calibration output is explicitly `candidate`, `validForProduction=false`, `applied=false`; it does not overwrite defaults.
+- Optimizer Python tests now cover no/one-point/zero-span data, eligible-only denominator, no `diarOffset`, synthetic recovery, and seed stability.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

@@ -20,6 +20,13 @@
 - Added `optimizer/tests/test_parameter_contract.py` and `optimizer/tests/test_search_contract.py`.
 - Verified `python -m unittest discover -s optimizer/tests -p "test_*.py"` (7 tests) and `python -m compileall optimizer`.
 
+### P1-2 make growth calibration identifiable — complete
+
+- Removed `diarOffset` from `calibrate.py` and `farm_tune.py`; growth calibration is limited to `scaleFactor` and `peakAdjust`.
+- `predict_error()` now counts eligible batches only, returns eligible count and exclusion reasons, and raises `NBJ_CALIBRATION_INSUFFICIENT_WEIGHT_DATA` below 3 eligible batches.
+- Calibration candidates are marked `status=candidate`, `validForProduction=false`, `applied=false`.
+- Added `optimizer/tests/test_calibration.py`; full Python suite now passes 11 tests and `python -m compileall optimizer` passes.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
