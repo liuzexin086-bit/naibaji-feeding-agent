@@ -1,4 +1,12 @@
-import type { DeviceWindow, FeedingDecision, FeedingMode } from "./agent-v2-contract.js";
+import type {
+  CreepGrade,
+  DeviceSetting,
+  DeviceWindow,
+  DiarrheaGrade,
+  FeedingDecision,
+  FeedingMode,
+  TimedMeal,
+} from "./agent-v2-contract.js";
 
 export interface LocalStoreOptions {
   filename: string;
@@ -219,6 +227,46 @@ export interface DailyObservation {
   createdAt: string;
 }
 
+export type FeedbackOriginKind = "diarrhea" | "creep_control";
+
+export interface FeedbackDeviceProposal {
+  kind: FeedbackOriginKind;
+  businessDate: string;
+  mode: FeedingMode;
+  dayAge: number;
+  dailyPowderGrams: number;
+  singlePowderGrams: number;
+  mealCount: number;
+  timedMeals: TimedMeal[];
+  freeWindows: DeviceWindow[];
+  precisionGrams: number;
+  source: DeviceSetting["source"];
+  rationale: string[];
+  manualDispositionRequired: boolean;
+  proposalDigest: string;
+  cumulativePowderGrams?: number;
+  targetRatio?: number;
+  remainingMealTimes?: string[];
+  controlStartDay?: number;
+}
+
+export interface FeedbackOrigin {
+  id: string;
+  kind: FeedbackOriginKind;
+  businessDate: string;
+  status: "proposed" | "applied";
+  sourceObservation: {
+    recordedAt: string;
+    diarrheaGrade?: DiarrheaGrade;
+    creepGrade?: CreepGrade;
+    actualPowderGrams?: number | null;
+  };
+  reason: string;
+  proposal?: FeedbackDeviceProposal;
+  controlStartDay?: number;
+  createdAt: string;
+}
+
 export interface DailyOperationItem {
   code: string;
   title: string;
@@ -226,6 +274,12 @@ export interface DailyOperationItem {
   sopSection: string;
   requiredObservationFields: string[];
   safetyNotes: string[];
+  feedbackRef?: {
+    originId: string;
+    kind: FeedbackOriginKind;
+    proposalDigest?: string;
+    requiresDeviceConfirmation: boolean;
+  };
 }
 
 export interface DailyOperationPlan {
@@ -243,6 +297,8 @@ export interface DailyOperationPlan {
   operations: DailyOperationItem[];
   operationsSha256: string;
   status: "pending" | "confirmed";
+  proposedSetting: FeedbackDeviceProposal | null;
+  feedbackOrigin: FeedbackOrigin | null;
   createdAt: string;
 }
 
@@ -256,6 +312,8 @@ export interface DailyOperationConfirmation {
   confirmedBy: string;
   confirmedAt: string;
   idempotencyKey: string;
+  deviceSetting: DeviceSetting | null;
+  decisionId: string | null;
 }
 
 export interface EnsureDailyOperationPlanInput {
@@ -272,6 +330,8 @@ export interface EnsureDailyOperationPlanInput {
   effectiveMode: FeedingMode;
   operations: DailyOperationItem[];
   operationsSha256: string;
+  proposedSetting?: FeedbackDeviceProposal | null;
+  feedbackOrigin?: FeedbackOrigin | null;
 }
 
 export interface ConfirmDailyOperationPlanInput {
@@ -285,6 +345,9 @@ export interface ConfirmDailyOperationPlanInput {
   idempotencyKey: string;
   /** Optional operator context, retained only in the audit event. */
   note?: string;
+  /** Service-side derived setting; clients must not supply a trusted value. */
+  deviceSetting?: DeviceSetting;
+  decisionId?: string | null;
 }
 
 export interface AppendDailyObservationInput {

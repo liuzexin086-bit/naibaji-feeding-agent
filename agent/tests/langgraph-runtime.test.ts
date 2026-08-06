@@ -41,6 +41,30 @@ function tool(name: string, execute: FeedingTool["execute"]): FeedingTool {
   };
 }
 
+function syncTool(overrides: Record<string, unknown> = {}) {
+  return tool("sync_observation_feedback", async () => receiptResult("sync_observation_feedback", "b", {
+    status: "ok",
+    reason: "测试反馈",
+    dailyOperationPlan: {
+      id: "plan-sync",
+      businessDate: "2026-08-04",
+      operationsSha256: "d".repeat(64),
+      status: "pending",
+      operations: [{ title: "腹泻处置确认（轻度）", dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 } }],
+    },
+    feedbackOrigin: {
+      id: "origin-1",
+      kind: "diarrhea",
+      businessDate: "2026-08-04",
+      status: "proposed",
+      sourceObservation: { recordedAt: "2026-08-04T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 },
+      reason: "测试反馈",
+    },
+    proposedSetting: null,
+    ...overrides,
+  }, 3, [0, 1, 4, 9, 120, 2026]));
+}
+
 function receiptResult(toolName: string, batchId: string, data: unknown, revision = 3, numericWhitelist = [42]) {
   const payload = {
     toolName,
@@ -83,13 +107,13 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(classifyDeterministicIntent("弱仔需要补喂").kind).toBe("laggard");
     expect(classifyDeterministicIntent("断奶首日要做什么").kind).toBe("knowledge");
     expect(staticEvidencePlan("timeline_or_today_operations")).toEqual({
-      requiredTools: ["get_today_timeline"], responseKind: "deterministic",
+      requiredTools: ["sync_observation_feedback", "get_today_timeline"], responseKind: "deterministic",
     });
   });
 
   it("routes diarrhea exceptions to the deterministic preview tool", () => {
     expect(staticEvidencePlan("exception", "已录入轻度腹泻，请给出具体设备操作。")).toEqual({
-      requiredTools: ["preview_diarrhea_adjustment"], responseKind: "deterministic",
+      requiredTools: ["sync_observation_feedback", "preview_diarrhea_adjustment"], responseKind: "deterministic",
     });
     expect(staticEvidencePlan("exception", "设备堵塞了")).toEqual({
       requiredTools: ["check_data_quality"], responseKind: "deterministic",
@@ -153,6 +177,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 14, 25, 30, 120, 150],
         )),
@@ -223,6 +248,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 25, 30, 100, 150],
         )),
@@ -281,6 +307,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 30, 500],
         )),
@@ -340,6 +367,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 30, 89, 100],
         )),
@@ -367,6 +395,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: model as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
           batch: { current_day_index: 0, config: { name: "批次 B" } },
           canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -421,6 +450,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 25, 150],
         )),
@@ -475,6 +505,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 20, 30, 100, 120],
         )),
@@ -495,6 +526,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("不应调用")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true })),
         tool("preview_diarrhea_adjustment", async () => {
           throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
@@ -514,6 +546,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: model as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => {
           execution.push("context");
           return receiptResult("get_batch_context", "b", { safe: true });
@@ -537,10 +570,11 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result).toMatchObject({
       intent: "timeline_or_today_operations",
       status: "completed",
-      toolExecutions: 1,
+      toolExecutions: 2,
       text: expect.stringContaining("今日常规操作已按冻结 SOP 汇总"),
     });
-    expect(result.toolEvidence.map((event) => event.name)).toEqual(["get_batch_context", "get_today_timeline"]);
+    expect(result.toolEvidence.map((event) => event.name))
+      .toEqual(["get_batch_context", "sync_observation_feedback", "get_today_timeline"]);
   });
 
   it("renders the verified current batch and device settings instead of a fixed acknowledgement", async () => {
@@ -563,6 +597,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("43 克"), new AIMessage("43 克")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 9, 10, 12, 18, 186, 1860],
         )),
@@ -587,6 +622,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("43 克")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
           batch: { current_day_index: 1, config: { name: "批次 A" } },
           canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -610,11 +646,59 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
   });
 
+  it("includes verified feedback and device proposal in batch narration context", async () => {
+    let seen: BaseMessage[] = [];
+    const model = {
+      bindTools: () => new RunnableLambda({
+        func: async (messages: BaseMessage[]) => {
+          seen = messages;
+          return new AIMessage("腹泻反馈已物化，设备方案以现场执行台显示为准。");
+        },
+      }),
+    };
+    const runtime = createAgentGraphRuntime({
+      model: model as never,
+      tools: [
+        syncTool({
+          proposedSetting: {
+            kind: "diarrhea",
+            businessDate: "2026-08-04",
+            mode: "timed_quantity",
+            dayAge: 4,
+            dailyPowderGrams: 90,
+            singlePowderGrams: 30,
+            mealCount: 3,
+            timedMeals: [{ timeLocal: "14:00", powderGrams: 30 }],
+            freeWindows: [],
+            precisionGrams: 1,
+            source: "sop_indirect",
+            rationale: ["腹泻调整"],
+            manualDispositionRequired: false,
+            proposalDigest: "A".repeat(64),
+          },
+        }),
+        tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
+          batch: { current_day_index: 1, config: { name: "批次 A" } },
+          canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+          selectedDecision: { setting: { dayAge: 4, timedMeals: [], freeWindows: [] } },
+        }, 3, [0, 1, 4, 9, 30, 90, 120, 2026])),
+      ],
+    });
+    const result = await runtime.run(input("当前批次数据"));
+    expect(result).toMatchObject({ intent: "batch_overview", status: "completed" });
+    const context = seen.find((message) =>
+      message instanceof SystemMessage && String(message.content).includes("现场反馈"));
+    expect(String(context?.content ?? "")).toContain("腹泻反馈（待确认）");
+    expect(String(context?.content ?? "")).toContain("程序总量90g");
+    expect(String(context?.content ?? "")).toContain("单次下粉30g");
+  });
+
   it("answers first-day SOP flow from frozen knowledge results", async () => {
     const execution: string[] = [];
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("断奶第 1 天：17:00 第一次教奶；每 3 小时供奶一次；第二天切换自由采食。以现场执行台显示为准。")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => {
           execution.push("context");
           return receiptResult("get_batch_context", "b", {
@@ -673,6 +757,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: model as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult(
           "get_batch_context", "b", contextData, 3, [0, 3, 5, 10, 14, 16, 35, 210],
         )),
@@ -696,6 +781,7 @@ describe("LangGraph v2 deterministic runtime", () => {
         { id: "must-not-run", name: "shell", args: {}, type: "tool_call" },
       ] })]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true }, 3)),
         tool("compute_production_plan", async () => receiptResult("compute_production_plan", "b", { value: 42 }, 3)),
       ],
@@ -760,6 +846,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage("unused")]) as never,
       tools: [
+        syncTool(),
         tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true }, 3)),
         tool("compute_production_plan", async () => receiptResult("compute_production_plan", "b", { value: 42 }, 4)),
       ],

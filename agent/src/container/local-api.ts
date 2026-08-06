@@ -14,6 +14,11 @@ import {
   buildDailyOperationItems,
   digestDailyOperationItems,
 } from "../operations/daily-operation-plan.js";
+import {
+  materializeObservationFeedbackPlan,
+  sustainedCreepGrade,
+  type FeedbackEngineResult,
+} from "../operations/observation-feedback.js";
 import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
 import { createLangChainModel } from "../agent/langgraph/models.js";
@@ -399,26 +404,6 @@ function recordsOf(batch: LocalBatch): JsonObject[] {
     : [];
 }
 
-type InternalCreepGrade = "none" | "low" | "medium" | "high" | "excellent";
-const INTERNAL_CREEP_ORDER: InternalCreepGrade[] = ["none", "low", "medium", "high", "excellent"];
-
-function internalGrade(value: unknown): InternalCreepGrade {
-  return INTERNAL_CREEP_ORDER.includes(String(value) as InternalCreepGrade)
-    ? value as InternalCreepGrade
-    : "none";
-}
-
-function sustainedCreepGrade(records: JsonObject[]): InternalCreepGrade {
-  const recent = records.slice(-3).map((row) => internalGrade(row.creepGrade));
-  if (recent.length < 2) return "none";
-  for (let index = INTERNAL_CREEP_ORDER.length - 1; index >= 1; index -= 1) {
-    if (recent.filter((grade) => INTERNAL_CREEP_ORDER.indexOf(grade) >= index).length >= 2) {
-      return INTERNAL_CREEP_ORDER[index];
-    }
-  }
-  return "none";
-}
-
 function modelRecords(records: JsonObject[]): JsonObject[] {
   return records.map((row) => {
     const heads = finite(row.effectiveHeads ?? row.headCount ?? 0, "effectiveHeads", 0);
@@ -563,7 +548,23 @@ function ensureCurrentDailyOperationPlan(
   if (requestedDateLocal !== undefined && requestedDateLocal !== null && requestedDateLocal !== input.businessDate) {
     throw new Error("NBJ_DAILY_OPERATION_DATE_INVALID");
   }
-  return store.ensureDailyOperationPlan(input);
+  const existing = store.getDailyOperationPlan(userId, batch.batchId, input.businessDate);
+  if (existing?.status === "confirmed") return existing;
+  return materializeFeedbackPlan(store, userId, batch, {}).plan;
+}
+
+function materializeFeedbackPlan(
+  store: SqliteLocalStore,
+  userId: string,
+  batch: LocalBatch,
+  observation: JsonObject,
+) {
+  return materializeObservationFeedbackPlan({
+    store,
+    userId,
+    batch,
+    observation,
+  });
 }
 
 function batchWithMigratedSop(batch: LocalBatch, template: LocalSopTemplate): LocalBatch {
@@ -599,6 +600,16 @@ function dailyPlanSummary(plan: DailyOperationPlan | null): JsonObject | null {
     devicePlanSha256: plan.devicePlanSha256,
     operationsSha256: plan.operationsSha256,
     operationCount: plan.operations.length,
+  };
+}
+
+function feedbackPublic(result: FeedbackEngineResult): JsonObject {
+  return {
+    kind: result.kind,
+    reason: result.reason,
+    operations: result.operations,
+    feedbackOrigin: result.feedbackOrigin,
+    proposedSetting: result.proposedSetting,
   };
 }
 
@@ -988,6 +999,7 @@ export async function handleLocalApi(
             plan: store.getDailyOperationPlan(auth.user.id, batchId, plan.businessDate),
             confirmation: committed.confirmation,
             replayed: committed.replayed,
+            decision: store.getActiveDecision(auth.user.id, batchId, plan.businessDate),
           });
           return true;
         }
@@ -1061,6 +1073,7 @@ export async function handleLocalApi(
           } as LocalBatch;
           const nextToday = decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision);
           const session = agentSessionPublic(store, auth.user.id, batchId);
+          const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
           const result = {
             batch: batchPublic(nextBatch),
             today: nextToday,
@@ -1068,6 +1081,7 @@ export async function handleLocalApi(
             committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
             agentSession: session,
             messages: session.messages,
+            feedback: feedbackResult ? feedbackPublic(feedbackResult) : null,
           };
           const committed = store.commitAdvance({
             userId: auth.user.id,
@@ -1085,11 +1099,13 @@ export async function handleLocalApi(
           return true;
         }
         const nextBatch = { ...batch, revision: batch.revision + 1, data: nextData } as LocalBatch;
+        const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
         const result = {
           batch: batchPublic(nextBatch),
           today: decisionFor(nextBatch, nextBatch.currentDay, nextBatch.revision),
           records: allRecords(nextBatch),
           committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
+          feedback: feedbackResult ? feedbackPublic(feedbackResult) : null,
         };
         const committed = store.commitRecord({ userId: auth.user.id, batchId, expectedRevision, idempotencyKey: key, dateLocal: String(observation.dateLocal ?? today.dateLocal ?? addDays(String(configOf(batch).planStartDate ?? batch.createdAt.slice(0, 10)), batch.currentDay)), observedAt: String(observation.recordedAt), observation, nextData, result });
         json(response, committed.result);

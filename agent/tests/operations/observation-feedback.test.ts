@@ -1,0 +1,167 @@
+import { describe, expect, it } from "vitest";
+import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
+import {
+  digestFeedbackProposal,
+  evaluateObservationFeedback,
+  feedbackOriginId,
+  mergeFeedbackOperations,
+  proposalToDeviceSetting,
+  sustainedCreepGrade,
+  type FeedbackEngineInput,
+} from "../../src/operations/observation-feedback.js";
+
+function baseDecision(): FeedingDecision {
+  return {
+    revision: 3,
+    batchId: "batch-1",
+    dateLocal: "2026-08-05",
+    setting: {
+      mode: "timed_quantity",
+      dayAge: 4,
+      dailyPowderGrams: 600,
+      singlePowderGrams: 50,
+      mealCount: 12,
+      timedMeals: [{ timeLocal: "10:00", powderGrams: 50 }],
+      freeWindows: [],
+      precisionGrams: 1,
+      source: "sop_indirect",
+    },
+    exceptionActions: [],
+    evidence: {
+      sopVersion: "sop@test-v1",
+      modelVersion: "model@test-v1",
+      calculationDate: "2026-08-05",
+      reasons: ["base decision"],
+      inputs: {},
+      steps: [],
+    },
+    status: "active",
+  };
+}
+
+function engineInput(overrides: Partial<FeedbackEngineInput> = {}): FeedbackEngineInput {
+  return {
+    records: [],
+    businessDate: "2026-08-05",
+    currentDayIndex: 1,
+    dayAge: 4,
+    config: { controlStartDay: -1 },
+    decision: baseDecision(),
+    ...overrides,
+  };
+}
+
+describe("observation feedback engine", () => {
+  it("computes sustained creep from the latest three records", () => {
+    expect(sustainedCreepGrade([
+      { creepGrade: "high" },
+      { creepGrade: "none" },
+      { creepGrade: "excellent" },
+    ])).toBe("high");
+    expect(sustainedCreepGrade([
+      { creepGrade: "high" },
+      { creepGrade: "none" },
+      { creepGrade: "none" },
+    ])).toBe("none");
+  });
+
+  it("generates a confirm task and device proposal for mild diarrhea with cumulative powder", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "2026-08-05T09:00:00.000Z",
+        diarrheaGrade: "mild",
+        actualPowderGrams: 120,
+      }],
+    }));
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe("diarrhea");
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
+    expect(result?.proposedSetting).toMatchObject({
+      kind: "diarrhea",
+      manualDispositionRequired: false,
+      cumulativePowderGrams: 120,
+    });
+    expect(result?.proposedSetting?.proposalDigest).toMatch(/^[A-F0-9]{64}$/);
+    expect(result?.feedbackOrigin.status).toBe("proposed");
+  });
+
+  it("keeps severe diarrhea manual-only without a proposal", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "2026-08-05T09:00:00.000Z",
+        diarrheaGrade: "severe",
+        actualPowderGrams: 120,
+      }],
+    }));
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_manual");
+    expect(result?.proposedSetting).toBeNull();
+  });
+
+  it("keeps diarrhea manual-only when cumulative powder is missing", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "2026-08-05T09:00:00.000Z",
+        diarrheaGrade: "moderate",
+        actualPowderGrams: null,
+      }],
+    }));
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_manual");
+    expect(result?.proposedSetting).toBeNull();
+  });
+
+  it("starts creep control confirmation on the configured control day", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      currentDayIndex: 2,
+      dayAge: 5,
+      config: { controlStartDay: 2 },
+      records: [
+        { recordedAt: "2026-08-06T10:00:00.000Z", creepGrade: "high" },
+        { recordedAt: "2026-08-07T10:00:00.000Z", creepGrade: "high" },
+      ],
+    }));
+    expect(result?.kind).toBe("creep_control");
+    expect(result?.operations[0]?.code).toBe("feedback_creep_control_confirm");
+    expect(result?.proposedSetting).toMatchObject({
+      kind: "creep_control",
+      controlStartDay: 2,
+    });
+  });
+
+  it("returns no feedback when neither signal is active", () => {
+    expect(evaluateObservationFeedback(engineInput())).toBeNull();
+  });
+
+  it("merges feedback operations without duplicating base tasks", () => {
+    const base = [{
+      code: "daily_patrol",
+      title: "日常巡栏",
+      dueWindow: { startLocal: "09:00", endLocal: "10:00" },
+      sopSection: "SOP.日常巡栏",
+      requiredObservationFields: [],
+      safetyNotes: [],
+    }];
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{ recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+    }))!;
+    const merged = mergeFeedbackOperations(base, [], result);
+    expect(merged.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(merged.filter((item) => item.code === "daily_patrol")).toHaveLength(1);
+  });
+
+  it("hashes proposals and maps them to device settings deterministically", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{ recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+    }))!;
+    const proposal = result.proposedSetting!;
+    expect(digestFeedbackProposal(proposal)).toBe(proposal.proposalDigest);
+    const setting = proposalToDeviceSetting(proposal);
+    expect(setting).toMatchObject({
+      mode: proposal.mode,
+      dayAge: proposal.dayAge,
+      dailyPowderGrams: proposal.dailyPowderGrams,
+      source: proposal.source,
+    });
+    expect(feedbackOriginId("diarrhea", "2026-08-05", { recordedAt: "x" }))
+      .toMatch(/^[0-9a-f]{32}$/);
+  });
+});

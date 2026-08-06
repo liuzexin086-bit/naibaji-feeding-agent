@@ -221,6 +221,19 @@ describe("local frontend contract", () => {
     expect(html).not.toContain("operationItemConfirm");
   });
 
+  it("shows feedback device proposal states and labels feedback operations", () => {
+    expect(html).toContain('id="deviceFeedbackStatus"');
+    expect(html).toContain("function renderDeviceFeedbackStatus()");
+    expect(html).toContain("已应用方案");
+    expect(html).toContain("待确认方案");
+    expect(html).toContain("未记录方案");
+    expect(html).toContain("plan.proposedSetting");
+    expect(html).toContain("confirmation.deviceSetting");
+    expect(html).toContain("operation-feedback");
+    expect(html).toContain("现场反馈 · ");
+    expect(html).toContain("item.feedbackRef.kind === 'diarrhea' ? '腹泻' : '教槽控奶'");
+  });
+
   it("preserves Agent session switching, Markdown, waiting state, and dialog accessibility", () => {
     expect(html).toContain("/agent/session");
     expect(html).toContain("agentHistoryLoaded");

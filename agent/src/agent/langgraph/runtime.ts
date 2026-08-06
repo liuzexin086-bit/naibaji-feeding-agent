@@ -26,6 +26,7 @@ import type {
   DiarrheaPreviewSummary,
   KnowledgeResultRef,
   TodayOperationSummary,
+  TodayFeedbackSummary,
 } from "./state.js";
 
 export const LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2";
@@ -225,6 +226,17 @@ function narrationContextText(state: AgentGraphState): string {
       return `${window}${operation.title}`;
     });
     parts.push(`今日操作：日期${today.businessDate ?? "未返回"}；状态${status}；条目：${items.join("；")}`);
+    if (today.feedback && today.feedback.length > 0) {
+      const feedbackLines = today.feedback.map((feedback) => {
+        const label = feedback.kind === "diarrhea" ? "腹泻" : "教槽控奶";
+        const feedbackStatus = feedback.status === "applied" ? "已应用" : "待确认";
+        const proposalText = feedback.proposal
+          ? `；方案：${feedback.proposal.mode === "free_feeding" ? "自由采食" : "定时定量"}，程序总量${feedback.proposal.dailyPowderGrams}g，单次下粉${feedback.proposal.singlePowderGrams}g，餐次${feedback.proposal.mealCount}，配奶时间点${feedback.proposal.timedMeals.map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`).join("、")}`
+          : "；无自动设备方案，需人工处置";
+        return `${label}反馈（${feedbackStatus}）：${feedback.reason}${proposalText}`;
+      });
+      parts.push(`现场反馈：${feedbackLines.join("\n")}`);
+    }
   }
   if (state.knowledgeResults && state.knowledgeResults.length > 0) {
     const rows = state.knowledgeResults.map((row) => `- ${row.title}：${row.text}`).join("\n");
@@ -284,6 +296,23 @@ function narrationWhitelist(state: AgentGraphState): number[] {
       }
       if (operation.endLocal) {
         for (const value of responseNumbers(operation.endLocal)) values.add(value);
+      }
+    }
+    for (const feedback of today.feedback ?? []) {
+      for (const value of responseNumbers(feedback.reason)) values.add(value);
+      if (feedback.proposal) {
+        for (const value of [
+          feedback.proposal.dailyPowderGrams,
+          feedback.proposal.singlePowderGrams,
+          feedback.proposal.mealCount,
+          feedback.proposal.controlStartDay,
+        ]) {
+          if (value !== undefined) values.add(value);
+        }
+        for (const meal of feedback.proposal.timedMeals) {
+          for (const value of responseNumbers(meal.timeLocal)) values.add(value);
+          values.add(meal.powderGrams);
+        }
       }
     }
   }
@@ -452,11 +481,63 @@ function todayOperationSummaryFromToolResult(result: unknown): TodayOperationSum
   }
   if (!operations.length) return undefined;
   const status = plan.status === "pending" || plan.status === "confirmed" ? plan.status : undefined;
+  const feedback = feedbackSummaryFromToolResult(result);
   return {
     ...(typeof plan.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(plan.businessDate) ? { businessDate: plan.businessDate } : {}),
     ...(status ? { status } : {}),
     operations,
+    ...(feedback ? { feedback } : {}),
   };
+}
+
+function feedbackSummaryFromToolResult(result: unknown): TodayFeedbackSummary[] | undefined {
+  const envelope = envelopeFromToolResult(result);
+  const data = object(envelope?.data);
+  const plan = object(data?.dailyOperationPlan);
+  const originRow = object(data?.feedbackOrigin) ?? object(plan?.feedbackOrigin);
+  if (!originRow) return undefined;
+  const kind = String(originRow.kind ?? "");
+  if (kind !== "diarrhea" && kind !== "creep_control") return undefined;
+  const proposalRow = object(data?.proposedSetting) ?? object(plan?.proposedSetting);
+  let proposal: TodayFeedbackSummary["proposal"] | undefined;
+  if (proposalRow) {
+    const mode = proposalRow.mode;
+    const timedMeals: NonNullable<TodayFeedbackSummary["proposal"]>["timedMeals"] = [];
+    if (Array.isArray(proposalRow.timedMeals)) {
+      for (const meal of proposalRow.timedMeals) {
+        const row = object(meal);
+        const timeLocal = localTime(row?.timeLocal);
+        const powderGrams = finite(row?.powderGrams);
+        if (timeLocal && powderGrams !== undefined) timedMeals.push({ timeLocal, powderGrams });
+      }
+    }
+    const dailyPowderGrams = finite(proposalRow.dailyPowderGrams);
+    const singlePowderGrams = finite(proposalRow.singlePowderGrams);
+    const mealCount = finite(proposalRow.mealCount);
+    if ((mode === "timed_quantity" || mode === "free_feeding") &&
+        dailyPowderGrams !== undefined && singlePowderGrams !== undefined &&
+        mealCount !== undefined) {
+      proposal = {
+        mode,
+        dailyPowderGrams,
+        singlePowderGrams,
+        mealCount,
+        timedMeals,
+        manualDispositionRequired: proposalRow.manualDispositionRequired === true,
+        ...(finite(proposalRow.controlStartDay) !== undefined
+          ? { controlStartDay: finite(proposalRow.controlStartDay) }
+          : {}),
+      };
+    }
+  }
+  const planStatus = plan?.status === "confirmed" ? "confirmed" : undefined;
+  const originStatus = originRow.status === "applied" ? "applied" : "proposed";
+  return [{
+    kind,
+    status: planStatus === "confirmed" ? "applied" : originStatus,
+    reason: String(originRow.reason ?? ""),
+    ...(proposal ? { proposal } : {}),
+  }];
 }
 
 function knowledgeResultsFromToolResult(result: unknown): KnowledgeResultRef[] | undefined {
@@ -679,7 +760,8 @@ const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfi
       run.signal,
     );
     const receipt = verifyReceipt(name, run.batchId, result);
-    if ((name === "compute_production_plan" || name === "get_today_timeline") && !receipt) {
+    if ((name === "compute_production_plan" || name === "get_today_timeline" ||
+         name === "sync_observation_feedback") && !receipt) {
       throw new Error("NBJ_AGENT_EVIDENCE_RECEIPT_REQUIRED");
     }
     if (receipt && receipt.binding !== state.frozenReceiptBinding) {
@@ -701,7 +783,9 @@ const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfi
         isError: false,
       }],
       ...(dailyOperationRef(result) ? { dailyOperations: dailyOperationRef(result) } : {}),
-      ...(name === "get_today_timeline" ? { todayOperations: todayOperationSummaryFromToolResult(result) } : {}),
+      ...(name === "get_today_timeline" || name === "sync_observation_feedback"
+        ? { todayOperations: todayOperationSummaryFromToolResult(result) }
+        : {}),
       ...(name === "search_feeding_knowledge"
         ? { knowledgeResults: knowledgeResultsFromToolResult(result) }
         : {}),

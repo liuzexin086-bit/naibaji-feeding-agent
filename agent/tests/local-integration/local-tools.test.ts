@@ -247,4 +247,46 @@ describe("local deterministic tools", () => {
       store.close();
     }
   });
+
+  it("registers sync_observation_feedback and materializes a verified feedback plan", async () => {
+    const { store, context } = contextFor("user-a", [
+      {
+        recordedAt: "2026-08-05T09:00:00.000Z",
+        dayIndex: 0,
+        diarrheaGrade: "mild",
+        actualPowderGrams: 120,
+      },
+    ]);
+    try {
+      const tool = createFeedingTools(context)
+        .find((item) => item.name === "sync_observation_feedback");
+      expect(tool).toBeDefined();
+      const output = await tool!.execute("call-1", {}, new AbortController().signal);
+      const details = output.details as {
+        data: {
+          status: string;
+          feedbackOrigin: { kind: string };
+          dailyOperationPlan: {
+            businessDate: string;
+            operations: Array<{ code: string }>;
+          };
+        };
+        evidenceReceipt: { receiptId: string };
+      };
+      expect(details.data.status).toBe("ok");
+      expect(details.data.feedbackOrigin.kind).toBe("diarrhea");
+      expect(details.data.dailyOperationPlan.operations.map((item) => item.code))
+        .toContain("feedback_diarrhea_confirm");
+      expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
+      const stored = store.getDailyOperationPlan(
+        "user-a",
+        "batch-1",
+        details.data.dailyOperationPlan.businessDate,
+      );
+      expect(stored?.proposedSetting).not.toBeNull();
+      expect(stored?.feedbackOrigin?.kind).toBe("diarrhea");
+    } finally {
+      store.close();
+    }
+  });
 });

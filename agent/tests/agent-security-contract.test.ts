@@ -28,6 +28,7 @@ const allowedTools = [
   "manage_laggard_case",
   "search_feeding_knowledge",
   "draft_daily_decision",
+  "sync_observation_feedback",
 ];
 
 describe("Agent security boundary", () => {

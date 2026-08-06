@@ -43,6 +43,22 @@ export interface TodayOperationSummary {
   businessDate?: string;
   status?: "pending" | "confirmed";
   operations: Array<{ title: string; startLocal?: string; endLocal?: string }>;
+  feedback?: TodayFeedbackSummary[];
+}
+
+export interface TodayFeedbackSummary {
+  kind: "diarrhea" | "creep_control";
+  status: "proposed" | "applied";
+  reason: string;
+  proposal?: {
+    mode: "timed_quantity" | "free_feeding";
+    dailyPowderGrams: number;
+    singlePowderGrams: number;
+    mealCount: number;
+    timedMeals: Array<{ timeLocal: string; powderGrams: number }>;
+    manualDispositionRequired: boolean;
+    controlStartDay?: number;
+  };
 }
 
 export interface KnowledgeResultRef {

@@ -62,15 +62,15 @@ export function classifyDeterministicIntent(message: string): IntentClassificati
 export function staticEvidencePlan(intent: AgentIntentKind, message = ""): StaticEvidencePlan {
   switch (intent) {
     case "batch_overview":
-      return { requiredTools: [], responseKind: "deterministic" };
+      return { requiredTools: ["sync_observation_feedback"], responseKind: "deterministic" };
     case "exception":
       return DIARRHEA.test(message)
-        ? { requiredTools: ["preview_diarrhea_adjustment"], responseKind: "deterministic" }
+        ? { requiredTools: ["sync_observation_feedback", "preview_diarrhea_adjustment"], responseKind: "deterministic" }
         : { requiredTools: ["check_data_quality"], responseKind: "deterministic" };
     case "device_plan_or_mode":
       return { requiredTools: ["compute_production_plan"], responseKind: "deterministic" };
     case "timeline_or_today_operations":
-      return { requiredTools: ["get_today_timeline"], responseKind: "deterministic" };
+      return { requiredTools: ["sync_observation_feedback", "get_today_timeline"], responseKind: "deterministic" };
     case "knowledge":
       return { requiredTools: ["search_feeding_knowledge"], responseKind: "knowledge" };
     case "laggard":

@@ -81,6 +81,7 @@ const CONTRACT_TOOL_ALLOWLIST = new Set<string>([
   "search_feeding_knowledge",
   "draft_daily_decision",
   "preview_diarrhea_adjustment",
+  "sync_observation_feedback",
 ]);
 if (
   APPROVED_FEEDING_TOOL_NAMES.some((name) => !CONTRACT_TOOL_ALLOWLIST.has(name)) ||

@@ -11,10 +11,7 @@ import {
   loadFrozenBatchDecisionContext,
   type FrozenBatchDecisionContext,
 } from "../decision/batch-decision-service.js";
-import {
-  buildDailyOperationItems,
-  digestDailyOperationItems,
-} from "../operations/daily-operation-plan.js";
+import { materializeObservationFeedbackPlan } from "../operations/observation-feedback.js";
 import {
   checkDataQuality,
   checkExecutionGap,
@@ -129,6 +126,7 @@ export const APPROVED_FEEDING_TOOL_NAMES = [
   "search_feeding_knowledge",
   "draft_daily_decision",
   "preview_diarrhea_adjustment",
+  "sync_observation_feedback",
 ] as const;
 
 const TOOL_CONTRACT_VERSION = "agent-v2@2026-07-31";
@@ -432,32 +430,29 @@ export function createFeedingTools(
     execute: async () => {
       const state = await batchDecisionState(context);
       if (context.storage.backend === "local") {
-        const canonical = computeFrozenBatchDecision(state.frozenContext);
-        const operations = buildDailyOperationItems({
-          dayIndex: state.frozenContext.currentDayIndex,
-          dayAge: state.currentDayAge,
-          endAge: state.frozenContext.modelInput.endAge,
-          sopConfig: state.frozenContext.sop.config,
-        });
-        const plan = context.storage.store.ensureDailyOperationPlan({
+        const localBatch = context.storage.store.getBatch(context.userId, context.batchId);
+        if (!localBatch) throw new Error("NBJ_BATCH_NOT_FOUND");
+        const materialized = materializeObservationFeedbackPlan({
+          store: context.storage.store,
           userId: context.userId,
-          batchId: context.batchId,
-          businessDate: state.dateLocal,
-          basedOnBatchRevision: state.revision,
-          sopTemplateId: canonical.sopRef.templateId,
-          sopSourceSha256: canonical.sopRef.sourceSha256,
-          devicePlanVersion: canonical.devicePlanRef.version,
-          devicePlanSha256: canonical.devicePlanRef.sha256,
-          selectedMode: canonical.selectedMode,
-          effectiveMode: canonical.effectiveMode,
-          operations,
-          operationsSha256: digestDailyOperationItems(operations),
+          batch: localBatch,
+          observation: context.observation as Record<string, unknown> | undefined,
         });
+        const plan = materialized.plan;
         return record(context, "get_today_timeline", {
           calculationDate: state.dateLocal,
           sopVersion: state.sopVersion,
           dailyOperationPlan: plan,
           tasks: plan.operations,
+          feedback: materialized.feedback
+            ? {
+                kind: materialized.feedback.kind,
+                reason: materialized.feedback.reason,
+                operations: materialized.feedback.operations,
+                feedbackOrigin: materialized.feedback.feedbackOrigin,
+                proposedSetting: materialized.feedback.proposedSetting,
+              }
+            : null,
         }, {
           sopVersion: state.sopVersion,
           frozenReceipt: frozenReceipt(state),
@@ -868,6 +863,53 @@ export function createFeedingTools(
     },
   };
 
+  const syncObservationFeedback: FeedingTool<any, any> = {
+    name: "sync_observation_feedback",
+    label: "同步现场观察反馈",
+    description: "读取最近腹泻和教槽采食记录，把需人工确认的处置任务与设备方案物化到今日操作。",
+    parameters: Type.Object({}),
+    execute: async () => {
+      if (context.storage.backend !== "local") {
+        return record(context, "sync_observation_feedback", {
+          status: "unavailable",
+          reason: "supabase_backend_no_op",
+          materialized: false,
+        });
+      }
+      const localBatch = context.storage.store.getBatch(context.userId, context.batchId);
+      if (!localBatch) throw new Error("NBJ_BATCH_NOT_FOUND");
+      const state = await batchDecisionState(context);
+      const materialized = materializeObservationFeedbackPlan({
+        store: context.storage.store,
+        userId: context.userId,
+        batch: localBatch,
+        observation: context.observation as Record<string, unknown> | undefined,
+      });
+      return record(context, "sync_observation_feedback", {
+        status: materialized.skipped ? "skipped" : "ok",
+        reason: materialized.skipped ? "confirmed" : materialized.feedback?.reason ?? null,
+        materialized: !materialized.skipped,
+        feedbackOrigin: materialized.plan.feedbackOrigin,
+        proposedSetting: materialized.plan.proposedSetting,
+        dailyOperationPlan: materialized.plan,
+        operations: materialized.plan.operations,
+        feedback: materialized.feedback
+          ? {
+              kind: materialized.feedback.kind,
+              reason: materialized.feedback.reason,
+              operations: materialized.feedback.operations,
+              feedbackOrigin: materialized.feedback.feedbackOrigin,
+              proposedSetting: materialized.feedback.proposedSetting,
+            }
+          : null,
+      }, {
+        sopVersion: state.sopVersion,
+        frozenReceipt: frozenReceipt(state),
+        basis: "按最近现场观察确定性物化今日操作反馈任务与待确认设备方案。",
+      });
+    },
+  };
+
   return [
     getBatchContext,
     getTodayTimeline,
@@ -879,5 +921,6 @@ export function createFeedingTools(
     knowledge,
     draftDecision,
     previewDiarrhea,
+    syncObservationFeedback,
   ];
 }

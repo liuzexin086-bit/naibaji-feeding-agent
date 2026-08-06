@@ -186,4 +186,142 @@ describe("today operations API", () => {
       .toEqual({ count: 1 });
     database.close();
   });
+
+  it("materializes diarrhea feedback into today operations and writes the confirmed device decision", async () => {
+    const { store, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "腹泻反馈闭环", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string; revision: number } };
+    const batchId = createdBody.batch.id;
+
+    const saved = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "record-diarrhea-1",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 120 },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    const savedBody = await saved.json() as {
+      feedback: {
+        kind: string;
+        operations: Array<{ code: string }>;
+        proposedSetting: { kind: string; dailyPowderGrams: number };
+      };
+    };
+    expect(savedBody.feedback).toMatchObject({
+      kind: "diarrhea",
+      operations: [{ code: "feedback_diarrhea_confirm" }],
+      proposedSetting: { kind: "diarrhea" },
+    });
+
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, { headers: { cookie } });
+    const planBody = await planResponse.json() as {
+      plan: {
+        status: string;
+        id: string;
+        operationsSha256: string;
+        proposedSetting: { kind: string; dailyPowderGrams: number };
+        feedbackOrigin: { id: string; kind: string };
+        operations: Array<{ code: string; feedbackRef: { originId: string } }>;
+      };
+    };
+    expect(planBody.plan).toMatchObject({
+      status: "pending",
+      proposedSetting: { kind: "diarrhea" },
+      feedbackOrigin: { kind: "diarrhea" },
+    });
+    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(planBody.plan.operations.find((item) => item.code === "feedback_diarrhea_confirm")?.feedbackRef)
+      .toMatchObject({ originId: planBody.plan.feedbackOrigin.id });
+
+    const confirmed = await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-diarrhea-feedback",
+      }),
+    });
+    const confirmedBody = await confirmed.json() as {
+      confirmation: { deviceSetting: { mode: string; dailyPowderGrams: number }; decisionId: string };
+      decision: { status: string; evidence: { modelVersion: string } };
+    };
+    expect(confirmedBody.confirmation.deviceSetting).toMatchObject({
+      mode: "timed_quantity",
+      dailyPowderGrams: planBody.plan.proposedSetting.dailyPowderGrams,
+    });
+    expect(confirmedBody.confirmation.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(confirmedBody.decision).toMatchObject({
+      status: "active",
+      evidence: { modelVersion: "daily-operation-confirmation@1" },
+    });
+    expect(store.getBatch(userId, batchId)?.revision).toBe(1);
+  });
+
+  it("materializes creep-control feedback into the next day plan after sustained creep", async () => {
+    const { base, cookie } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "教槽控奶反馈闭环", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const observation = { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 500 };
+    const advance = (expectedRevision: number, key: string) => request(base, `/api/batches/${batchId}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision,
+        idempotencyKey: key,
+        observation,
+      }),
+    });
+    const record = (expectedRevision: number, key: string) => request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision,
+        idempotencyKey: key,
+        observation,
+      }),
+    });
+    const firstAdvance = await advance(0, "creep-advance-day1");
+    expect(firstAdvance.status).toBe(200);
+    const day1 = await record(1, "creep-day-1");
+    expect(day1.status).toBe(200);
+    const day1Body = await day1.json() as { batch: { currentDayIndex: number; revision: number } };
+    expect(day1Body.batch).toMatchObject({ currentDayIndex: 1, revision: 2 });
+    const advanced = await advance(2, "creep-advance-day2");
+    const advancedBody = await advanced.json() as {
+      batch: { currentDayIndex: number; revision: number };
+      feedback: { kind: string; operations: Array<{ code: string }>; proposedSetting: { controlStartDay: number } };
+    };
+    expect(advancedBody.batch).toMatchObject({ currentDayIndex: 2, revision: 3 });
+    expect(advancedBody.feedback).toMatchObject({
+      kind: "creep_control",
+      operations: [{ code: "feedback_creep_control_confirm" }],
+      proposedSetting: { controlStartDay: 2 },
+    });
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, { headers: { cookie } });
+    const planBody = await planResponse.json() as {
+      plan: {
+        proposedSetting: { kind: string; controlStartDay: number };
+        feedbackOrigin: { kind: string; controlStartDay: number };
+        operations: Array<{ code: string }>;
+      };
+    };
+    expect(planBody.plan).toMatchObject({
+      proposedSetting: { kind: "creep_control", controlStartDay: 2 },
+      feedbackOrigin: { kind: "creep_control", controlStartDay: 2 },
+    });
+    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_creep_control_confirm");
+  });
 });

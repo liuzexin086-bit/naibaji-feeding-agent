@@ -107,7 +107,7 @@
   - 管理员后台新增批次 SOP 迁移界面：预览目标模板、规则变化和今日操作影响，
     以“迁移 SOP”短语确认后原子迁移；已确认今日操作仍被阻止。
   - Agent 头部状态栏显示当前批次、第 N 天和日龄，不再停留在“等待批次”。
-- 验证基线：`npm run check`、31 文件 / 252 测试、`npm run p0-release-gate`（57 测试）、`npm run build` 全绿；
+- 验证基线：`npm run check`、32 文件 / 268 测试、`npm run p0-release-gate`（59 测试）、`npm run build` 全绿；
   本轮新增路由、运行时、工具与 UI 契约测试。
 
 ## Test Results

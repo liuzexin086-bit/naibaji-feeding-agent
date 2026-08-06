@@ -1,6 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { FeedingDecision, FeedingMode } from "../shared/agent-v2-contract.js";
+import type {
+  DeviceSetting,
+  FeedingDecision,
+  FeedingMode,
+} from "../shared/agent-v2-contract.js";
 import type {
   AgentMessage,
   AgentSession,
@@ -20,6 +24,8 @@ import type {
   DailyOperationItem,
   DailyOperationPlan,
   DailyObservation,
+  FeedbackDeviceProposal,
+  FeedbackOrigin,
   ConfirmDailyOperationPlanInput,
   EnsureDailyOperationPlanInput,
   ListMessagesOptions,
@@ -35,6 +41,7 @@ import type {
   SopEditTask,
 } from "../shared/local-store-contract.js";
 import { INITIAL_SCHEMA, MIGRATION_VERSION } from "./schema.js";
+import { proposalToDeviceSetting } from "../operations/observation-feedback.js";
 
 type Row = Record<string, unknown>;
 
@@ -107,6 +114,50 @@ function jsonObject(value: unknown, field: string): Record<string, unknown> {
   return parsed as Record<string, unknown>;
 }
 
+function nullableJsonObject(value: unknown, field: string): Record<string, unknown> | null {
+  if (value === null || value === undefined) return null;
+  return jsonObject(value, field);
+}
+
+function feedbackOriginKind(value: unknown, field: string): FeedbackOrigin["kind"] {
+  if (value !== "diarrhea" && value !== "creep_control") {
+    throw new Error(`Invalid database ${field}`);
+  }
+  return value;
+}
+
+function feedbackRefOf(value: unknown, field: string): NonNullable<DailyOperationItem["feedbackRef"]> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`Invalid database ${field}`);
+  }
+  const row = value as Record<string, unknown>;
+  const kind = feedbackOriginKind(row.kind, `${field}.kind`);
+  const originId = stringValue(row.originId, `${field}.originId`);
+  const requiresDeviceConfirmation = row.requiresDeviceConfirmation;
+  if (typeof requiresDeviceConfirmation !== "boolean") {
+    throw new Error(`Invalid database ${field}.requiresDeviceConfirmation`);
+  }
+  const proposalDigest = row.proposalDigest;
+  return {
+    originId,
+    kind,
+    ...(proposalDigest === undefined || proposalDigest === null
+      ? {}
+      : { proposalDigest: stringValue(proposalDigest, `${field}.proposalDigest`) }),
+    requiresDeviceConfirmation,
+  };
+}
+
+function feedbackProposalOf(value: unknown, field: string): FeedbackDeviceProposal {
+  const row = jsonObject(value, field);
+  return row as unknown as FeedbackDeviceProposal;
+}
+
+function feedbackOriginOf(value: unknown, field: string): FeedbackOrigin {
+  const row = jsonObject(value, field);
+  return row as unknown as FeedbackOrigin;
+}
+
 function serializeObject(value: Record<string, unknown>, field: string): string {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `${field} must be an object`);
@@ -116,6 +167,13 @@ function serializeObject(value: Record<string, unknown>, field: string): string 
     throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", `${field} is not serializable`);
   }
   return serialized;
+}
+
+function nullableJsonParam(value: unknown, existingValue: unknown): string | null {
+  if (value === undefined) {
+    return existingValue == null ? null : JSON.stringify(existingValue);
+  }
+  return value == null ? null : JSON.stringify(value);
 }
 
 function serializeDecision(decision: FeedingDecision): string {
@@ -396,6 +454,9 @@ function dailyOperationItems(value: DailyOperationItem[]): DailyOperationItem[] 
         requiredText(entry, `operations[${index}].requiredObservationFields[${fieldIndex}]`)),
       safetyNotes: item.safetyNotes.map((entry, fieldIndex) =>
         requiredText(entry, `operations[${index}].safetyNotes[${fieldIndex}]`)),
+      ...(item.feedbackRef === undefined
+        ? {}
+        : { feedbackRef: feedbackRefOf(item.feedbackRef, `operations[${index}].feedbackRef`) }),
     };
   });
 }
@@ -446,6 +507,9 @@ function operationItemsFromJson(value: unknown, field: string): DailyOperationIt
         ? row.requiredObservationFields.map((entry) => stringValue(entry, `${field}.requiredObservationFields`)) : [],
       safetyNotes: Array.isArray(row.safetyNotes)
         ? row.safetyNotes.map((entry) => stringValue(entry, `${field}.safetyNotes`)) : [],
+      ...(row.feedbackRef === undefined || row.feedbackRef === null
+        ? {}
+        : { feedbackRef: feedbackRefOf(row.feedbackRef, `${field}.feedbackRef`) }),
     };
   });
 }
@@ -474,11 +538,21 @@ function dailyOperationPlanFromRow(row: Row): DailyOperationPlan {
     operations: operationItemsFromJson(row.operations_json, "daily_operation_plans.operations_json"),
     operationsSha256: stringValue(row.operations_sha256, "daily_operation_plans.operations_sha256"),
     status,
+    proposedSetting: row.proposed_setting_json == null
+      ? null
+      : feedbackProposalOf(row.proposed_setting_json, "daily_operation_plans.proposed_setting_json"),
+    feedbackOrigin: row.feedback_origin_json == null
+      ? null
+      : feedbackOriginOf(row.feedback_origin_json, "daily_operation_plans.feedback_origin_json"),
     createdAt: stringValue(row.created_at, "daily_operation_plans.created_at"),
   };
 }
 
 function dailyOperationConfirmationFromRow(row: Row): DailyOperationConfirmation {
+  const deviceSettingRow = nullableJsonObject(
+    row.device_setting_json,
+    "daily_operation_confirmations.device_setting_json",
+  );
   return {
     id: stringValue(row.id, "daily_operation_confirmations.id"),
     planId: stringValue(row.plan_id, "daily_operation_confirmations.plan_id"),
@@ -489,6 +563,8 @@ function dailyOperationConfirmationFromRow(row: Row): DailyOperationConfirmation
     confirmedBy: stringValue(row.confirmed_by, "daily_operation_confirmations.confirmed_by"),
     confirmedAt: stringValue(row.confirmed_at, "daily_operation_confirmations.confirmed_at"),
     idempotencyKey: stringValue(row.idempotency_key, "daily_operation_confirmations.idempotency_key"),
+    deviceSetting: deviceSettingRow as DeviceSetting | null,
+    decisionId: row.decision_id == null ? null : stringValue(row.decision_id, "daily_operation_confirmations.decision_id"),
   };
 }
 
@@ -579,6 +655,30 @@ export class SqliteLocalStore implements LocalStore {
       ] as const) {
         if (!sopColumns.has(name)) {
           this.#database.exec(`ALTER TABLE sop_templates ADD COLUMN ${name} ${definition}`);
+        }
+      }
+      const planColumns = new Set(
+        (this.#database.prepare("PRAGMA table_info(daily_operation_plans)").all() as Row[])
+          .map((row) => String(row.name)),
+      );
+      for (const [name, definition] of [
+        ["proposed_setting_json", "TEXT"],
+        ["feedback_origin_json", "TEXT"],
+      ] as const) {
+        if (!planColumns.has(name)) {
+          this.#database.exec(`ALTER TABLE daily_operation_plans ADD COLUMN ${name} ${definition}`);
+        }
+      }
+      const confirmationColumns = new Set(
+        (this.#database.prepare("PRAGMA table_info(daily_operation_confirmations)").all() as Row[])
+          .map((row) => String(row.name)),
+      );
+      for (const [name, definition] of [
+        ["device_setting_json", "TEXT"],
+        ["decision_id", "TEXT"],
+      ] as const) {
+        if (!confirmationColumns.has(name)) {
+          this.#database.exec(`ALTER TABLE daily_operation_confirmations ADD COLUMN ${name} ${definition}`);
         }
       }
       this.#database.exec(`
@@ -727,7 +827,15 @@ export class SqliteLocalStore implements LocalStore {
       if (digestDailyOperations(operations) !== operationsSha256) {
         throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "operationsSha256 does not match operations");
       }
-      if (existing.operationsSha256 === operationsSha256) return existing;
+      const proposedSettingJson = nullableJsonParam(input.proposedSetting, existing.proposedSetting);
+      const feedbackOriginJson = nullableJsonParam(input.feedbackOrigin, existing.feedbackOrigin);
+      if (existing.operationsSha256 === operationsSha256 &&
+          existing.proposedSetting !== undefined &&
+          JSON.stringify(existing.proposedSetting ?? null) === (proposedSettingJson ?? "null") &&
+          existing.feedbackOrigin !== undefined &&
+          JSON.stringify(existing.feedbackOrigin ?? null) === (feedbackOriginJson ?? "null")) {
+        return existing;
+      }
       const batch = this.getBatch(userId, batchId);
       if (!batch) this.#batchNotFound();
       if (batch.status !== "active") {
@@ -744,6 +852,8 @@ export class SqliteLocalStore implements LocalStore {
           effective_mode = ?,
           operations_json = ?,
           operations_sha256 = ?,
+          proposed_setting_json = ?,
+          feedback_origin_json = ?,
           status = 'pending'
         WHERE id = ? AND status = 'pending'
       `).run(
@@ -756,6 +866,8 @@ export class SqliteLocalStore implements LocalStore {
         dailyOperationMode(input.effectiveMode, "effectiveMode"),
         JSON.stringify(operations),
         operationsSha256,
+        proposedSettingJson,
+        feedbackOriginJson,
         existing.id,
       );
       const refreshed = this.getDailyOperationPlan(userId, batchId, dateLocal);
@@ -785,8 +897,9 @@ export class SqliteLocalStore implements LocalStore {
         INSERT INTO daily_operation_plans (
           id, user_id, batch_id, business_date, based_on_batch_revision,
           sop_template_id, sop_source_sha256, device_plan_version, device_plan_sha256,
-          selected_mode, effective_mode, operations_json, operations_sha256, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+          selected_mode, effective_mode, operations_json, operations_sha256,
+          proposed_setting_json, feedback_origin_json, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
       `).run(
         id,
         userId,
@@ -801,6 +914,8 @@ export class SqliteLocalStore implements LocalStore {
         dailyOperationMode(input.effectiveMode, "effectiveMode"),
         JSON.stringify(operations),
         operationsSha256,
+        nullableJsonParam(input.proposedSetting, null),
+        nullableJsonParam(input.feedbackOrigin, null),
         now,
       );
     });
@@ -825,29 +940,6 @@ export class SqliteLocalStore implements LocalStore {
     if (confirmedBy !== userId) {
       throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "confirmedBy must be the batch owner");
     }
-    const replay = this.#database.prepare(`
-      SELECT * FROM daily_operation_confirmations
-      WHERE user_id = ? AND idempotency_key = ?
-    `).get(userId, idempotencyKey) as Row | undefined;
-    if (replay) {
-      const confirmation = dailyOperationConfirmationFromRow(replay);
-      if (confirmation.batchId !== batchId || confirmation.businessDate !== dateLocal ||
-          confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256 ||
-          confirmation.confirmedBy !== confirmedBy) this.#idempotencyConflict();
-      return { confirmation, replayed: true };
-    }
-    const alreadyConfirmed = this.#database.prepare(`
-      SELECT * FROM daily_operation_confirmations
-      WHERE user_id = ? AND batch_id = ? AND business_date = ?
-    `).get(userId, batchId, dateLocal) as Row | undefined;
-    if (alreadyConfirmed) {
-      const confirmation = dailyOperationConfirmationFromRow(alreadyConfirmed);
-      if (confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256) {
-        this.#idempotencyConflict();
-      }
-      return { confirmation, replayed: true };
-    }
-
     const plan = this.#database.prepare(`
       SELECT * FROM daily_operation_plans
       WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
@@ -862,6 +954,44 @@ export class SqliteLocalStore implements LocalStore {
     if (batch.status !== "active") {
       throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation confirmations require an active batch");
     }
+    const derivedDeviceSetting = storedPlan.proposedSetting
+      ? proposalToDeviceSetting(storedPlan.proposedSetting)
+      : null;
+    const expectedDecisionId = input.decisionId ?? null;
+    const replay = this.#database.prepare(`
+      SELECT * FROM daily_operation_confirmations
+      WHERE user_id = ? AND idempotency_key = ?
+    `).get(userId, idempotencyKey) as Row | undefined;
+    if (replay) {
+      const confirmation = dailyOperationConfirmationFromRow(replay);
+      if (!this.#confirmationReplayMatches(confirmation, {
+        batchId,
+        dateLocal,
+        planId,
+        operationsSha256,
+        confirmedBy,
+        deviceSetting: derivedDeviceSetting,
+        decisionId: expectedDecisionId,
+      })) this.#idempotencyConflict();
+      return { confirmation, replayed: true };
+    }
+    const alreadyConfirmed = this.#database.prepare(`
+      SELECT * FROM daily_operation_confirmations
+      WHERE user_id = ? AND batch_id = ? AND business_date = ?
+    `).get(userId, batchId, dateLocal) as Row | undefined;
+    if (alreadyConfirmed) {
+      const confirmation = dailyOperationConfirmationFromRow(alreadyConfirmed);
+      if (!this.#confirmationReplayMatches(confirmation, {
+        batchId,
+        dateLocal,
+        planId,
+        operationsSha256,
+        confirmedBy,
+        deviceSetting: derivedDeviceSetting,
+        decisionId: expectedDecisionId,
+      })) this.#idempotencyConflict();
+      return { confirmation, replayed: true };
+    }
 
     const id = requiredText(input.id ?? randomUUID(), "id");
     const now = new Date().toISOString();
@@ -872,9 +1002,15 @@ export class SqliteLocalStore implements LocalStore {
       `).get(userId, idempotencyKey) as Row | undefined;
       if (transactionReplay) {
         const confirmation = dailyOperationConfirmationFromRow(transactionReplay);
-        if (confirmation.batchId !== batchId || confirmation.businessDate !== dateLocal ||
-            confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256 ||
-            confirmation.confirmedBy !== confirmedBy) this.#idempotencyConflict();
+        if (!this.#confirmationReplayMatches(confirmation, {
+          batchId,
+          dateLocal,
+          planId,
+          operationsSha256,
+          confirmedBy,
+          deviceSetting: derivedDeviceSetting,
+          decisionId: expectedDecisionId,
+        })) this.#idempotencyConflict();
         return { confirmation, replayed: true };
       }
       const transactionDayConfirmation = this.#database.prepare(`
@@ -883,9 +1019,15 @@ export class SqliteLocalStore implements LocalStore {
       `).get(userId, batchId, dateLocal) as Row | undefined;
       if (transactionDayConfirmation) {
         const confirmation = dailyOperationConfirmationFromRow(transactionDayConfirmation);
-        if (confirmation.planId !== planId || confirmation.operationsSha256 !== operationsSha256) {
-          this.#idempotencyConflict();
-        }
+        if (!this.#confirmationReplayMatches(confirmation, {
+          batchId,
+          dateLocal,
+          planId,
+          operationsSha256,
+          confirmedBy,
+          deviceSetting: derivedDeviceSetting,
+          decisionId: expectedDecisionId,
+        })) this.#idempotencyConflict();
         return { confirmation, replayed: true };
       }
       const update = this.#database.prepare(`
@@ -895,12 +1037,59 @@ export class SqliteLocalStore implements LocalStore {
       if (Number(update.changes) !== 1) {
         throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "daily operation plan is not pending");
       }
+      const decisionId = derivedDeviceSetting
+        ? this.#insertActiveDecisionLocked({
+            userId,
+            batchId,
+            dateLocal,
+            decision: {
+              revision: storedPlan.basedOnBatchRevision,
+              batchId,
+              dateLocal,
+              setting: derivedDeviceSetting,
+              exceptionActions: [],
+              evidence: {
+                sopVersion: storedPlan.sopTemplateId,
+                modelVersion: "daily-operation-confirmation@1",
+                calculationDate: dateLocal,
+                reasons: ["操作员确认今日操作后由服务端写入设备设定。"],
+                inputs: {
+                  planId,
+                  operationsSha256,
+                  feedbackProposalDigest: storedPlan.proposedSetting?.proposalDigest ?? null,
+                  feedbackOriginId: storedPlan.feedbackOrigin?.id ?? null,
+                },
+                steps: [
+                  {
+                    name: "confirmation",
+                    value: { confirmedBy },
+                    explanation: "今日操作确认由已认证操作员完成。",
+                  },
+                ],
+              },
+              status: "active",
+            },
+            now,
+          })
+        : null;
       this.#database.prepare(`
         INSERT INTO daily_operation_confirmations (
           id, plan_id, user_id, batch_id, business_date, operations_sha256,
-          confirmed_by, confirmed_at, idempotency_key
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(id, planId, userId, batchId, dateLocal, operationsSha256, confirmedBy, now, idempotencyKey);
+          confirmed_by, confirmed_at, idempotency_key, device_setting_json, decision_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        planId,
+        userId,
+        batchId,
+        dateLocal,
+        operationsSha256,
+        confirmedBy,
+        now,
+        idempotencyKey,
+        derivedDeviceSetting ? JSON.stringify(derivedDeviceSetting) : null,
+        decisionId,
+      );
       this.#database.prepare(`
         INSERT INTO audit_events (
           user_id, id, batch_id, action, details_json, idempotency_key, created_at
@@ -1268,36 +1457,13 @@ export class SqliteLocalStore implements LocalStore {
     if (input.sessionId) this.#requireSession(userId, batchId, input.sessionId);
     const now = new Date().toISOString();
     this.#transaction(() => {
-      if (decision.status === "active") {
-        this.#database.prepare(`
-          UPDATE feeding_decisions SET status = 'superseded', updated_at = ?
-          WHERE user_id = ? AND batch_id = ? AND date_local = ? AND status = 'active'
-        `).run(now, userId, batchId, decision.dateLocal);
-      }
-      this.#database.prepare(`
-        INSERT INTO feeding_decisions (
-          user_id, id, batch_id, session_id, revision, date_local,
-          sop_version, model_version, calculation_date, device_setting_json,
-          evidence_json, decision_json, status, idempotency_key, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
+      this.#insertActiveDecisionLocked({
         userId,
-        input.id ?? randomUUID(),
         batchId,
-        input.sessionId ?? null,
-        revision,
-        requiredText(decision.dateLocal, "decision.dateLocal"),
-        requiredText(decision.evidence.sopVersion, "decision.evidence.sopVersion"),
-        requiredText(decision.evidence.modelVersion, "decision.evidence.modelVersion"),
-        requiredText(decision.evidence.calculationDate, "decision.evidence.calculationDate"),
-        JSON.stringify(decision.setting),
-        JSON.stringify(decision.evidence),
-        decisionJson,
-        decision.status,
-        input.idempotencyKey ?? null,
+        dateLocal: decision.dateLocal,
+        decision,
         now,
-        now,
-      );
+      });
     });
     return decision;
   }
@@ -2117,6 +2283,106 @@ export class SqliteLocalStore implements LocalStore {
       this.#database.exec("ROLLBACK");
       throw error;
     }
+  }
+
+  #confirmationReplayMatches(
+    confirmation: DailyOperationConfirmation,
+    expected: {
+      batchId: string;
+      dateLocal: string;
+      planId: string;
+      operationsSha256: string;
+      confirmedBy: string;
+      deviceSetting: DeviceSetting | null;
+      decisionId: string | null;
+    },
+  ): boolean {
+    if (confirmation.batchId !== expected.batchId ||
+        confirmation.businessDate !== expected.dateLocal ||
+        confirmation.planId !== expected.planId ||
+        confirmation.operationsSha256 !== expected.operationsSha256 ||
+        confirmation.confirmedBy !== expected.confirmedBy) {
+      return false;
+    }
+    if (expected.deviceSetting === null) {
+      if (confirmation.deviceSetting !== null) return false;
+    } else if (JSON.stringify(confirmation.deviceSetting) !== JSON.stringify(expected.deviceSetting)) {
+      return false;
+    }
+    return expected.decisionId === null || confirmation.decisionId === expected.decisionId;
+  }
+
+  #insertActiveDecisionLocked(input: {
+    userId: string;
+    batchId: string;
+    dateLocal: string;
+    decision: FeedingDecision;
+    now: string;
+  }): string {
+    const revision = nonNegativeInteger(input.decision.revision, "decision.revision");
+    const existing = this.#database.prepare(`
+      SELECT id FROM feeding_decisions
+      WHERE user_id = ? AND batch_id = ? AND date_local = ? AND revision = ?
+    `).get(input.userId, input.batchId, input.dateLocal, revision) as Row | undefined;
+    if (existing) {
+      this.#database.prepare(`
+        UPDATE feeding_decisions SET
+          session_id = NULL,
+          sop_version = ?,
+          model_version = ?,
+          calculation_date = ?,
+          device_setting_json = ?,
+          evidence_json = ?,
+          decision_json = ?,
+          status = ?,
+          idempotency_key = NULL,
+          updated_at = ?
+        WHERE id = ?
+      `).run(
+        requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
+        requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
+        requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
+        JSON.stringify(input.decision.setting),
+        JSON.stringify(input.decision.evidence),
+        serializeDecision(input.decision),
+        input.decision.status,
+        input.now,
+        stringValue(existing.id, "feeding_decisions.id"),
+      );
+      return stringValue(existing.id, "feeding_decisions.id");
+    }
+    const id = randomUUID();
+    if (input.decision.status === "active") {
+      this.#database.prepare(`
+        UPDATE feeding_decisions SET status = 'superseded', updated_at = ?
+        WHERE user_id = ? AND batch_id = ? AND date_local = ? AND status = 'active'
+      `).run(input.now, input.userId, input.batchId, input.dateLocal);
+    }
+    this.#database.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.userId,
+      id,
+      input.batchId,
+      null,
+      revision,
+      requiredText(input.dateLocal, "dateLocal"),
+      requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
+      requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
+      requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
+      JSON.stringify(input.decision.setting),
+      JSON.stringify(input.decision.evidence),
+      serializeDecision(input.decision),
+      input.decision.status,
+      null,
+      input.now,
+      input.now,
+    );
+    return id;
   }
 
   #insertObservation(input: AppendDailyObservationInput): DailyObservation {

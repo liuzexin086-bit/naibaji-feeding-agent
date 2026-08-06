@@ -367,6 +367,193 @@ describe("SQLite local store", () => {
     database.close();
   });
 
+  it("persists feedback proposals and writes an active device decision on confirmation", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({ userId: "user-a", batchId: "batch-feedback", revision: 6 });
+    const oldDecision = {
+      ...decision("batch-feedback", 5),
+      dateLocal: "2026-08-04",
+      status: "active" as const,
+    };
+    const seed = new DatabaseSync(filename);
+    seed.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      "user-a",
+      "old-decision-id",
+      "batch-feedback",
+      null,
+      5,
+      oldDecision.dateLocal,
+      oldDecision.evidence.sopVersion,
+      oldDecision.evidence.modelVersion,
+      oldDecision.evidence.calculationDate,
+      JSON.stringify(oldDecision.setting),
+      JSON.stringify(oldDecision.evidence),
+      JSON.stringify(oldDecision),
+      oldDecision.status,
+      null,
+      "2026-08-04T08:00:00.000Z",
+      "2026-08-04T08:00:00.000Z",
+    );
+    seed.close();
+    const proposal = {
+      kind: "diarrhea" as const,
+      businessDate: "2026-08-04",
+      mode: "timed_quantity" as const,
+      dayAge: 4,
+      dailyPowderGrams: 90,
+      singlePowderGrams: 30,
+      mealCount: 3,
+      timedMeals: [{ timeLocal: "14:00", powderGrams: 30 }],
+      freeWindows: [],
+      precisionGrams: 1,
+      source: "sop_indirect" as const,
+      rationale: ["腹泻调整"],
+      manualDispositionRequired: false,
+      proposalDigest: "A".repeat(64),
+      cumulativePowderGrams: 120,
+    };
+    const feedbackOrigin = {
+      id: "origin-1",
+      kind: "diarrhea" as const,
+      businessDate: "2026-08-04",
+      status: "proposed" as const,
+      sourceObservation: {
+        recordedAt: "2026-08-04T09:00:00.000Z",
+        diarrheaGrade: "mild" as const,
+        actualPowderGrams: 120,
+      },
+      reason: "已录入轻度腹泻",
+      proposal,
+      createdAt: "2026-08-04T09:00:00.000Z",
+    };
+    const operations = [{
+      ...dailyOperations()[0],
+      code: "feedback_diarrhea_confirm",
+      title: "腹泻处置确认（轻度）",
+      dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
+      sopSection: "现场反馈.腹泻",
+      feedbackRef: {
+        originId: "origin-1",
+        kind: "diarrhea" as const,
+        proposalDigest: proposal.proposalDigest,
+        requiresDeviceConfirmation: true,
+      },
+    }];
+    const planInput = {
+      userId: "user-a",
+      batchId: "batch-feedback",
+      businessDate: "2026-08-04",
+      basedOnBatchRevision: 6,
+      sopTemplateId: "frozen-sop-v1",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v1",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity" as const,
+      effectiveMode: "timed_quantity" as const,
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+      proposedSetting: proposal,
+      feedbackOrigin,
+    };
+    const plan = store.ensureDailyOperationPlan(planInput);
+    expect(plan.proposedSetting).toEqual(proposal);
+    expect(plan.feedbackOrigin).toEqual(feedbackOrigin);
+    expect(plan.operations[0]?.feedbackRef).toMatchObject({
+      originId: "origin-1",
+      kind: "diarrhea",
+      requiresDeviceConfirmation: true,
+    });
+
+    const confirmed = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-feedback",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-feedback-1",
+    });
+    expect(confirmed.confirmation.deviceSetting).toEqual({
+      mode: proposal.mode,
+      dayAge: proposal.dayAge,
+      dailyPowderGrams: proposal.dailyPowderGrams,
+      singlePowderGrams: proposal.singlePowderGrams,
+      mealCount: proposal.mealCount,
+      timedMeals: proposal.timedMeals,
+      freeWindows: proposal.freeWindows,
+      precisionGrams: proposal.precisionGrams,
+      source: proposal.source,
+    });
+    expect(confirmed.confirmation.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(store.getActiveDecision("user-a", "batch-feedback", plan.businessDate))
+      .toMatchObject({
+        revision: 6,
+        dateLocal: "2026-08-04",
+        status: "active",
+        evidence: { modelVersion: "daily-operation-confirmation@1" },
+      });
+
+    const dayReplay = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-feedback",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-feedback-2",
+    });
+    expect(dayReplay).toEqual({ confirmation: confirmed.confirmation, replayed: true });
+    store.close();
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const rows = database.prepare(`
+      SELECT status FROM feeding_decisions
+      WHERE user_id = ? AND batch_id = ? AND date_local = ?
+      ORDER BY created_at ASC
+    `).all("user-a", "batch-feedback", "2026-08-04") as Array<{ status: string }>;
+    expect(rows.map((row) => row.status)).toEqual(["superseded", "active"]);
+    database.close();
+  });
+
+  it("adds v7 feedback columns to an existing daily operations database", () => {
+    const { filename, store } = fileStore();
+    store.close();
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(`
+      ALTER TABLE daily_operation_plans DROP COLUMN proposed_setting_json;
+      ALTER TABLE daily_operation_plans DROP COLUMN feedback_origin_json;
+      ALTER TABLE daily_operation_confirmations DROP COLUMN device_setting_json;
+      ALTER TABLE daily_operation_confirmations DROP COLUMN decision_id;
+      DELETE FROM schema_migrations;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (6, '2026-08-05T00:00:00.000Z');
+    `);
+    legacy.close();
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const planColumns = database.prepare("PRAGMA table_info(daily_operation_plans)").all()
+      .map((row) => String(row.name));
+    const confirmationColumns = database.prepare("PRAGMA table_info(daily_operation_confirmations)").all()
+      .map((row) => String(row.name));
+    expect(planColumns).toEqual(expect.arrayContaining([
+      "proposed_setting_json",
+      "feedback_origin_json",
+    ]));
+    expect(confirmationColumns).toEqual(expect.arrayContaining([
+      "device_setting_json",
+      "decision_id",
+    ]));
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(7);
+    database.close();
+    upgraded.close();
+  });
+
   it("refreshes only pending daily plans when materialized operations change", () => {
     const { store } = fileStore();
     store.createBatch({ userId: "user-a", batchId: "batch-refresh", revision: 6 });

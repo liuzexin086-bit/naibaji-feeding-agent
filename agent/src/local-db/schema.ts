@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 6;
+export const MIGRATION_VERSION = 7;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -170,6 +170,8 @@ CREATE TABLE IF NOT EXISTS daily_operation_plans (
   effective_mode TEXT NOT NULL CHECK (effective_mode IN ('timed_quantity', 'free_feeding')),
   operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
   operations_sha256 TEXT NOT NULL,
+  proposed_setting_json TEXT CHECK (proposed_setting_json IS NULL OR json_valid(proposed_setting_json)),
+  feedback_origin_json TEXT CHECK (feedback_origin_json IS NULL OR json_valid(feedback_origin_json)),
   status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed')),
   created_at TEXT NOT NULL,
   UNIQUE (user_id, batch_id, business_date),
@@ -186,6 +188,8 @@ CREATE TABLE IF NOT EXISTS daily_operation_confirmations (
   confirmed_by TEXT NOT NULL,
   confirmed_at TEXT NOT NULL,
   idempotency_key TEXT NOT NULL,
+  device_setting_json TEXT CHECK (device_setting_json IS NULL OR json_valid(device_setting_json)),
+  decision_id TEXT,
   UNIQUE (user_id, batch_id, business_date),
   UNIQUE (user_id, idempotency_key),
   FOREIGN KEY (plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
