@@ -295,6 +295,65 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).not.toContain("剩余 0 餐：");
   });
 
+  it("explains when remaining allowance exists but no meals remain", async () => {
+    const contextData = {
+      batch: {
+        current_day_index: 1,
+        config: { name: "批次 A" },
+        records: [
+          { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 100 },
+        ],
+      },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const previewData = {
+      worstGrade: "mild",
+      decision: {
+        setting: {
+          mode: "timed_quantity",
+          dailyPowderGrams: 89,
+          singlePowderGrams: 0,
+          mealCount: 0,
+          timedMeals: [],
+        },
+      },
+      deviceOperation: {
+        mode: "timed_quantity",
+        remainingDailyPowderGrams: 89,
+        singlePowderGrams: 0,
+        timedMeals: [],
+        clearFreeFeedingWindows: true,
+        requiresHumanApproval: true,
+        manualDispositionRequired: false,
+      },
+      cumulativePowderGrams: 100,
+      cumulativeSource: "latest_record",
+      severeException: null,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 30, 89, 100],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", previewData, 3, [0, 1, 2, 4, 10, 30, 89, 100],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("腹泻后设备怎么设"));
+    expect(result.status).toBe("completed");
+    expect(result.text).toContain("剩余调整额度 89g");
+    expect(result.text).toContain("已无待执行餐次");
+  });
+
   it("gives every general turn the verified batch context", async () => {
     let seen: BaseMessage[] = [];
     const model = {
