@@ -16,9 +16,20 @@ simulate.py  (入口：生成模拟数据 → 训练 → 输出)
     └── train.py      (梯度下降主循环)
 ```
 
-## 可调参数（7个）
+## 可调参数（V3，6个）
 
-θ₁ D1 比例、θ₂ D2 比例、θ₃ D3 比例、θ₄ D4+ 比例、θ₅ FCR、θ₆ 教槽当量、θ₇ 日增重保护阈值
+唯一生产参数合同为 `feeding-parameters-v3`，字段及单位：
+
+| 字段 | 单位 | 范围 |
+|---|---|---|
+| `baseLevel` | ratio | 0.18–0.40 |
+| `ramp` | ratio | 0.15–0.50 |
+| `peakLevel` | ratio | 0.68–0.92 |
+| `threshold` | grams-per-head | 150–220 |
+| `dilution` | water-to-powder ratio | 5–8 |
+| `diarrheaSensitivity` | dimensionless | 0.3–2.0 |
+
+旧 7 参数向量一律由 `optimizer/contracts.py` 拒绝，禁止进入 V3 模型或生产路径。
 
 ## 运行
 

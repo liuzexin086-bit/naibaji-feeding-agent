@@ -9,8 +9,8 @@ import numpy as np
 import json, os, sys
 sys.path.insert(0, os.path.dirname(__file__))
 
-from model import diff_forward, WEIGHT_STANDARD, PARAM_NAMES, PARAM_DEFAULT, PARAM_RANGE
-from model import FCR_BASE, CREEP_EQ, BASE_MEALS
+from contracts import PARAM_DEFAULT, PARAM_NAMES, PARAM_RANGE
+from model import BASE_MEALS, CREEP_EQ, FCR_BASE, WEIGHT_STANDARD, diff_forward
 
 
 KNOB_NAMES = ['scaleFactor', 'peakAdjust', 'diarOffset']

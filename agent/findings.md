@@ -10,6 +10,13 @@
 - Optimizer outputs are experimental and must not be imported into production. Existing JSON hashes were recorded in `optimizer/legacy-artifacts-manifest.json` with `validForProduction=false`.
 - Repository scan found no production consumer reading optimizer JSON outside `optimizer/` itself. No additional runtime block was required in P1-0 beyond the quarantine manifest and README freeze.
 
+## P1-1 Optimizer parameter contract
+
+- Added `optimizer/contracts.py` as the single `feeding-parameters-v3` contract: immutable `FeedingParametersV3`, strict mapping/vector validation, ranges, units, `from_mapping()`, `to_mapping()`, and `to_vector()`.
+- Legacy seven-parameter vectors are rejected with `NBJ_OPTIMIZER_PARAMETER_SCHEMA_MISMATCH`; unknown, missing, non-finite, and out-of-range values fail closed.
+- `search.py` now searches six named V3 fields, uses deterministic seeds, and writes `schemaVersion`, `modelVersion`, seed, data digest, metrics, names, and units.
+- Optimizer Python tests: 7 tests pass under `python -m unittest discover -s optimizer/tests -p "test_*.py"`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

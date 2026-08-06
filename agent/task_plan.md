@@ -5,7 +5,7 @@
 执行依据：用户消息中提供的《NBJ-SAFETY-P1-Codex-Plan.md》全文。仓库中未找到同名计划文件，已在 P1-0 证据中记录该事实；后续以消息内计划为准。
 
 - P1-0 baseline and optimizer quarantine: complete
-- P1-1 unify optimizer parameter contract: pending
+- P1-1 unify optimizer parameter contract: complete
 - P1-2 make growth calibration identifiable: pending
 - P1-3 enforce diarrhea adjustment safety contract: pending
 - P1-4 persist post-confirmation amendments: pending

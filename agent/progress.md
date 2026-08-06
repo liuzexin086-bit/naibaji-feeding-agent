@@ -12,6 +12,14 @@
 - The plan file `NBJ-SAFETY-P1-Codex-Plan.md` was not found in the repo; the user-provided plan text is authoritative and this fact is recorded.
 - P1-0 is committed separately before P1-1.
 
+### P1-1 unify optimizer parameter contract — complete
+
+- Added `optimizer/contracts.py` with immutable `FeedingParametersV3`, field ranges/units/defaults, `from_mapping()`, `to_mapping()`, `to_vector()`, and strict rejection of legacy/unknown/missing/non-finite/out-of-range parameters.
+- Rewrote `optimizer/search.py` to search the six V3 fields, iterate by field name, and emit named, versioned output with seed and data digest.
+- Updated `model.py`, `train.py`, `gradient.py` imports/paths, `pareto.py`, `farm_tune.py`, `loss.py`, and `simulate.py` so parameter definitions come from `contracts.py`.
+- Added `optimizer/tests/test_parameter_contract.py` and `optimizer/tests/test_search_contract.py`.
+- Verified `python -m unittest discover -s optimizer/tests -p "test_*.py"` (7 tests) and `python -m compileall optimizer`.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

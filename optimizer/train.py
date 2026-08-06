@@ -4,7 +4,7 @@
 
 import numpy as np
 from gradient import numerical_gradient
-from model import PARAM_NAMES, PARAM_RANGE
+from contracts import PARAM_NAMES, PARAM_RANGE
 
 RMS_DECAY = 0.9
 LR_DECAY = 0.96

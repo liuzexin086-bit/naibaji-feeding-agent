@@ -2,7 +2,8 @@
 损失函数 V3 — 6 参数
 """
 import numpy as np
-from model import diff_forward, PARAM_DEFAULT, PARAM_NAMES, FCR_BASE
+from contracts import PARAM_DEFAULT, PARAM_NAMES
+from model import FCR_BASE, diff_forward
 
 
 def compute_loss(theta, batches):

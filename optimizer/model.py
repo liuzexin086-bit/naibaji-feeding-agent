@@ -10,6 +10,14 @@
 
 import numpy as np
 
+from contracts import (
+    PARAM_DEFAULT,
+    PARAM_NAMES,
+    PARAM_RANGE,
+    FeedingParametersV3,
+    coerce_parameters,
+)
+
 STOMACH_ML_PER_KG = 30
 SAFETY_FACTOR = 0.85
 
@@ -18,20 +26,6 @@ WEIGHT_STANDARD = {
     8: 3.2, 9: 3.4, 10: 3.6, 11: 3.8, 12: 4.0, 13: 4.2, 14: 4.4,
     15: 4.6, 16: 4.8, 17: 5.0, 18: 5.2, 19: 5.4, 20: 5.6, 21: 5.8,
 }
-
-PARAM_NAMES = ['baseLevel', 'ramp', 'peakLevel', 'threshold', 'dilution', 'diarSense']
-# FCR 和 creepEq 不优化（固定值），baseMeals 固定 12
-
-PARAM_RANGE = {
-    'baseLevel': (0.18, 0.40),
-    'ramp':      (0.15, 0.50),
-    'peakLevel': (0.68, 0.92),
-    'threshold': (150, 220),
-    'dilution':  (5, 8),
-    'diarSense': (0.3, 2.0),
-}
-
-PARAM_DEFAULT = np.array([0.28, 0.40, 0.82, 180, 6, 1.0])
 
 FCR_BASE = 0.90
 CREEP_EQ = 0.65
@@ -88,12 +82,13 @@ def estimate_diarrhea(milk_ratio, creep_pp, sensitivity):
 # ---------- 主前向 ----------
 
 def diff_forward(theta, batch):
-    base_level = theta[0]
-    ramp = theta[1]
-    peak_level = theta[2]
-    threshold = theta[3]
-    dilution = max(theta[4], 4)
-    diar_sense = max(theta[5], 0.1)
+    params = coerce_parameters(theta)
+    base_level = params.baseLevel
+    ramp = params.ramp
+    peak_level = params.peakLevel
+    threshold = params.threshold
+    dilution = params.dilution
+    diar_sense = params.diarrheaSensitivity
 
     sa = batch['startAge']
     ea = batch['endAge']
