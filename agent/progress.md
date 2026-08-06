@@ -45,6 +45,14 @@
 - Added `tests/local-integration/amendments.test.ts` and migration/data-count coverage in `tests/local-db/local-store.test.ts`.
 - Verified `npm run check` and full `npm test` (33 files / 281 tests after adding migration count test; targeted amendment suite also passes).
 
+### P1-5 render protected numeric facts deterministically — complete
+
+- Added `DeterministicFact` typed claims and `protectedFacts()`/`deterministicFactBlockText()` in the LangGraph runtime.
+- Protected intents now render deterministic facts plus safety note without invoking the LLM; `numericWhitelist` is no longer an acceptance gate.
+- LLM explanation segments containing Arabic/full-width digits, percentages, times, dates, or Chinese numerals are discarded and replaced with deterministic fallback.
+- Added number-swap, unit, Chinese numeral, percent/date/day-age, tool-call, stale receipt, and provider-unavailable regression tests.
+- Verified `npm run check` and full `npm test` (33 files / 285 tests).
+
 ## Session: 2026-08-04
 
 ### Plan authoring

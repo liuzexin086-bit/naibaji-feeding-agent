@@ -609,7 +609,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("今天有哪些今日操作和巡栏任务？"));
     expect(execution).toEqual(["context", "timeline"]);
-    expect(model.calls).toBe(1);
+    expect(model.calls).toBe(0);
     expect(result).toMatchObject({
       intent: "timeline_or_today_operations",
       status: "completed",
@@ -689,16 +689,8 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
   });
 
-  it("includes verified feedback and device proposal in batch narration context", async () => {
-    let seen: BaseMessage[] = [];
-    const model = {
-      bindTools: () => new RunnableLambda({
-        func: async (messages: BaseMessage[]) => {
-          seen = messages;
-          return new AIMessage("腹泻反馈已物化，设备方案以现场执行台显示为准。");
-        },
-      }),
-    };
+  it("renders protected batch facts deterministically without calling the LLM", async () => {
+    const model = fakeModel([new AIMessage("不应调用")]);
     const runtime = createAgentGraphRuntime({
       model: model as never,
       tools: [
@@ -729,11 +721,10 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("当前批次数据"));
     expect(result).toMatchObject({ intent: "batch_overview", status: "completed" });
-    const context = seen.find((message) =>
-      message instanceof SystemMessage && String(message.content).includes("现场反馈"));
-    expect(String(context?.content ?? "")).toContain("腹泻反馈（待确认）");
-    expect(String(context?.content ?? "")).toContain("程序总量90g");
-    expect(String(context?.content ?? "")).toContain("单次下粉30g");
+    expect(model.calls).toBe(0);
+    expect(result.text).toContain("确定性事实");
+    expect(result.text).toContain("feedback_diarrhea=proposed");
+    expect(result.text).toContain("feedbackDailyPowderGrams=90 g");
   });
 
   it("answers first-day SOP flow from frozen knowledge results", async () => {
@@ -776,7 +767,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).toContain("17:00 第一次教奶");
   });
 
-  it("adopts a valid narrated device plan when every number is whitelisted", async () => {
+  it("uses deterministic facts for a protected device plan instead of LLM narration", async () => {
     const contextData = {
       batch: { current_day_index: 1, config: { name: "批次 A" } },
       canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -813,12 +804,15 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result).toMatchObject({
       intent: "device_plan_or_mode",
       status: "completed",
-      text: narration,
     });
-    expect(model.calls).toBe(1);
+    expect(result.text).toContain("确定性事实");
+    expect(result.text).toContain("singlePowderGrams=35 g");
+    expect(result.text).toContain("dailyPowderGrams=210 g");
+    expect(result.text).not.toContain("当前批次为定时定量模式：单次下粉");
+    expect(model.calls).toBe(0);
   });
 
-  it("rejects a narration model that tries to call a tool under a narration intent", async () => {
+  it("never calls the LLM for a protected device intent even if it would return a tool call", async () => {
     const runtime = createAgentGraphRuntime({
       model: fakeModel([new AIMessage({ content: "", tool_calls: [
         { id: "must-not-run", name: "shell", args: {}, type: "tool_call" },
@@ -829,7 +823,12 @@ describe("LangGraph v2 deterministic runtime", () => {
         tool("compute_production_plan", async () => receiptResult("compute_production_plan", "b", { value: 42 }, 3)),
       ],
     });
-    await expect(runtime.run(input("当前批次的设备怎么设置"))).rejects.toThrow("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+    const result = await runtime.run(input("当前批次的设备怎么设置"));
+    expect(result).toMatchObject({
+      intent: "device_plan_or_mode",
+      status: "completed",
+      text: expect.stringContaining("确定性事实"),
+    });
   });
 
   it("blocks a narration model that tries to choose a tool", async () => {
@@ -839,27 +838,29 @@ describe("LangGraph v2 deterministic runtime", () => {
       ] })]) as never,
       tools: [tool("get_batch_context", async () => receiptResult("get_batch_context", "b", { safe: true }))],
     });
-    await expect(runtime.run(input("你好"))).rejects.toThrow("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+    const result = await runtime.run(input("你好"));
+    expect(result).toMatchObject({
+      status: "completed",
+      text: expect.stringContaining("我会基于当前批次的冻结 SOP 和确定性证据协助说明"),
+    });
   });
 
-  it("validates every numeric narration token against a verified receipt", async () => {
+  it("discards LLM explanation segments that contain numbers", async () => {
     const tools = [tool("get_batch_context", async () =>
       receiptResult("get_batch_context", "b", { dailyPowderGrams: 42 }))];
     const accepted = createAgentGraphRuntime({
-      model: fakeModel([new AIMessage("今日总下粉 42 克")]) as never,
+      model: fakeModel([new AIMessage("明白")]) as never,
       tools,
     });
-    await expect(accepted.run(input("你好"))).resolves.toMatchObject({ text: "今日总下粉 42 克" });
+    await expect(accepted.run(input("你好"))).resolves.toMatchObject({ text: "明白" });
     const rejected = createAgentGraphRuntime({
-      model: fakeModel([new AIMessage("今日总下粉 43 克")]) as never,
+      model: fakeModel([new AIMessage("今日总下粉 四十二 克")]) as never,
       tools,
     });
-    // General chat refuses unverified numbers gracefully instead of failing
-    // the whole turn; the numeric gate still blocks them from being delivered.
     await expect(rejected.run({ ...input("你好"), clientMessageId: "numeric-reject" }))
       .resolves.toMatchObject({
         status: "completed",
-        text: expect.stringContaining("未经核实"),
+        text: expect.stringContaining("我会基于当前批次的冻结 SOP 和确定性证据协助说明"),
       });
   });
 
@@ -950,5 +951,179 @@ describe("LangGraph v2 deterministic runtime", () => {
     const second = getSharedCheckpointSaver(resolve(path));
     expect(second).toBe(first);
     closeSharedCheckpointSavers();
+  });
+
+  it("rejects number-swap attacks for protected device facts", async () => {
+    const contextData = {
+      batch: { current_day_index: 1, config: { name: "批次 A" } },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          singlePowderGrams: 50,
+          dailyPowderGrams: 500,
+          mealCount: 10,
+          timedMeals: [
+            { timeLocal: "09:00", powderGrams: 50 },
+            { timeLocal: "10:00", powderGrams: 50 },
+          ],
+          freeWindows: [],
+        },
+      },
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("把 500g 与 10餐 互换，再把克说成公斤")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context",
+          "b",
+          contextData,
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+        tool("compute_production_plan", async () => receiptResult(
+          "compute_production_plan",
+          "b",
+          { safe: true },
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("当前批次的设备怎么设置"));
+    expect(result).toMatchObject({ intent: "device_plan_or_mode", status: "completed" });
+    expect(result.text).toContain("dailyPowderGrams=500 g");
+    expect(result.text).toContain("mealCount=10");
+    expect(result.text).toContain("mealTime_0=09:00");
+    expect(result.text).toContain("mealTime_1=10:00");
+    expect(result.text).not.toContain("公斤");
+    expect(result.text).not.toContain("把 500g 与 10餐 互换");
+  });
+
+  it("rejects percentage, date, and day-age attacks in LLM explanation", async () => {
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("增加 50%，日期 2026-08-06，日龄 5")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context",
+          "b",
+          {
+            batch: { current_day_index: 1, config: { name: "批次 A" } },
+            canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+            selectedDecision: {
+              setting: {
+                dayAge: 4,
+                singlePowderGrams: 50,
+                dailyPowderGrams: 500,
+                mealCount: 10,
+                timedMeals: [{ timeLocal: "09:00", powderGrams: 50 }],
+                freeWindows: [],
+              },
+            },
+          },
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+        tool("compute_production_plan", async () => receiptResult(
+          "compute_production_plan",
+          "b",
+          { safe: true },
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("当前批次的设备怎么设置"));
+    expect(result.text).toContain("dayAge=4");
+    expect(result.text).not.toContain("50%");
+    expect(result.text).not.toContain("2026-08-06");
+    expect(result.text).not.toContain("日龄 5");
+  });
+
+  it("returns full deterministic facts when the provider is unavailable", async () => {
+    const failingModel = {
+      bindTools: () => new RunnableLambda({
+        func: async () => {
+          throw new Error("provider unavailable");
+        },
+      }),
+    };
+    const runtime = createAgentGraphRuntime({
+      model: failingModel as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context",
+          "b",
+          {
+            batch: { current_day_index: 1, config: { name: "批次 A" } },
+            canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+            selectedDecision: {
+              setting: {
+                dayAge: 4,
+                singlePowderGrams: 50,
+                dailyPowderGrams: 500,
+                mealCount: 10,
+                timedMeals: [{ timeLocal: "09:00", powderGrams: 50 }],
+                freeWindows: [],
+              },
+            },
+          },
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+        tool("compute_production_plan", async () => receiptResult(
+          "compute_production_plan",
+          "b",
+          { safe: true },
+          3,
+          [0, 1, 4, 9, 10, 50, 500, 2026],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("当前批次的设备怎么设置"));
+    expect(result).toMatchObject({ intent: "device_plan_or_mode", status: "completed" });
+    expect(result.text).toContain("确定性事实");
+    expect(result.text).toContain("dailyPowderGrams=500 g");
+    expect(result.text).toContain("安全说明");
+  });
+
+  it("keeps protected routing deterministic against numeric general phrasing", async () => {
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("五百克分十餐，请解释")]) as never,
+      tools: [
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context",
+          "b",
+          {
+            batch: { current_day_index: 1, config: { name: "批次 A" } },
+            canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+            selectedDecision: {
+              setting: {
+                dayAge: 4,
+                singlePowderGrams: 50,
+                dailyPowderGrams: 500,
+                mealCount: 10,
+                timedMeals: [{ timeLocal: "10:00", powderGrams: 50 }],
+                freeWindows: [],
+              },
+            },
+          },
+          3,
+          [0, 1, 4, 10, 50, 500, 2026],
+        )),
+        tool("compute_production_plan", async () => receiptResult(
+          "compute_production_plan",
+          "b",
+          { safe: true },
+          3,
+          [0, 1, 4, 10, 50, 500, 2026],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("当前批次设备五百克分十餐，怎么设置"));
+    expect(result.intent).toBe("device_plan_or_mode");
+    expect(result.text).toContain("dailyPowderGrams=500 g");
+    expect(result.text).toContain("mealCount=10");
+    expect(result.text).not.toContain("五百克分十餐");
   });
 });

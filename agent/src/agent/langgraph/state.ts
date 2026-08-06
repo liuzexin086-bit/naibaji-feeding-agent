@@ -85,6 +85,16 @@ export interface DiarrheaPreviewSummary {
   targetAlreadyHappened?: boolean;
 }
 
+export interface DeterministicFact {
+  field: string;
+  value: string | number;
+  unit?: string;
+  evidenceRef?: string;
+  revision?: number;
+  sopDigest?: string;
+  deviceDigest?: string;
+}
+
 /**
  * Checkpoint-safe graph state. It deliberately holds references and digests,
  * never raw tool inputs/results, credentials, or the full message body.
@@ -125,6 +135,7 @@ export interface AgentGraphStateContract {
   knowledgeResults?: KnowledgeResultRef[];
   diarrheaPreview?: DiarrheaPreviewSummary;
   diarrheaEnded?: boolean;
+  deterministicFacts?: DeterministicFact[];
   dailyOperations?: {
     planId: string;
     businessDate: string;

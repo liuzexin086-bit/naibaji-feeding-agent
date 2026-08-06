@@ -48,7 +48,8 @@ describe("Agent V2 deterministic gateway", () => {
     expect(graphRuntime).toContain('addNode("render_response"');
     expect(graphRuntime).toContain('addNode("validate_response"');
     expect(graphRuntime).toContain('addNode("persist_response"');
-    expect(graphRuntime).toContain("NBJ_AGENT_MODEL_TOOL_CALL_FORBIDDEN");
+    expect(graphRuntime).toContain("containsNumericExpression");
+    expect(graphRuntime).toContain("protectedDeterministicText");
     expect(graphRouter).toContain("Fixed safety precedence");
     expect(graphRouter).toContain("staticEvidencePlan");
     expect(graphState).toContain("never raw tool inputs/results");

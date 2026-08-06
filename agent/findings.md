@@ -40,6 +40,14 @@
 - UI “今日操作” card renders confirmed-plan amendment status, severity, proposal availability, and digest.
 - Tests cover canonical idempotency/concurrent ensure, original plan immutability, stale revision/digest rejection, severe proposal-less amendments, migration 7→8 data-count preservation, and audit events.
 
+## P1-5 Deterministic numeric output
+
+- Added typed `DeterministicFact` and a protected-facts renderer with field/value/unit/evidenceRef/revision/SOP digest/device digest.
+- Protected intents (`batch_overview`, `device_plan_or_mode`, `timeline_or_today_operations`, diarrhea/laggard paths) no longer call the LLM; final text is deterministic facts + deterministic body + safety note.
+- General/knowledge narration is allowed only as a non-numeric explanation; Arabic digits, full-width digits, percentages, time expressions, dates, and Chinese numerals cause fallback.
+- `numericWhitelist` is retained as telemetry/compatibility only and is no longer used as the acceptance gate; replay no longer validates against it.
+- Attack tests cover number/unit/time swaps, Chinese numerals, percent/date/day-age injection, tool calls, stale receipts, and provider unavailability.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
