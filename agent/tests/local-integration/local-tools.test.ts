@@ -198,7 +198,7 @@ describe("local deterministic tools", () => {
       if (!tool) throw new Error("missing preview tool");
       const output = await tool.execute(
         "call-1",
-        { observedAt: "2026-08-05T10:00:00.000Z" },
+        { observedAt: "2026-08-05T10:00:00+08:00" },
         new AbortController().signal,
       );
       const details = output.details as {
@@ -230,7 +230,11 @@ describe("local deterministic tools", () => {
       const tool = createFeedingTools(context)
         .find((item) => item.name === "preview_diarrhea_adjustment");
       if (!tool) throw new Error("missing preview tool");
-      const output = await tool.execute("call-1", {}, new AbortController().signal);
+      const output = await tool.execute(
+        "call-1",
+        { observedAt: "2026-08-05T10:00:00+08:00" },
+        new AbortController().signal,
+      );
       const details = output.details as {
         data: {
           worstGrade: string;

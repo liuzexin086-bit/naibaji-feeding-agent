@@ -22,7 +22,10 @@ function baseDecision(): FeedingDecision {
       dailyPowderGrams: 600,
       singlePowderGrams: 50,
       mealCount: 12,
-      timedMeals: [{ timeLocal: "10:00", powderGrams: 50 }],
+      timedMeals: Array.from({ length: 12 }, (_, index) => ({
+        timeLocal: `${String((10 + index) % 24).padStart(2, "0")}:00`,
+        powderGrams: 50,
+      })),
       freeWindows: [],
       precisionGrams: 1,
       source: "sop_indirect",
@@ -48,6 +51,8 @@ function engineInput(overrides: Partial<FeedbackEngineInput> = {}): FeedbackEngi
     dayAge: 4,
     config: { controlStartDay: -1 },
     decision: baseDecision(),
+    reductionPriority: ["10:00"],
+    freeReductionPriority: ["09:00"],
     ...overrides,
   };
 }
@@ -69,7 +74,7 @@ describe("observation feedback engine", () => {
   it("generates a confirm task and device proposal for mild diarrhea with cumulative powder", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
-        recordedAt: "2026-08-05T09:00:00.000Z",
+        recordedAt: "2026-08-05T09:00:00+08:00",
         diarrheaGrade: "mild",
         actualPowderGrams: 120,
       }],
@@ -88,25 +93,29 @@ describe("observation feedback engine", () => {
   it("generates a reduce-one-meal proposal for severe diarrhea", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
-        recordedAt: "2026-08-05T09:00:00.000Z",
+        recordedAt: "2026-08-05T09:00:00+08:00",
         diarrheaGrade: "severe",
         actualPowderGrams: 120,
       }],
     }));
     expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
-    expect(result?.proposedSetting).not.toBeNull();
+    expect(result?.proposedSetting).toBeNull();
+    expect(result?.feedbackOrigin.status).toBe("manual");
+    expect(result?.operations[0]?.feedbackRef?.requiresDeviceConfirmation).toBe(false);
   });
 
-  it("generates a proposal even when cumulative powder is missing", () => {
+  it("generates a preview-only manual task when cumulative powder is missing", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
-        recordedAt: "2026-08-05T09:00:00.000Z",
+        recordedAt: "2026-08-05T09:00:00+08:00",
         diarrheaGrade: "moderate",
         actualPowderGrams: null,
       }],
     }));
     expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
-    expect(result?.proposedSetting).not.toBeNull();
+    expect(result?.proposedSetting).toBeNull();
+    expect(result?.feedbackOrigin.status).toBe("manual");
+    expect(result?.operations[0]?.title).toBe("腹泻人工处置（中度）");
   });
 
   it("closes diarrhea when the latest explicit grade returns to none", () => {
@@ -178,7 +187,7 @@ describe("observation feedback engine", () => {
       safetyNotes: [],
     }];
     const result = evaluateObservationFeedback(engineInput({
-      records: [{ recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 120 }],
     }))!;
     const merged = mergeFeedbackOperations(base, [], result);
     expect(merged.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
@@ -187,7 +196,7 @@ describe("observation feedback engine", () => {
 
   it("hashes proposals and maps them to device settings deterministically", () => {
     const result = evaluateObservationFeedback(engineInput({
-      records: [{ recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 120 }],
     }))!;
     const proposal = result.proposedSetting!;
     expect(digestFeedbackProposal(proposal)).toBe(proposal.proposalDigest);

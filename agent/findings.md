@@ -24,6 +24,14 @@
 - Calibration output is explicitly `candidate`, `validForProduction=false`, `applied=false`; it does not overwrite defaults.
 - Optimizer Python tests now cover no/one-point/zero-span data, eligible-only denominator, no `diarOffset`, synthetic recovery, and seed stability.
 
+## P1-3 Diarrhea adjustment safety contract
+
+- Removed `targetRatio` and `gradeTargetRatio()`; mild/proposal, moderate/preview-only, severe/manual-only are explicit result kinds.
+- Target meal/window must come from frozen SOP `reductionPriority`; missing priority or no matching slot raises `NBJ_DECISION_DIARRHEA_REDUCTION_SLOT_REQUIRED`.
+- `observedAt` is now decisive: a passed target slot, severe grade, or cumulative actual above adjusted total produces `manual_only` with no device proposal.
+- Deterministic facts include `adjustedProgramTotal`, `cumulativeActual`, `remainingDeliverable`, `targetSlot`, and `targetAlreadyHappened`.
+- Agent/local API/UI/feedback paths were updated to carry the new result kinds; full Agent suite passes 32 files / 277 tests.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

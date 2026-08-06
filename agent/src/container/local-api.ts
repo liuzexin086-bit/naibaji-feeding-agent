@@ -102,6 +102,7 @@ export const DEFAULT_SOP_CONFIG: Record<string, unknown> = {
   productionProgramStartLocal: "09:00",
   freeFeedingTemplate: {
     windows: defaultFreeFeedingSlots(),
+    reductionPriority: ["00:00"],
     stageConditions: { earliestBatchDay: 1, requiresOperatorSelection: true },
     exceptionBlockers: ["milk_control", "diarrhea", "refusal", "blockage", "probe_contamination", "curve_cap"],
   },
@@ -326,6 +327,9 @@ function buildDevicePlanSnapshot(sopConfig: JsonObject): DevicePlanSnapshot {
   const freeFeeding: FreeFeedingTemplateSnapshot = {
     slots,
     windows: enabledFreeFeedingWindows(slots),
+    ...(freeInput.reductionPriority === undefined
+      ? {}
+      : { reductionPriority: stringList(freeInput.reductionPriority, [], "free_reduction_priority") }),
     stageConditions: freeInput.stageConditions && typeof freeInput.stageConditions === "object" &&
         !Array.isArray(freeInput.stageConditions)
       ? structuredClone(freeInput.stageConditions as JsonObject)
@@ -799,7 +803,9 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     exceptionActions: Array.isArray(source.exceptionActions) ? source.exceptionActions : today.exceptionActions,
     modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: String(today.sopVersion ?? "local-sop-default-v1"),
-    recordedAt: new Date().toISOString(),
+    recordedAt: typeof source.recordedAt === "string" && source.recordedAt
+      ? source.recordedAt
+      : new Date().toISOString(),
   };
   return record;
 }

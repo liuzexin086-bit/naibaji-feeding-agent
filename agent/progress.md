@@ -27,6 +27,15 @@
 - Calibration candidates are marked `status=candidate`, `validForProduction=false`, `applied=false`.
 - Added `optimizer/tests/test_calibration.py`; full Python suite now passes 11 tests and `python -m compileall optimizer` passes.
 
+### P1-3 enforce diarrhea adjustment safety contract — complete
+
+- Removed `targetRatio` and `gradeTargetRatio()` from `decision/core.ts` and the shared contract.
+- Added `DiarrheaAdjustmentResult` with `none | proposal | preview_only | manual_only`, plus deterministic cumulative/target facts.
+- `previewDiarrheaAdjustment()` now selects the target only from frozen SOP `reductionPriority`/`freeReductionPriority`, checks `observedAt` on the 09:00 business-day axis, and fails closed on missing slots.
+- Severe, target-passed, and cumulative-overrun cases return `manual_only` with no device proposal; moderate returns preview-only; mild returns a pending proposal.
+- Updated `observation-feedback.ts`, `container/tools.ts`, LangGraph state/runtime/responses, local API observed-at handling, and tests.
+- Verified `npm run check`, full `npm test` (32 files / 277 tests), and P1-3 targeted suites.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

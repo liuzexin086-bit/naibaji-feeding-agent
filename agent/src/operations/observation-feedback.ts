@@ -3,6 +3,7 @@ import {
   previewDiarrheaAdjustment,
   type CreepGrade,
   type DeviceSetting,
+  type DiarrheaAdjustmentResult,
   type DiarrheaGrade,
   type FeedingDecision,
   type FeedingMode,
@@ -135,6 +136,8 @@ export interface FeedbackEngineInput {
   dayAge: number;
   config: JsonObject;
   decision: FeedingDecision;
+  reductionPriority?: string[];
+  freeReductionPriority?: string[];
 }
 
 export interface FeedbackEngineResult {
@@ -164,7 +167,7 @@ function feedbackOperation(
       originId: origin.id,
       kind: origin.kind,
       ...(proposal ? { proposalDigest: proposal.proposalDigest } : {}),
-      requiresDeviceConfirmation: true,
+      requiresDeviceConfirmation: proposal !== null,
     },
   };
 }
@@ -173,26 +176,37 @@ function diarrheaProposal(
   kind: FeedbackOriginKind,
   businessDate: string,
   grade: Exclude<DiarrheaGrade, "none">,
-  preview: FeedingDecision,
-): FeedbackDeviceProposal {
+  result: DiarrheaAdjustmentResult,
+): FeedbackDeviceProposal | null {
+  if (!result.proposal) return null;
   const proposal: FeedbackDeviceProposal = {
     kind,
     businessDate,
-    mode: preview.setting.mode,
-    dayAge: preview.setting.dayAge,
-    dailyPowderGrams: preview.setting.dailyPowderGrams,
-    singlePowderGrams: preview.setting.singlePowderGrams,
-    mealCount: preview.setting.mealCount,
-    timedMeals: preview.setting.timedMeals,
-    freeWindows: preview.setting.freeWindows,
-    precisionGrams: preview.setting.precisionGrams,
-    source: preview.setting.source,
+    mode: result.proposal.mode,
+    dayAge: result.proposal.dayAge,
+    dailyPowderGrams: result.proposal.dailyPowderGrams,
+    singlePowderGrams: result.proposal.singlePowderGrams,
+    mealCount: result.proposal.mealCount,
+    timedMeals: result.proposal.timedMeals,
+    freeWindows: result.proposal.freeWindows,
+    precisionGrams: result.proposal.precisionGrams,
+    source: result.proposal.source,
     rationale: [
-      ...preview.evidence.reasons.slice(-2),
-      "确认后减少一次配奶/自由采食窗口。",
+      `按冻结 SOP 目标槽位 ${result.targetSlot ?? "未指定"} 减少一次配奶/自由采食窗口。`,
+      "该方案为待确认设备提案；未确认前设备保持不变。",
     ],
-    manualDispositionRequired: false,
+    manualDispositionRequired: result.manualDispositionRequired,
     proposalDigest: "",
+    resultKind: result.kind === "proposal"
+      ? "proposal"
+      : result.kind === "preview_only"
+        ? "preview_only"
+        : "manual_only",
+    adjustedProgramTotal: result.adjustedProgramTotal,
+    remainingDeliverable: result.remainingDeliverable,
+    ...(result.targetSlot ? { targetSlot: result.targetSlot } : {}),
+    ...(result.targetAlreadyHappened ? { targetAlreadyHappened: true } : {}),
+    ...(result.cumulativeActual >= 0 ? { cumulativePowderGrams: result.cumulativeActual } : {}),
   };
   proposal.proposalDigest = digestFeedbackProposal(proposal);
   return proposal;
@@ -268,6 +282,8 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       grades: [diarrheaGrade],
       cumulativePowderGrams: cumulativePowderGrams ?? 0,
       observedAt: String(sourceRecord.recordedAt ?? new Date().toISOString()),
+      reductionPriority: input.reductionPriority,
+      freeReductionPriority: input.freeReductionPriority,
     });
     const proposal = diarrheaProposal(
       "diarrhea",
@@ -275,17 +291,32 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       diarrheaGrade,
       preview,
     );
+    const originStatus = preview.kind === "proposal" ? "proposed" : "manual";
+    const resultLabel = preview.kind === "proposal"
+      ? "生成待确认设备提案"
+      : preview.kind === "preview_only"
+        ? "仅生成预览，不自动应用"
+        : "转人工处置，不生成可执行设备方案";
+    const operationTitle = preview.kind === "proposal"
+      ? `腹泻处置确认（${gradeLabel}）`
+      : preview.kind === "preview_only"
+        ? `腹泻人工处置（${gradeLabel}）`
+        : `腹泻紧急人工处置（${gradeLabel}）`;
+    const operationNote = preview.kind === "proposal"
+      ? "按冻结 SOP 目标槽位减少一次配奶/自由采食窗口；未确认前设备保持不变。"
+      : "不生成可执行设备方案；需现场负责人人工处置并留痕。";
     const origin: FeedbackOrigin = {
       ...originBase,
-      reason: `已记录${gradeLabel}腹泻，按规则减少一次配奶/自由采食窗口，生成待确认设备方案。`,
+      status: originStatus,
+      reason: `已记录${gradeLabel}腹泻，${resultLabel}。`,
       proposal,
     };
     const operation = feedbackOperation(
       origin,
       proposal,
       "feedback_diarrhea_confirm",
-      `腹泻处置确认（${gradeLabel}）`,
-      "确认后减少一次配奶/自由采食窗口；未确认前设备保持不变。",
+      operationTitle,
+      operationNote,
       ["diarrheaGrade", "actualPowderGrams"],
     );
     return { kind: "diarrhea", reason: origin.reason, operations: [operation], feedbackOrigin: origin, proposedSetting: proposal };
@@ -406,6 +437,8 @@ export function materializeObservationFeedbackPlan(input: {
       controlStartDay: batchConfig.controlStartDay,
     },
     decision: canonical.decision,
+    reductionPriority: context.devicePlan.templates.timed_quantity.reductionPriority,
+    freeReductionPriority: context.devicePlan.templates.free_feeding.reductionPriority,
   });
   const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
   const plan = input.store.ensureDailyOperationPlan({

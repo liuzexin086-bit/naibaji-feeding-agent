@@ -128,8 +128,29 @@ export interface DiarrheaAdjustmentInput {
   grades: DiarrheaGrade[];
   /** Actual powder already dispensed today; never an estimated or planned amount. */
   cumulativePowderGrams: number;
-  /** Optional explicit medical/SOP ratio; otherwise the deterministic grade table is used. */
-  targetRatio?: number;
-  /** Explicit remaining times avoid ambiguity for overnight programs. */
-  remainingMealTimes?: string[];
+  /** Frozen SOP timed-meal reductionPriority. Required for timed_quantity. */
+  reductionPriority?: string[];
+  /** Frozen SOP free-feeding reductionPriority, keyed by window startLocal. Required for free_feeding. */
+  freeReductionPriority?: string[];
+}
+
+export type DiarrheaAdjustmentKind =
+  | "none"
+  | "proposal"
+  | "preview_only"
+  | "manual_only";
+
+export interface DiarrheaAdjustmentResult {
+  kind: DiarrheaAdjustmentKind;
+  worstGrade: Exclude<DiarrheaGrade, "none"> | null;
+  decision: FeedingDecision | null;
+  proposal: DeviceSetting | null;
+  manualDispositionRequired: boolean;
+  targetSlot: string | null;
+  targetAlreadyHappened: boolean;
+  adjustedProgramTotal: number;
+  cumulativeActual: number;
+  remainingDeliverable: number;
+  reason: string;
+  evidence: Record<string, unknown>;
 }

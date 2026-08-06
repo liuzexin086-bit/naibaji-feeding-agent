@@ -104,16 +104,28 @@ export function deterministicDiarrheaResponse(
 ): string {
   const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
   const prefix = batchPrefix(summary);
+  if (preview.resultKind === "manual_only") {
+    return `${prefix}已生成${gradeLabel}腹泻人工处置要求：目标槽位 ${preview.targetSlot ?? "未指定"}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，累计实际 ${preview.cumulativePowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。不生成可执行设备提案，需人工处置。`;
+  }
+  if (preview.resultKind === "preview_only") {
+    const windows = preview.freeWindows
+      .map((window) => `${window.startLocal}–${window.endLocal}`)
+      .join("、") || "无";
+    const times = preview.timedMeals
+      .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
+      .join("、") || "无";
+    return `${prefix}已生成${gradeLabel}腹泻调整预览：目标槽位 ${preview.targetSlot ?? "未指定"}；剩余窗口 ${preview.freeWindows.length ? windows : "无"}；剩余餐次 ${preview.mealCount ?? 0}：${times}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，累计实际 ${preview.cumulativePowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该预览不会自动应用，需人工处置。`;
+  }
   if (preview.mode === "free_feeding") {
     const windows = preview.freeWindows
       .map((window) => `${window.startLocal}–${window.endLocal}`)
       .join("、") || "无";
-    return `${prefix}已生成${gradeLabel}腹泻调整预览：减少一个自由采食窗口（固定 09:00–09:30）；剩余 ${preview.freeWindows.length} 个窗口：${windows}。该预览不会自动生效，需人工确认后写入设备。`;
+    return `${prefix}已生成${gradeLabel}腹泻调整待确认提案：目标窗口 ${preview.targetSlot ?? "未指定"}；剩余 ${preview.freeWindows.length} 个窗口：${windows}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该提案需人工确认后写入设备。`;
   }
   const times = preview.timedMeals
     .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
     .join("、") || "无";
-  return `${prefix}已生成${gradeLabel}腹泻调整预览：减少一次配奶（固定 10:00）；当前 ${preview.mealCount} 餐：${times}；程序总量 ${preview.remainingDailyPowderGrams}g，单次最大下粉 ${preview.singlePowderGrams}g。该预览不会自动生效，需人工确认后写入设备。`;
+  return `${prefix}已生成${gradeLabel}腹泻调整待确认提案：目标餐次 ${preview.targetSlot ?? "未指定"}；当前 ${preview.mealCount ?? 0} 餐：${times}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该提案需人工确认后写入设备。`;
 }
 
 /** Deterministic response after the latest recorded diarrhea grade returns to none. */

@@ -772,7 +772,7 @@ export function createFeedingTools(
   const previewDiarrhea: FeedingTool<any, any> = {
     name: "preview_diarrhea_adjustment",
     label: "预览腹泻调整",
-    description: "按腹泻档位生成未生效草案：定时定量固定减少 10:00 配奶，自由采食固定减少 09:00–09:30 窗口；不按确认时间重排，不切换模式。最近记录为无时返回已结束。",
+    description: "按腹泻档位和冻结 SOP reductionPriority 生成未生效草案或人工处置要求；不自动应用设备方案。最近记录为无时返回已结束。",
     parameters: Type.Object({
       grades: Type.Optional(Type.Array(Type.Union([
         Type.Literal("none"),
@@ -782,17 +782,12 @@ export function createFeedingTools(
       ]), { minItems: 1, maxItems: 10000 })),
       cumulativePowderGrams: Type.Optional(Type.Number({ minimum: 0 })),
       observedAt: Type.Optional(Type.String({ minLength: 1, maxLength: 80 })),
-      remainingMealTimes: Type.Optional(Type.Array(
-        Type.String({ pattern: "^(?:[01]\\d|2[0-3]):[0-5]\\d$" }),
-        { maxItems: 32 },
-      )),
     }),
     execute: async (_id, rawParams) => {
       const params = rawParams as {
         grades?: DiarrheaGrade[];
         cumulativePowderGrams?: number;
         observedAt?: string;
-        remainingMealTimes?: string[];
       };
       const batch = await loadBatch(context);
       const records = Array.isArray(batch?.records) ? batch.records : [];
@@ -867,7 +862,8 @@ export function createFeedingTools(
         grades,
         cumulativePowderGrams: cumulativeValue,
         observedAt: params.observedAt ?? shanghaiLocalNowIso(),
-        remainingMealTimes: params.remainingMealTimes,
+        reductionPriority: production.state.frozenContext.devicePlan.templates.timed_quantity.reductionPriority,
+        freeReductionPriority: production.state.frozenContext.devicePlan.templates.free_feeding.reductionPriority,
       });
       const worstGrade = grades.reduce<DiarrheaGrade>((worst, grade) =>
         ["none", "mild", "moderate", "severe"].indexOf(grade) >
@@ -875,28 +871,41 @@ export function createFeedingTools(
           ? grade
           : worst,
       "none") as "mild" | "moderate" | "severe";
+      const setting = preview.decision?.setting;
       return record(context, "preview_diarrhea_adjustment", {
-        decision: preview,
+        status: preview.kind,
         worstGrade,
-        deviceOperation: {
-          mode: preview.setting.mode,
-          remainingDailyPowderGrams: preview.setting.dailyPowderGrams,
-          singlePowderGrams: preview.setting.singlePowderGrams,
-          timedMeals: preview.setting.timedMeals,
-          freeWindows: preview.setting.freeWindows,
-          clearFreeFeedingWindows: false,
-          requiresHumanApproval: true,
-          manualDispositionRequired: false,
-        },
+        decision: preview.decision,
+        deviceOperation: preview.proposal
+          ? {
+              mode: preview.proposal.mode,
+              remainingDailyPowderGrams: preview.adjustedProgramTotal,
+              singlePowderGrams: preview.proposal.singlePowderGrams,
+              timedMeals: preview.proposal.timedMeals,
+              freeWindows: preview.proposal.freeWindows,
+              clearFreeFeedingWindows: false,
+              requiresHumanApproval: true,
+              manualDispositionRequired: preview.manualDispositionRequired,
+            }
+          : null,
+        manualDispositionRequired: preview.manualDispositionRequired,
+        adjustedProgramTotal: preview.adjustedProgramTotal,
+        remainingDeliverable: preview.remainingDeliverable,
+        targetSlot: preview.targetSlot,
+        targetAlreadyHappened: preview.targetAlreadyHappened,
         cumulativePowderGrams: cumulativeValue,
         cumulativeSource,
-        severeException: null,
+        severeException: preview.kind === "manual_only" ? "manual_disposition_required" : null,
       }, {
-        sopVersion: preview.evidence.sopVersion,
-        modelVersion: preview.evidence.modelVersion,
-        calculationDate: preview.evidence.calculationDate,
-        basis: "previewDiarrheaAdjustment 固定减少 10:00 配奶或 09:00–09:30 自由采食窗口，仅减少一次，不按确认时间或累计下粉量重排；预览不自动生效。",
-        evidence: preview.evidence,
+        sopVersion: preview.decision?.evidence.sopVersion ?? originalDecision.evidence.sopVersion,
+        modelVersion: preview.decision?.evidence.modelVersion ?? originalDecision.evidence.modelVersion,
+        calculationDate: preview.decision?.evidence.calculationDate ?? originalDecision.evidence.calculationDate,
+        basis: "previewDiarrheaAdjustment 使用冻结 SOP reductionPriority 选择目标槽位；无自动应用。",
+        evidence: preview.decision?.evidence ?? {
+          ...originalDecision.evidence,
+          reasons: [...originalDecision.evidence.reasons, preview.reason],
+          inputs: { ...originalDecision.evidence.inputs, diarrheaAdjustment: preview.evidence },
+        },
         frozenReceipt: frozenReceipt(production.state),
       });
     },

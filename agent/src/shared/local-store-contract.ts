@@ -112,6 +112,8 @@ export interface FreeFeedingTemplateSnapshot {
   slots: FreeFeedingSlot[];
   /** Derived from enabled slots only; this is the only window list sent to the deterministic core. */
   windows: DeviceWindow[];
+  /** Optional frozen SOP reduction priority, keyed by window startLocal. */
+  reductionPriority?: string[];
   stageConditions: Record<string, unknown>;
   exceptionBlockers: string[];
 }
@@ -245,8 +247,11 @@ export interface FeedbackDeviceProposal {
   manualDispositionRequired: boolean;
   proposalDigest: string;
   cumulativePowderGrams?: number;
-  targetRatio?: number;
-  remainingMealTimes?: string[];
+  resultKind?: "proposal" | "preview_only" | "manual_only";
+  adjustedProgramTotal?: number;
+  remainingDeliverable?: number;
+  targetSlot?: string;
+  targetAlreadyHappened?: boolean;
   controlStartDay?: number;
 }
 
@@ -254,7 +259,7 @@ export interface FeedbackOrigin {
   id: string;
   kind: FeedbackOriginKind;
   businessDate: string;
-  status: "proposed" | "applied";
+  status: "proposed" | "manual" | "applied";
   sourceObservation: {
     recordedAt: string;
     diarrheaGrade?: DiarrheaGrade;
@@ -262,7 +267,7 @@ export interface FeedbackOrigin {
     actualPowderGrams?: number | null;
   };
   reason: string;
-  proposal?: FeedbackDeviceProposal;
+  proposal?: FeedbackDeviceProposal | null;
   controlStartDay?: number;
   createdAt: string;
 }

@@ -10,6 +10,7 @@ import type {
   DeviceSetting,
   DeviceWindow,
   DiarrheaAdjustmentInput,
+  DiarrheaAdjustmentResult,
   DiarrheaGrade,
   ExceptionAction,
   FeedingDecision,
@@ -34,23 +35,6 @@ const FIXED_TEACHING_TIMES = [
   "08:00",
 ] as const;
 export const FREE_FEEDING_SUGGESTED_MEAL_COUNT = 12;
-const DIARRHEA_REDUCED_TIMED_MEAL_LOCAL = "10:00";
-const DIARRHEA_REDUCED_FREE_WINDOW = { startLocal: "09:00", endLocal: "09:30" } as const;
-
-function removeDiarrheaTimedMeal(meals: TimedMeal[]): TimedMeal[] {
-  if (meals.length === 0) return meals;
-  const index = meals.findIndex((meal) => meal.timeLocal === DIARRHEA_REDUCED_TIMED_MEAL_LOCAL);
-  return meals.filter((_, itemIndex) => itemIndex !== (index >= 0 ? index : 0));
-}
-
-function removeDiarrheaFreeWindow(windows: DeviceWindow[]): DeviceWindow[] {
-  if (windows.length === 0) return windows;
-  const index = windows.findIndex((window) =>
-    window.startLocal === DIARRHEA_REDUCED_FREE_WINDOW.startLocal &&
-    window.endLocal === DIARRHEA_REDUCED_FREE_WINDOW.endLocal,
-  );
-  return windows.filter((_, itemIndex) => itemIndex !== (index >= 0 ? index : 0));
-}
 
 function fail(code: string): never {
   throw new Error(`NBJ_DECISION_${code}`);
@@ -510,112 +494,268 @@ function observedLocalHourMinute(value: string): string {
   return `${hour}:${minute}`;
 }
 
-function gradeTargetRatio(grade: DiarrheaGrade): number {
-  return { none: 1, mild: 0.9, moderate: 0.75, severe: 0.5 }[grade];
+function selectDiarrheaTarget(
+  candidates: string[],
+  priority: string[] | undefined,
+): string {
+  if (!priority || priority.length === 0) {
+    fail("DIARRHEA_REDUCTION_SLOT_REQUIRED");
+  }
+  for (const slot of priority) {
+    if (candidates.includes(slot)) return slot;
+  }
+  fail("DIARRHEA_REDUCTION_SLOT_REQUIRED");
 }
 
-export function previewDiarrheaAdjustment(
-  input: DiarrheaAdjustmentInput,
-): FeedingDecision {
-  const worstGrade = worstDiarrheaGrade(input.grades);
-  const targetRatio = input.targetRatio ?? gradeTargetRatio(worstGrade);
-  if (!Number.isFinite(targetRatio) || targetRatio < 0 || targetRatio > 1) {
-    fail("INVALID_DIARRHEA_TARGET_RATIO");
-  }
-  const source = input.decision.setting;
-  const precision = source.precisionGrams;
-  const mode = source.mode;
-  let timedMeals = [...source.timedMeals];
-  let freeWindows = [...source.freeWindows];
-  let dailyPowderGrams = source.dailyPowderGrams;
-  let singlePowderGrams = source.singlePowderGrams;
-  let mealCount = source.mealCount;
-  let suggestedDailyPowderGrams = source.suggestedDailyPowderGrams;
-  let suggestedDailyMealCount = source.suggestedDailyMealCount;
-  if (mode === "free_feeding") {
-    freeWindows = removeDiarrheaFreeWindow(freeWindows);
-    mealCount = Math.max(0, mealCount - 1);
-    dailyPowderGrams = Math.max(0, floorToPrecision(dailyPowderGrams - singlePowderGrams, precision));
-    if (suggestedDailyPowderGrams !== undefined) {
-      suggestedDailyPowderGrams = Math.max(0, floorToPrecision(suggestedDailyPowderGrams - singlePowderGrams, precision));
-    }
-    if (suggestedDailyMealCount !== undefined) {
-      suggestedDailyMealCount = Math.max(0, suggestedDailyMealCount - 1);
-    }
-  } else {
-    timedMeals = removeDiarrheaTimedMeal(timedMeals);
-    dailyPowderGrams = timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0);
-    singlePowderGrams = timedMeals.length
-      ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
-      : 0;
-    mealCount = timedMeals.length;
-  }
-  const adjustmentSteps = [
-    {
-      name: "diarrhea_grade",
-      value: { grades: [...input.grades], worstGrade, targetRatio, mode },
-      explanation: "按最严重腹泻档位识别，只减少一次配奶/自由采食窗口。",
-    },
-    {
-      name: "reduce_one_feeding",
-      value: {
-        mode,
-        fromMealCount: source.mealCount,
-        toMealCount: mealCount,
-        fromWindows: source.freeWindows.length,
-        toWindows: freeWindows.length,
-        fromDailyPowderGrams: source.dailyPowderGrams,
-        toDailyPowderGrams: dailyPowderGrams,
-      },
-      explanation: "发现腹泻时固定减少 10:00 配奶或 09:00–09:30 自由采食窗口，仅减少一次，不按确认时间或累计下粉量重排。",
-    },
-  ];
+function diarrheaTargetAlreadyHappened(target: string, observedAt: string): boolean {
+  const observedLocal = observedLocalHourMinute(observedAt);
+  return remainingBusinessDayTimes([target], observedLocal).length === 0;
+}
 
+function diarrheaAdjustedSetting(
+  source: DeviceSetting,
+  targetSlot: string,
+): { setting: DeviceSetting; adjustedProgramTotal: number } {
+  const precision = source.precisionGrams;
+  if (source.mode === "free_feeding") {
+    const freeWindows = source.freeWindows.filter(
+      (window) => window.startLocal !== targetSlot,
+    );
+    if (freeWindows.length === source.freeWindows.length) {
+      fail("DIARRHEA_REDUCTION_SLOT_REQUIRED");
+    }
+    const adjustedProgramTotal = Math.max(
+      0,
+      floorToPrecision(source.dailyPowderGrams - source.singlePowderGrams, precision),
+    );
+    return {
+      setting: {
+        ...source,
+        dailyPowderGrams: adjustedProgramTotal,
+        mealCount: Math.max(0, source.mealCount - 1),
+        freeWindows,
+        ...(source.suggestedDailyPowderGrams !== undefined
+          ? {
+              suggestedDailyPowderGrams: Math.max(
+                0,
+                floorToPrecision(source.suggestedDailyPowderGrams - source.singlePowderGrams, precision),
+              ),
+            }
+          : {}),
+        ...(source.suggestedDailyMealCount !== undefined
+          ? { suggestedDailyMealCount: Math.max(0, source.suggestedDailyMealCount - 1) }
+          : {}),
+      },
+      adjustedProgramTotal,
+    };
+  }
+
+  const timedMeals = source.timedMeals.filter((meal) => meal.timeLocal !== targetSlot);
+  if (timedMeals.length === source.timedMeals.length) {
+    fail("DIARRHEA_REDUCTION_SLOT_REQUIRED");
+  }
+  const adjustedProgramTotal = timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0);
+  const singlePowderGrams = timedMeals.length
+    ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
+    : 0;
   return {
-    ...input.decision,
-    revision: input.decision.revision + 1,
     setting: {
       ...source,
-      mode,
-      dailyPowderGrams,
+      dailyPowderGrams: adjustedProgramTotal,
       singlePowderGrams,
-      mealCount,
+      mealCount: timedMeals.length,
       timedMeals,
-      freeWindows,
-      ...(suggestedDailyPowderGrams !== undefined ? { suggestedDailyPowderGrams } : {}),
-      ...(suggestedDailyMealCount !== undefined ? { suggestedDailyMealCount } : {}),
     },
+    adjustedProgramTotal,
+  };
+}
+
+function diarrheaEvidenceDecision(
+  decision: FeedingDecision,
+  setting: DeviceSetting,
+  input: DiarrheaAdjustmentInput,
+  worstGrade: Exclude<DiarrheaGrade, "none">,
+  targetSlot: string,
+  targetAlreadyHappened: boolean,
+  adjustedProgramTotal: number,
+  remainingDeliverable: number,
+  kind: Exclude<DiarrheaAdjustmentResult["kind"], "none">,
+): FeedingDecision {
+  const mode = setting.mode;
+  const reason = kind === "manual_only"
+    ? `腹泻${worstGrade}已转人工处置；不生成可执行设备方案。`
+    : kind === "preview_only"
+      ? `腹泻${worstGrade}仅生成预览；不自动应用设备方案，需人工处置。`
+      : `腹泻${worstGrade}按冻结 SOP 目标槽位生成待确认设备提案。`;
+  const actionText = kind === "manual_only"
+    ? "现场检查并按兽医/场区 SOP 处置；不自动生成设备方案。"
+    : "按冻结 SOP 目标槽位减少一次配奶/自由采食窗口，需人工确认。";
+  return {
+    ...decision,
+    revision: decision.revision + 1,
+    setting,
     exceptionActions: [
-      ...input.decision.exceptionActions.filter((action) => action.type !== "diarrhea"),
+      ...decision.exceptionActions.filter((action) => action.type !== "diarrhea"),
       {
         type: "diarrhea",
         severity: "urgent",
-        title: `腹泻调整预览：${worstGrade}（减少一次配奶/自由采食窗口）`,
-        actions: [
-          "仅减少一次配奶/自由采食窗口。",
-          "现场检查并按兽医/场区 SOP 处置。",
-        ],
+        title: `腹泻调整：${worstGrade}（${kind}）`,
+        actions: [actionText, "现场检查并按兽医/场区 SOP 处置。"],
         requiresHumanConfirmation: true,
       },
     ],
     evidence: {
-      ...input.decision.evidence,
-      reasons: [
-      ...input.decision.evidence.reasons,
-        "腹泻调整仅减少一次配奶/自由采食窗口：定时定量固定减少 10:00 配奶，自由采食固定减少 09:00–09:30 窗口；不按确认时间或累计下粉量重排。",
-      ],
+      ...decision.evidence,
+      reasons: [...decision.evidence.reasons, reason],
       inputs: {
-        ...input.decision.evidence.inputs,
+        ...decision.evidence.inputs,
         diarrheaAdjustment: {
           grades: [...input.grades],
+          worstGrade,
           mode,
-          targetRatio,
-          reducedMealCount: Math.max(0, source.mealCount - mealCount),
-          reducedWindowCount: Math.max(0, source.freeWindows.length - freeWindows.length),
+          targetSlot,
+          targetAlreadyHappened,
+          cumulativePowderGrams: input.cumulativePowderGrams,
+          adjustedProgramTotal,
+          remainingDeliverable,
         },
       },
-      steps: [...input.decision.evidence.steps, ...adjustmentSteps],
+      steps: [
+        ...decision.evidence.steps,
+        {
+          name: "diarrhea_target_slot",
+          value: { mode, targetSlot, targetAlreadyHappened, prioritySource: "frozen_sop" },
+          explanation: "目标槽位必须来自冻结 SOP reductionPriority，不自行选择替代餐次。",
+        },
+        {
+          name: "diarrhea_cumulative_facts",
+          value: {
+            cumulativeActual: input.cumulativePowderGrams,
+            adjustedProgramTotal,
+            remainingDeliverable,
+          },
+          explanation: "累计量仅表示已发生事实；超过调整后总量时禁止生成可执行提案。",
+        },
+      ],
     },
     status: "draft",
+  };
+}
+
+export function previewDiarrheaAdjustment(
+  input: DiarrheaAdjustmentInput,
+): DiarrheaAdjustmentResult {
+  const worstGrade = worstDiarrheaGrade(input.grades);
+  const cumulativeActual = finiteNonNegative(
+    input.cumulativePowderGrams,
+    "INVALID_DIARRHEA_CUMULATIVE",
+  );
+  if (worstGrade === "none") {
+    return {
+      kind: "none",
+      worstGrade: null,
+      decision: null,
+      proposal: null,
+      manualDispositionRequired: false,
+      targetSlot: null,
+      targetAlreadyHappened: false,
+      adjustedProgramTotal: input.decision.setting.dailyPowderGrams,
+      cumulativeActual,
+      remainingDeliverable: Math.max(
+        0,
+        input.decision.setting.dailyPowderGrams - cumulativeActual,
+      ),
+      reason: "最近腹泻档位为无，不生成腹泻调整。",
+      evidence: { grades: [...input.grades], worstGrade: "none" },
+    };
+  }
+
+  const source = input.decision.setting;
+  const mode = source.mode;
+  const candidates = mode === "free_feeding"
+    ? source.freeWindows.map((window) => window.startLocal)
+    : source.timedMeals.map((meal) => meal.timeLocal);
+  const targetSlot = selectDiarrheaTarget(
+    candidates,
+    mode === "free_feeding" ? input.freeReductionPriority : input.reductionPriority,
+  );
+  const targetAlreadyHappened = diarrheaTargetAlreadyHappened(targetSlot, input.observedAt);
+  const adjusted = diarrheaAdjustedSetting(source, targetSlot);
+  const remainingDeliverable = Math.max(
+    0,
+    adjusted.adjustedProgramTotal - cumulativeActual,
+  );
+
+  let kind: Exclude<DiarrheaAdjustmentResult["kind"], "none">;
+  let manualDispositionRequired: boolean;
+  let decision: FeedingDecision | null;
+  let proposal: DeviceSetting | null;
+  if (
+    worstGrade === "severe" ||
+    targetAlreadyHappened ||
+    cumulativeActual > adjusted.adjustedProgramTotal
+  ) {
+    kind = "manual_only";
+    manualDispositionRequired = true;
+    decision = null;
+    proposal = null;
+  } else if (worstGrade === "moderate") {
+    kind = "preview_only";
+    manualDispositionRequired = true;
+    decision = diarrheaEvidenceDecision(
+      input.decision,
+      adjusted.setting,
+      input,
+      worstGrade,
+      targetSlot,
+      targetAlreadyHappened,
+      adjusted.adjustedProgramTotal,
+      remainingDeliverable,
+      kind,
+    );
+    proposal = null;
+  } else {
+    kind = "proposal";
+    manualDispositionRequired = false;
+    decision = diarrheaEvidenceDecision(
+      input.decision,
+      adjusted.setting,
+      input,
+      worstGrade,
+      targetSlot,
+      targetAlreadyHappened,
+      adjusted.adjustedProgramTotal,
+      remainingDeliverable,
+      kind,
+    );
+    proposal = decision.setting;
+  }
+
+  const evidenceAdjustedTotal = kind === "manual_only"
+    ? source.dailyPowderGrams
+    : adjusted.adjustedProgramTotal;
+  const evidenceRemaining = Math.max(0, evidenceAdjustedTotal - cumulativeActual);
+  return {
+    kind,
+    worstGrade,
+    decision,
+    proposal,
+    manualDispositionRequired,
+    targetSlot,
+    targetAlreadyHappened,
+    adjustedProgramTotal: evidenceAdjustedTotal,
+    cumulativeActual,
+    remainingDeliverable: evidenceRemaining,
+    reason: `腹泻${worstGrade}：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g。`,
+    evidence: {
+      grades: [...input.grades],
+      worstGrade,
+      mode,
+      targetSlot,
+      targetAlreadyHappened,
+      cumulativePowderGrams: cumulativeActual,
+      adjustedProgramTotal: evidenceAdjustedTotal,
+      remainingDeliverable: evidenceRemaining,
+    },
   };
 }

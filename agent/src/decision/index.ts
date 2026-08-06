@@ -13,6 +13,7 @@ export type {
   DeviceSetting,
   DeviceWindow,
   DiarrheaAdjustmentInput,
+  DiarrheaAdjustmentResult,
   DiarrheaGrade,
   FeedingDecision,
   FeedingMode,

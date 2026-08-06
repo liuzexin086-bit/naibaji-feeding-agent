@@ -146,6 +146,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "mild",
+      status: "proposal",
       decision: {
         setting: {
           mode: "timed_quantity",
@@ -172,6 +173,10 @@ describe("LangGraph v2 deterministic runtime", () => {
       },
       cumulativePowderGrams: 120,
       cumulativeSource: "observation",
+      adjustedProgramTotal: 150,
+      remainingDeliverable: 30,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
       severeException: null,
     };
     const runtime = createAgentGraphRuntime({
@@ -191,7 +196,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).toContain("批次 A");
     expect(result.text).toContain("第2天");
     expect(result.text).toContain("日龄4");
-    expect(result.text).toContain("轻度腹泻调整预览");
+    expect(result.text).toContain("轻度腹泻调整待确认提案");
     expect(result.text).toContain("10:00 25g");
     expect(result.text).toContain("人工确认");
   });
@@ -217,6 +222,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "mild",
+      status: "proposal",
       decision: {
         setting: {
           mode: "timed_quantity",
@@ -243,6 +249,10 @@ describe("LangGraph v2 deterministic runtime", () => {
       },
       cumulativePowderGrams: 100,
       cumulativeSource: "latest_record",
+      adjustedProgramTotal: 150,
+      remainingDeliverable: 50,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
       severeException: null,
     };
     const runtime = createAgentGraphRuntime({
@@ -259,7 +269,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("现在怎么办"));
     expect(result).toMatchObject({ intent: "exception", status: "completed" });
-    expect(result.text).toContain("轻度腹泻调整预览");
+    expect(result.text).toContain("轻度腹泻调整待确认提案");
   });
 
   it("returns an ended response when the latest diarrhea record returns to none", async () => {
@@ -325,26 +335,31 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "moderate",
+      status: "preview_only",
       decision: {
         setting: {
           mode: "timed_quantity",
-          dailyPowderGrams: 0,
-          singlePowderGrams: 0,
-          mealCount: 0,
-          timedMeals: [],
+          dailyPowderGrams: 150,
+          singlePowderGrams: 25,
+          mealCount: 5,
+          timedMeals: [{ timeLocal: "14:00", powderGrams: 25 }],
         },
       },
       deviceOperation: {
         mode: "timed_quantity",
-        remainingDailyPowderGrams: 0,
-        singlePowderGrams: 0,
-        timedMeals: [],
+        remainingDailyPowderGrams: 150,
+        singlePowderGrams: 25,
+        timedMeals: [{ timeLocal: "14:00", powderGrams: 25 }],
         clearFreeFeedingWindows: true,
         requiresHumanApproval: true,
-        manualDispositionRequired: false,
+        manualDispositionRequired: true,
       },
-      cumulativePowderGrams: 500,
+      cumulativePowderGrams: 100,
       cumulativeSource: "observation",
+      adjustedProgramTotal: 150,
+      remainingDeliverable: 50,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
       severeException: null,
     };
     const runtime = createAgentGraphRuntime({
@@ -361,12 +376,12 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("腹泻后设备怎么设"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("减少一次配奶");
-    expect(result.text).not.toContain("剩余调整额度已为 0");
-    expect(result.text).not.toContain("剩余 0 餐：");
+    expect(result.text).toContain("中度腹泻调整预览");
+    expect(result.text).toContain("不会自动应用");
+    expect(result.text).toContain("目标槽位 10:00");
   });
 
-  it("keeps reduce-one-meal wording even when no meals remain", async () => {
+  it("converts cumulative overrun to manual-only even when no meals remain", async () => {
     const contextData = {
       batch: {
         current_day_index: 1,
@@ -386,26 +401,16 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "mild",
-      decision: {
-        setting: {
-          mode: "timed_quantity",
-          dailyPowderGrams: 89,
-          singlePowderGrams: 0,
-          mealCount: 0,
-          timedMeals: [],
-        },
-      },
-      deviceOperation: {
-        mode: "timed_quantity",
-        remainingDailyPowderGrams: 89,
-        singlePowderGrams: 0,
-        timedMeals: [],
-        clearFreeFeedingWindows: true,
-        requiresHumanApproval: true,
-        manualDispositionRequired: false,
-      },
+      status: "manual_only",
+      decision: null,
+      deviceOperation: null,
       cumulativePowderGrams: 100,
       cumulativeSource: "latest_record",
+      adjustedProgramTotal: 89,
+      remainingDeliverable: 0,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
+      manualDispositionRequired: true,
       severeException: null,
     };
     const runtime = createAgentGraphRuntime({
@@ -422,9 +427,9 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("腹泻后设备怎么设"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("减少一次配奶");
-    expect(result.text).toContain("程序总量 89g");
-    expect(result.text).not.toContain("已无待执行餐次");
+    expect(result.text).toContain("人工处置");
+    expect(result.text).toContain("调整后整日程序总量 89g");
+    expect(result.text).toContain("不生成可执行设备提案");
   });
 
   it("gives every general turn the verified batch context", async () => {
@@ -470,6 +475,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "mild",
+      status: "proposal",
       decision: {
         setting: {
           mode: "timed_quantity",
@@ -490,6 +496,10 @@ describe("LangGraph v2 deterministic runtime", () => {
       },
       cumulativePowderGrams: 0,
       cumulativeSource: "assumed_zero",
+      adjustedProgramTotal: 150,
+      remainingDeliverable: 150,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
       severeException: null,
     };
     const runtime = createAgentGraphRuntime({
@@ -506,11 +516,11 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("已录入轻度腹泻，请给出具体设备操作。"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("减少一次配奶");
+    expect(result.text).toContain("轻度腹泻调整待确认提案");
     expect(result.text).not.toContain("未录入");
   });
 
-  it("applies reduce-one-meal response for severe diarrhea", async () => {
+  it("returns manual-only response for severe diarrhea", async () => {
     const contextData = {
       batch: { current_day_index: 1, config: { name: "批次 A" } },
       canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -524,26 +534,16 @@ describe("LangGraph v2 deterministic runtime", () => {
     };
     const previewData = {
       worstGrade: "severe",
-      decision: {
-        setting: {
-          mode: "timed_quantity",
-          dailyPowderGrams: 100,
-          singlePowderGrams: 20,
-          mealCount: 3,
-          timedMeals: [],
-        },
-      },
-      deviceOperation: {
-        mode: "timed_quantity",
-        remainingDailyPowderGrams: 100,
-        singlePowderGrams: 20,
-        timedMeals: [],
-        clearFreeFeedingWindows: true,
-        requiresHumanApproval: true,
-        manualDispositionRequired: false,
-      },
+      status: "manual_only",
+      decision: null,
+      deviceOperation: null,
       cumulativePowderGrams: 120,
       cumulativeSource: "observation",
+      adjustedProgramTotal: 100,
+      remainingDeliverable: 0,
+      targetSlot: "10:00",
+      targetAlreadyHappened: false,
+      manualDispositionRequired: true,
       severeException: "严重异常：暂停常规增量，执行现场检查并进入人工处置。",
     };
     const runtime = createAgentGraphRuntime({
@@ -560,9 +560,9 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("已录入重度腹泻，请给出具体设备操作。"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("减少一次配奶");
-    expect(result.text).toContain("人工确认");
-    expect(result.text).not.toContain("人工处置");
+    expect(result.text).toContain("重度腹泻人工处置要求");
+    expect(result.text).toContain("人工处置");
+    expect(result.text).toContain("不生成可执行设备提案");
   });
 
   it("asks for the diarrhea grade when the preview cannot derive one", async () => {
