@@ -45,6 +45,8 @@ function baseDecision(): FeedingDecision {
 
 function engineInput(overrides: Partial<FeedbackEngineInput> = {}): FeedbackEngineInput {
   return {
+    userId: "user-a",
+    batchId: "batch-1",
     records: [],
     businessDate: "2026-08-05",
     currentDayIndex: 1,
@@ -128,6 +130,24 @@ describe("observation feedback engine", () => {
     expect(result).toBeNull();
   });
 
+  it("does not treat an omitted diarrheaGrade as an explicit none", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [
+        {
+          recordedAt: "2026-08-05T09:00:00+08:00",
+          diarrheaGrade: "moderate",
+          actualPowderGrams: 100,
+        },
+        {
+          recordedAt: "2026-08-05T14:00:00+08:00",
+          actualPowderGrams: 180,
+        },
+      ],
+    }));
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe("diarrhea");
+  });
+
   it("drops previously materialized diarrhea feedback when the latest grade is none", () => {
     const base = [{
       code: "daily_patrol",
@@ -207,7 +227,11 @@ describe("observation feedback engine", () => {
       dailyPowderGrams: proposal.dailyPowderGrams,
       source: proposal.source,
     });
-    expect(feedbackOriginId("diarrhea", "2026-08-05", { recordedAt: "x" }))
+    expect(feedbackOriginId("diarrhea", "2026-08-05", { recordedAt: "x" }, {
+      userId: "user-a",
+      batchId: "batch-1",
+      observationId: "obs-1",
+    }))
       .toMatch(/^[0-9a-f]{32}$/);
   });
 });

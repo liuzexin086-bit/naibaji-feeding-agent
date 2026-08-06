@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 8;
+export const MIGRATION_VERSION = 9;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -206,7 +206,8 @@ CREATE TABLE IF NOT EXISTS daily_operation_amendments (
   base_confirmation_id TEXT,
   origin_id TEXT NOT NULL,
   origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
-  severity TEXT NOT NULL CHECK (severity IN ('mild', 'moderate', 'severe')),
+  severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
+  priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
   operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
   proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),

@@ -247,6 +247,7 @@ def main() -> None:
     print("奶爸机 — 生长校准（仅 scaleFactor / peakAdjust）")
     print("=" * 60)
 
+    smoke = os.environ.get("NBJ_OPTIMIZER_SMOKE") == "1"
     farm_bias = {"scaleFactor": 0.95, "peakAdjust": -0.02}
     batches, theta_true, _ = gen_farm_with_weights(n=8, farm_bias=farm_bias)
     print(f"\n场区真实生长偏差: scaleFactor={farm_bias['scaleFactor']}, peakAdjust={farm_bias['peakAdjust']}")
@@ -255,8 +256,9 @@ def main() -> None:
     default_result = predict_error(KNOB_DEFAULT, batches, PARAM_DEFAULT)
     print(f"\n默认参数预测误差: {default_result['error']:.4f}，有效批次 {default_result['eligibleBatchCount']}")
 
-    print("\n网格搜索 11×11 = 121 次评估...")
-    best_knobs, best_result = grid_search(batches, PARAM_DEFAULT)
+    grid_steps = 3 if smoke else 11
+    print(f"\n网格搜索 {grid_steps}×{grid_steps} = {grid_steps ** 2} 次评估...")
+    best_knobs, best_result = grid_search(batches, PARAM_DEFAULT, grid_steps=grid_steps)
     improvement = (default_result["error"] - best_result["error"]) / default_result["error"] * 100
     print(f"\n最优候选: 误差 {default_result['error']:.4f} → {best_result['error']:.4f} ({improvement:.0f}% 降低)")
 
@@ -273,11 +275,12 @@ def main() -> None:
         farm_bias=farm_bias,
         batches=batches,
     )
-    path = os.path.join(os.path.dirname(__file__), "growth_calibration_candidate.json")
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(candidate, file, ensure_ascii=False, indent=2)
-    print("\n结果仅作为 candidate 保存，不会覆盖默认参数或写入生产模型。")
-    print(f"  文件: {path}")
+    if not smoke:
+        path = os.path.join(os.path.dirname(__file__), "growth_calibration_candidate.json")
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(candidate, file, ensure_ascii=False, indent=2)
+        print("\n结果仅作为 candidate 保存，不会覆盖默认参数或写入生产模型。")
+        print(f"  文件: {path}")
 
 
 if __name__ == "__main__":

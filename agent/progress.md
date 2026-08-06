@@ -67,6 +67,18 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
+### Review remediation — 2026-08-06
+
+- Corrected amendment state machine and added `daily_operation_amendment_actions` for true confirm/reject/apply idempotency.
+- `confirm` no longer activates a decision; `apply` creates exactly one active decision and preserves `decision_id`; manual-only apply is blocked.
+- Added diarrhea tri-state handling: omitted grade stays unknown, explicit `none` closes an event.
+- Origin IDs now include user, batch, and immutable observation id; same-origin digest drift fails closed.
+- Added nullable amendment severity and priority; UI renders creep_control separately from diarrhea.
+- Fixed optimizer entry failures, boundary-aware gradient, top-level schemaVersion validation, and CLI smoke tests.
+- Fixed latest-message SQL and added precise evidence-based message lookup.
+- Verified full Agent suite (33 files / 287 tests), Python 12 tests, and CLI smoke.
+- P1-7 request-size/login-rate-limit remains deferred to P3 per the original scope boundary.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

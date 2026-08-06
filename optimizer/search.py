@@ -215,6 +215,7 @@ def main() -> None:
     print("奶爸机 V3 — 随机搜索 + 局部精调（feeding-parameters-v3）")
     print("=" * 60)
 
+    smoke = os.environ.get("NBJ_OPTIMIZER_SMOKE") == "1"
     batches = generate_batches(15)
     print(f"\n模拟批次: {len(batches)} 批")
 
@@ -223,13 +224,15 @@ def main() -> None:
     print(f"\n默认参数: ADG={adg0:.1f}g, 腹泻率={diar0*100:.1f}%, 损失={loss0:.2f}")
     print(f"  {defaults.to_mapping()['parameters']}")
 
-    print("\n阶段1: 随机搜索 (3000次)...")
-    best1, loss1, all_results = random_search(batches, n_trials=3000)
+    trials = 3 if smoke else 3000
+    print(f"\n阶段1: 随机搜索 ({trials}次)...")
+    best1, loss1, all_results = random_search(batches, n_trials=trials)
     loss1, adg1, diar1 = evaluate_batches(best1, batches)
     print(f"  最优: ADG={adg1:.1f}g, 腹泻率={diar1*100:.1f}%, 损失={loss1:.2f}")
 
-    print("\n阶段2: 局部精调 (500次)...")
-    best2, loss2, refine_results = local_refine(batches, best1, n_trials=500)
+    refine_trials = 2 if smoke else 500
+    print(f"\n阶段2: 局部精调 ({refine_trials}次)...")
+    best2, loss2, refine_results = local_refine(batches, best1, n_trials=refine_trials)
     adg2, diar2 = evaluate_batches(best2, batches)[1:]
     print(f"  最优: ADG={adg2:.1f}g, 腹泻率={diar2*100:.1f}%, 损失={loss2:.2f}")
 
@@ -251,10 +254,11 @@ def main() -> None:
         all_results,
         refine_results,
     )
-    path = os.path.join(os.path.dirname(__file__), "search_result.json")
-    with open(path, "w", encoding="utf-8") as file:
-        json.dump(output, file, ensure_ascii=False, indent=2)
-    print(f"\n结果已保存到 search_result.json")
+    if not smoke:
+        path = os.path.join(os.path.dirname(__file__), "search_result.json")
+        with open(path, "w", encoding="utf-8") as file:
+            json.dump(output, file, ensure_ascii=False, indent=2)
+        print(f"\n结果已保存到 search_result.json")
 
 
 if __name__ == "__main__":

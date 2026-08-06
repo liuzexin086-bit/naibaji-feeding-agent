@@ -63,6 +63,19 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
+## Review Remediation — 2026-08-06
+
+复审发现并修复的阻断项：
+
+- `decideDailyOperationAmendment()` 不再在 confirm 时创建 active decision；只有 apply 才创建并保留 `decision_id`。manual-only 修订无法 apply。
+- 新增 `daily_operation_amendment_actions` 表，动作幂等键独立于 amendment 创建幂等键；confirm/apply 重试返回 `replayed=true` 和原始结果。
+- `parseObservation()` 在未填写腹泻时不再补 `none`；新增单元测试证明 omitted 不会关闭既有腹泻事件。
+- `feedbackOriginId()` 现包含 user、batch、immutable observation id；同 origin 不同 payload 返回 `LOCAL_STORE_AMENDMENT_ORIGIN_CONFLICT`。
+- Amendment 的 severity 可为 null 且新增 priority；UI 按 `originKind` 显示腹泻/教槽控奶。
+- 优化器 CLI 入口修复：`farm_tune.py` 导入、边界感知数值梯度、顶层 schemaVersion 校验、四入口 smoke 测试。
+- 最近消息 SQL 改为先取最新 N 条再升序；client/response message id 使用精确 evidence JSON 查询。
+- 复审中的 P1-7 请求体大小/登录限速仍按原计划归入 P3，不伪装为 P1 已关闭。
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

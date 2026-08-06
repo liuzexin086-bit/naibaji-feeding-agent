@@ -117,9 +117,12 @@ export function createLocalAgentMessageStore(input: {
 
     async findByClientMessageId(sessionId, clientMessageId) {
       try {
-        return messages(sessionId)
-          .filter((row) => row.evidence.clientMessageId === clientMessageId)
-          .slice(0, 2)
+        return store.findMessagesByClientMessageId(
+          userId,
+          batchId,
+          sessionId,
+          clientMessageId,
+        )
           .map(storedMessage);
       } catch (error) {
         throw localError(error);
@@ -138,9 +141,12 @@ export function createLocalAgentMessageStore(input: {
 
     async findByResponseMessageId(sessionId, messageId) {
       try {
-        return messages(sessionId)
-          .filter((row) => row.evidence.responseMessageId === messageId)
-          .slice(0, 2)
+        return store.findMessagesByResponseMessageId(
+          userId,
+          batchId,
+          sessionId,
+          messageId,
+        )
           .map(storedMessage);
       } catch (error) {
         throw localError(error);

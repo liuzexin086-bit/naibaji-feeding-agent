@@ -100,6 +100,7 @@ describe("post-confirmation amendments", () => {
       originId,
       originKind: "diarrhea" as const,
       severity: "mild" as const,
+      priority: "routine" as const,
       operations: [{
         code: "feedback_diarrhea_confirm",
         title: "腹泻处置确认（轻度）",
@@ -124,6 +125,15 @@ describe("post-confirmation amendments", () => {
     expect(firstResult.amendment.id).toBe(secondResult.amendment.id);
     expect(store.getDailyOperationAmendments(userId, batchId, planBody.plan.businessDate))
       .toHaveLength(1);
+
+    expect(() => store.ensureDailyOperationAmendment({
+      ...baseInput,
+      idempotencyKey: "conflicting-origin",
+      operations: [{
+        ...baseInput.operations[0]!,
+        title: "冲突后的不同方案",
+      }],
+    })).toThrow("origin_id is already bound to a different amendment payload");
   });
 
   it("creates one canonical amendment, keeps the confirmed plan immutable, and confirms with audit", async () => {
@@ -227,7 +237,7 @@ describe("post-confirmation amendments", () => {
 
     const amendment = dupBody.amendments[0];
     const revision = store.getBatch(userId, batchId)?.revision ?? 0;
-    const decision = await request(
+    const confirm = await request(
       base,
       `/api/batches/${batchId}/amendments/${amendment.id}/confirm`,
       {
@@ -240,12 +250,77 @@ describe("post-confirmation amendments", () => {
         }),
       },
     );
-    expect(decision.status).toBe(200);
-    const decisionBody = await decision.json() as {
+    expect(confirm.status).toBe(200);
+    const confirmBody = await confirm.json() as {
       amendment: { status: string; decisionId: string | null };
+      replayed: boolean;
     };
-    expect(decisionBody.amendment.status).toBe("confirmed");
-    expect(decisionBody.amendment.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(confirmBody.amendment.status).toBe("confirmed");
+    expect(confirmBody.amendment.decisionId).toBeNull();
+    expect(confirmBody.replayed).toBe(false);
+
+    const confirmReplay = await request(
+      base,
+      `/api/batches/${batchId}/amendments/${amendment.id}/confirm`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: revision,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "confirm-amendment",
+        }),
+      },
+    );
+    const confirmReplayBody = await confirmReplay.json() as {
+      amendment: { status: string; decisionId: string | null };
+      replayed: boolean;
+    };
+    expect(confirmReplayBody.replayed).toBe(true);
+    expect(confirmReplayBody.amendment.status).toBe("confirmed");
+    expect(confirmReplayBody.amendment.decisionId).toBeNull();
+
+    const preApplyDb = new DatabaseSync(filename, { readOnly: true });
+    expect(preApplyDb.prepare(`
+      SELECT count(*) AS count FROM feeding_decisions WHERE status = 'active'
+    `).get()).toEqual({ count: 0 });
+    preApplyDb.close();
+
+    const applyRequest = () => request(
+      base,
+      `/api/batches/${batchId}/amendments/${amendment.id}/apply`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: revision,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "apply-amendment",
+        }),
+      },
+    );
+    const [apply, applyReplay] = await Promise.all([applyRequest(), applyRequest()]);
+    expect(apply.status).toBe(200);
+    expect(applyReplay.status).toBe(200);
+    const applyBody = await apply.json() as {
+      amendment: { status: string; decisionId: string | null };
+      replayed: boolean;
+    };
+    const applyReplayBody = await applyReplay.json() as {
+      amendment: { status: string; decisionId: string | null };
+      replayed: boolean;
+    };
+    expect(applyBody.amendment.status).toBe("applied");
+    expect(applyBody.amendment.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect([applyBody.replayed, applyReplayBody.replayed].sort()).toEqual([false, true]);
+    expect(applyReplayBody.amendment.status).toBe("applied");
+    expect(applyReplayBody.amendment.decisionId).toBe(applyBody.amendment.decisionId);
+
+    const postApplyDb = new DatabaseSync(filename, { readOnly: true });
+    expect(postApplyDb.prepare(`
+      SELECT count(*) AS count FROM feeding_decisions WHERE status = 'active'
+    `).get()).toEqual({ count: 1 });
+    postApplyDb.close();
 
     const stale = await request(
       base,
@@ -268,14 +343,20 @@ describe("post-confirmation amendments", () => {
       WHERE action IN (
         'daily_operation_amendments.created',
         'daily_operation_amendments.confirmed',
+        'daily_operation_amendments.applied',
         'daily_operation_amendments.rejected'
       )
       GROUP BY action ORDER BY action
     `).all() as Array<{ action: string; count: number }>;
     expect(audit.map((row) => row.action)).toEqual([
+      "daily_operation_amendments.applied",
       "daily_operation_amendments.confirmed",
       "daily_operation_amendments.created",
     ]);
+    const actionRows = database.prepare(`
+      SELECT count(*) AS count FROM daily_operation_amendment_actions
+    `).get() as { count: number };
+    expect(actionRows.count).toBe(2);
     database.close();
   });
 
@@ -339,6 +420,23 @@ describe("post-confirmation amendments", () => {
       proposal: null,
     });
     const amendment = todayBody.amendments[0];
+    const manualApply = await request(
+      base,
+      `/api/batches/${batchId}/amendments/${amendment.id}/apply`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: store.getBatch(userId, batchId)?.revision ?? 0,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "manual-apply-blocked",
+        }),
+      },
+    );
+    expect(manualApply.status).toBeGreaterThanOrEqual(400);
+    const manualApplyBody = await manualApply.json() as { code: string };
+    expect(manualApplyBody.code).toBe("NBJ_AMENDMENT_MANUAL_ONLY");
+
     const rejected = await request(
       base,
       `/api/batches/${batchId}/amendments/${amendment.id}/reject`,

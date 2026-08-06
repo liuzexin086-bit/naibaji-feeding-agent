@@ -105,6 +105,10 @@ class FeedingParametersV3:
     ) -> "FeedingParametersV3":
         if not mapping or not isinstance(mapping, Mapping):
             raise parameter_schema_mismatch("mapping must be a non-empty object")
+        if "schemaVersion" in mapping and mapping["schemaVersion"] != schema_version:
+            raise parameter_schema_mismatch(
+                f"schemaVersion mismatch: {mapping['schemaVersion']!r}"
+            )
         values = mapping.get("parameters", mapping)
         if not isinstance(values, Mapping):
             raise parameter_schema_mismatch("parameters must be an object")

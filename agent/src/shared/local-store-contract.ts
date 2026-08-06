@@ -336,7 +336,8 @@ export interface DailyOperationAmendment {
   baseConfirmationId: string | null;
   originId: string;
   originKind: FeedbackOriginKind;
-  severity: "mild" | "moderate" | "severe";
+  severity: "mild" | "moderate" | "severe" | null;
+  priority: "routine" | "warning" | "critical";
   status: DailyOperationAmendmentStatus;
   operations: DailyOperationItem[];
   proposal: FeedbackDeviceProposal | null;
@@ -358,7 +359,8 @@ export interface EnsureDailyOperationAmendmentInput {
   baseConfirmationId: string;
   originId: string;
   originKind: FeedbackOriginKind;
-  severity: "mild" | "moderate" | "severe";
+  severity: "mild" | "moderate" | "severe" | null;
+  priority: "routine" | "warning" | "critical";
   operations: DailyOperationItem[];
   proposal?: FeedbackDeviceProposal | null;
   basedOnBatchRevision: number;
@@ -551,6 +553,18 @@ export interface LocalStore {
     batchId: string,
     sessionId: string,
     options?: ListMessagesOptions,
+  ): AgentMessage[];
+  findMessagesByClientMessageId(
+    userId: string,
+    batchId: string,
+    sessionId: string,
+    clientMessageId: string,
+  ): AgentMessage[];
+  findMessagesByResponseMessageId(
+    userId: string,
+    batchId: string,
+    sessionId: string,
+    responseMessageId: string,
   ): AgentMessage[];
   audit(input: AuditInput): AuditEvent;
   getUserByEmail(email: string): LocalUser | null;

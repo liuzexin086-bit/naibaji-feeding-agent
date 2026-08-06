@@ -12,6 +12,19 @@
 - P1-5 render protected numeric facts deterministically: complete
 - P1-6 add safety release gates and evidence: complete
 
+## Review Remediation — 2026-08-06
+
+针对复审 `FAIL WITH BLOCKING FINDINGS` 的修复批次：
+
+- P0-1: amendment `confirm` 只记录审批，不激活设备决策；`apply` 才创建 active decision 并保存 `decision_id`；manual-only 不能 apply。
+- P0-2: 新增 `daily_operation_amendment_actions` 动作幂等表，confirm/reject/apply 重放返回原始结果。
+- P0-3: 未填写 `diarrheaGrade` 不再落成 `none`，只有显式 `none` 才关闭事件。
+- P1-3/P1-4: origin ID 包含 user/batch/immutable observation id；同 origin 不同 digest/revision fail closed。
+- P1-5: severity 可为 null，新增 priority；creep_control 修订不再显示为“腹泻轻度”。
+- P1-1/P1-2: 顶层 schemaVersion 校验、farm_tune 导入、边界感知梯度、CLI smoke。
+- P1-6: 最近消息改为最新 N 条后升序返回；evidence 精确 SQL 查询。
+- P1-7 请求体/登录限速按原计划保留为 P3 范围，不在本次 P1 修复。
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

@@ -35,6 +35,7 @@ def main():
     print('奶爸机 V3 — 6参数 (FCR/教槽当量固定)')
     print('=' * 60)
 
+    smoke = os.environ.get("NBJ_OPTIMIZER_SMOKE") == "1"
     batches = gen_batches(15)
 
     # 显示默认值
@@ -43,11 +44,12 @@ def main():
     print(f'默认 ({len(batches)}批): ADG={m0["ADG"]:.1f}g  腹泻率={m0["diarrheaRate"]*100:.1f}%  L={loss0:.2f}')
     print('θ=' + ' '.join(f'{n}={v:.3f}' for n, v in zip(PARAM_NAMES, PARAM_DEFAULT)))
 
-    print(f'\nRMSprop 梯度下降 ...')
+    epochs = 2 if smoke else 200
+    print(f'\nRMSprop 梯度下降 ({epochs} epochs) ...')
     print('-' * 60)
 
     theta_opt, history = train(PARAM_DEFAULT.copy(), batches, compute_loss,
-                                lr=0.5, epochs=200)
+                                lr=0.5, epochs=epochs)
 
     loss_opt, m_opt = compute_loss(theta_opt, batches)
 
@@ -77,10 +79,11 @@ def main():
            'history': [{'epoch':h['epoch'],'loss':h['loss'],'ADG':h['ADG'],
                         'diarrheaRate':h['diarrheaRate'],'theta':h['theta'].tolist()}
                        for h in history]}
-    p = os.path.join(os.path.dirname(__file__), 'simulation_v3.json')
-    with open(p, 'w', encoding='utf-8') as f:
-        json.dump(out, f, ensure_ascii=False, indent=2)
-    print(f'\n已保存 simulation_v3.json')
+    if not smoke:
+        p = os.path.join(os.path.dirname(__file__), 'simulation_v3.json')
+        with open(p, 'w', encoding='utf-8') as f:
+            json.dump(out, f, ensure_ascii=False, indent=2)
+        print(f'\n已保存 simulation_v3.json')
 
 
 if __name__ == '__main__':

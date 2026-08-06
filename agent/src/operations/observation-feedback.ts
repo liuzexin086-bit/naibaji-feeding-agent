@@ -95,12 +95,16 @@ export function feedbackOriginId(
   kind: FeedbackOriginKind,
   businessDate: string,
   source: unknown,
+  context: { userId: string; batchId: string; observationId?: string },
 ): string {
   return createHash("sha256")
     .update([
-      "nbj-feedback-v1",
+      "nbj-feedback-v2",
+      context.userId,
+      context.batchId,
       kind,
       businessDate,
+      context.observationId ?? "no-observation-id",
       JSON.stringify(source ?? {}).normalize("NFC"),
     ].join("\u001f"), "utf8")
     .digest("hex")
@@ -130,6 +134,8 @@ export function proposalToDeviceSetting(proposal: FeedbackDeviceProposal): Devic
 }
 
 export interface FeedbackEngineInput {
+  userId: string;
+  batchId: string;
   observation?: JsonObject;
   records: JsonObject[];
   businessDate: string;
@@ -263,7 +269,21 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       recordedAt: String(sourceRecord.recordedAt ?? sourceRecord.created_at ?? ""),
       idempotencyKey: sourceRecord.idempotencyKey ?? null,
     };
-    const originId = feedbackOriginId("diarrhea", input.businessDate, sourceRef);
+    const originId = feedbackOriginId(
+      "diarrhea",
+      input.businessDate,
+      sourceRef,
+      {
+        userId: input.userId,
+        batchId: input.batchId,
+        observationId: String(
+          sourceRecord.id ??
+          sourceRecord.observationId ??
+          sourceRecord.idempotencyKey ??
+          "unknown",
+        ),
+      },
+    );
     const originBase = {
       id: originId,
       kind: "diarrhea" as const,
@@ -333,7 +353,21 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       recordedAt: String(creepRecord.recordedAt ?? creepRecord.created_at ?? ""),
       idempotencyKey: creepRecord.idempotencyKey ?? null,
     };
-    const originId = feedbackOriginId("creep_control", input.businessDate, sourceRef);
+    const originId = feedbackOriginId(
+      "creep_control",
+      input.businessDate,
+      sourceRef,
+      {
+        userId: input.userId,
+        batchId: input.batchId,
+        observationId: String(
+          creepRecord.id ??
+          creepRecord.observationId ??
+          creepRecord.idempotencyKey ??
+          "unknown",
+        ),
+      },
+    );
     const proposal = creepControlProposal(input.businessDate, input.decision, input.currentDayIndex);
     const origin: FeedbackOrigin = {
       id: originId,
@@ -425,6 +459,8 @@ export function materializeObservationFeedbackPlan(input: {
   };
   const existing = input.store.getDailyOperationPlan(input.userId, batch.batchId, baseInput.businessDate);
   const result = evaluateObservationFeedback({
+    userId: input.userId,
+    batchId: batch.batchId,
     observation: input.observation,
     records: recordsOf(batch),
     businessDate: baseInput.businessDate,
@@ -451,10 +487,17 @@ export function materializeObservationFeedbackPlan(input: {
     if (!confirmation) {
       throw new Error("NBJ_AMENDMENT_CONFIRMATION_REQUIRED");
     }
-    const severity = result.feedbackOrigin.sourceObservation.diarrheaGrade ?? "mild";
-    if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+    const severity = result.kind === "diarrhea"
+      ? (result.feedbackOrigin.sourceObservation.diarrheaGrade ?? null)
+      : null;
+    if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
       throw new Error("NBJ_AMENDMENT_SEVERITY_INVALID");
     }
+    const priority = severity === "severe"
+      ? "critical"
+      : severity === "moderate"
+        ? "warning"
+        : "routine";
     const amendmentResult = input.store.ensureDailyOperationAmendment({
       userId: input.userId,
       batchId: batch.batchId,
@@ -464,6 +507,7 @@ export function materializeObservationFeedbackPlan(input: {
       originId: result.feedbackOrigin.id,
       originKind: result.kind,
       severity,
+      priority,
       operations: result.operations,
       proposal: result.proposedSetting,
       basedOnBatchRevision: batch.revision,

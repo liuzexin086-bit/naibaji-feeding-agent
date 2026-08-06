@@ -718,7 +718,7 @@ function recordPublic(
     actualPowderGrams: row.actualPowderGrams == null ? null : Number(row.actualPowderGrams),
     creepGrade: grade,
     creepValue: Number(row.creepValue ?? CREEP_VALUES[grade as keyof typeof CREEP_VALUES] ?? 0),
-    diarrheaGrade: String(row.diarrheaGrade ?? "none"),
+    diarrheaGrade: row.diarrheaGrade == null ? null : String(row.diarrheaGrade),
     waterState: String(row.waterState ?? "closed"),
     exceptionActions: Array.isArray(row.exceptionActions) ? row.exceptionActions : [],
     modelVersion: String(row.modelVersion ?? "feeding-model+V5-Lite"),
@@ -780,8 +780,12 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
   const heads = integer(source.effectiveHeads ?? source.headCount ?? config.effectiveHeads ?? config.headCount ?? 1, "effectiveHeads", 0, 100_000);
   const grade = String(source.creepGrade ?? "none");
   if (!(grade in CREEP_VALUES)) throw new Error("NBJ_CREEP_GRADE_INVALID");
-  const diarrhea = String(source.diarrheaGrade ?? "none");
-  if (!["none", "mild", "moderate", "severe"].includes(diarrhea)) throw new Error("NBJ_DIARRHEA_GRADE_INVALID");
+  const diarrhea = source.diarrheaGrade == null || source.diarrheaGrade === ""
+    ? undefined
+    : String(source.diarrheaGrade);
+  if (diarrhea !== undefined && !["none", "mild", "moderate", "severe"].includes(diarrhea)) {
+    throw new Error("NBJ_DIARRHEA_GRADE_INVALID");
+  }
   const record = {
     ...source,
     dayIndex: Number(today.dayIndex),
@@ -798,7 +802,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     actualPowderGrams: source.actualPowderGrams == null ? null : finite(source.actualPowderGrams, "actualPowderGrams", 0),
     creepGrade: grade,
     creepValue: CREEP_VALUES[grade as keyof typeof CREEP_VALUES],
-    diarrheaGrade: diarrhea,
+    ...(diarrhea === undefined ? {} : { diarrheaGrade: diarrhea }),
     waterState: String(source.waterState ?? today.waterState ?? "closed"),
     exceptionActions: Array.isArray(source.exceptionActions) ? source.exceptionActions : today.exceptionActions,
     modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),

@@ -6,6 +6,7 @@ not identifiable from ADG weight data alone and is deliberately excluded.
 
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
@@ -168,6 +169,7 @@ def main() -> None:
     print("奶爸机 — 场区生长微调（仅 scaleFactor / peakAdjust）")
     print("=" * 60)
 
+    smoke = os.environ.get("NBJ_OPTIMIZER_SMOKE") == "1"
     farm_bias = {"scaleFactor": 0.92, "peakAdjust": -0.04}
     batches, theta_true, _ = gen_farm_batches(n=10, farm_bias=farm_bias)
     print(f"\n模拟场区生长偏差: scaleFactor={farm_bias['scaleFactor']}, peakAdjust={farm_bias['peakAdjust']}")
@@ -177,11 +179,12 @@ def main() -> None:
     print(f"\n专家默认得分: {default_score:.2f}")
 
     bounds = [KNOB_RANGE[name] for name in KNOB_NAMES]
+    max_iter = 3 if smoke else 150
     best_knobs, best_score_value, history = nelder_mead(
         lambda knobs: score(knobs, batches, PARAM_DEFAULT),
         KNOB_DEFAULT,
         bounds,
-        max_iter=150,
+        max_iter=max_iter,
     )
     print(f"\n最终候选得分: {best_score_value:.2f}")
     print(f"\n{'旋钮':>12} {'默认':>8} {'候选':>8} {'真值':>8} {'范围':>16}")

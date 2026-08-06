@@ -76,6 +76,11 @@ class FeedingParametersContractTest(unittest.TestCase):
             FeedingParametersV3.from_mapping({name: value for name, value in values.items() if name != "ramp"})
         with self.assertRaisesRegex(ValueError, "schemaVersion mismatch"):
             FeedingParametersV3.from_mapping({**values, "schemaVersion": "legacy-v1"})
+        with self.assertRaisesRegex(ValueError, "schemaVersion mismatch"):
+            FeedingParametersV3.from_mapping({
+                "schemaVersion": "legacy-v1",
+                "parameters": values,
+            })
 
 
 if __name__ == "__main__":

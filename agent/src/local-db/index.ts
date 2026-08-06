@@ -56,6 +56,8 @@ export type LocalStoreErrorCode =
   | "LOCAL_STORE_AMENDMENT_STALE"
   | "LOCAL_STORE_AMENDMENT_NOT_PENDING"
   | "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED"
+  | "LOCAL_STORE_AMENDMENT_ORIGIN_CONFLICT"
+  | "LOCAL_STORE_AMENDMENT_MANUAL_ONLY"
   | "LOCAL_STORE_SESSION_NOT_FOUND"
   | "LOCAL_STORE_STALE_REVISION"
   | "LOCAL_STORE_IDEMPOTENCY_CONFLICT"
@@ -576,13 +578,19 @@ function dailyOperationConfirmationFromRow(row: Row): DailyOperationConfirmation
 
 function dailyOperationAmendmentFromRow(row: Row): DailyOperationAmendment {
   const originKind = stringValue(row.origin_kind, "daily_operation_amendments.origin_kind");
-  const severity = stringValue(row.severity, "daily_operation_amendments.severity");
+  const severity = row.severity == null
+    ? null
+    : stringValue(row.severity, "daily_operation_amendments.severity");
+  const priority = stringValue(row.priority, "daily_operation_amendments.priority");
   const status = stringValue(row.status, "daily_operation_amendments.status");
   if (originKind !== "diarrhea" && originKind !== "creep_control") {
     throw new Error("Invalid database daily_operation_amendments.origin_kind");
   }
-  if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+  if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
     throw new Error("Invalid database daily_operation_amendments.severity");
+  }
+  if (priority !== "routine" && priority !== "warning" && priority !== "critical") {
+    throw new Error("Invalid database daily_operation_amendments.priority");
   }
   if (status !== "pending" && status !== "confirmed" &&
       status !== "rejected" && status !== "applied") {
@@ -600,6 +608,7 @@ function dailyOperationAmendmentFromRow(row: Row): DailyOperationAmendment {
     originId: stringValue(row.origin_id, "daily_operation_amendments.origin_id"),
     originKind,
     severity,
+    priority,
     status,
     operations: operationItemsFromJson(
       row.operations_json,
@@ -693,6 +702,7 @@ export class SqliteLocalStore implements LocalStore {
     this.#ensureOpen();
     return this.#transaction(() => {
       this.#database.exec(INITIAL_SCHEMA);
+      this.#ensureAmendmentV9();
       const appliesFrozenSopDigestBackfill = !this.#database.prepare(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
       ).get(MIGRATION_VERSION);
@@ -767,6 +777,84 @@ export class SqliteLocalStore implements LocalStore {
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
       ).run(MIGRATION_VERSION, new Date().toISOString());
     });
+  }
+
+  #ensureAmendmentV9(): void {
+    const columns = new Map(
+      (this.#database.prepare("PRAGMA table_info(daily_operation_amendments)").all() as Row[])
+        .map((row) => [String(row.name), row]),
+    );
+    const severity = columns.get("severity");
+    const needsRebuild = !columns.has("priority") ||
+      (severity !== undefined && Number(severity.notnull) === 1);
+    if (needsRebuild) {
+      this.#database.exec(`
+        CREATE TABLE daily_operation_amendments_v9 (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          batch_id TEXT NOT NULL,
+          business_date TEXT NOT NULL,
+          base_plan_id TEXT NOT NULL,
+          base_confirmation_id TEXT,
+          origin_id TEXT NOT NULL,
+          origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+          severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
+          priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
+          status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
+          operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+          proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+          decision_id TEXT,
+          amendment_sha256 TEXT NOT NULL,
+          based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          decided_at TEXT,
+          decided_by TEXT,
+          UNIQUE (user_id, origin_id),
+          UNIQUE (user_id, idempotency_key),
+          FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+          FOREIGN KEY (base_plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+          FOREIGN KEY (base_confirmation_id) REFERENCES daily_operation_confirmations(id) ON DELETE SET NULL,
+          FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+        ) STRICT;
+        INSERT INTO daily_operation_amendments_v9 (
+          id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+          origin_id, origin_kind, severity, priority, status, operations_json,
+          proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+          idempotency_key, created_at, decided_at, decided_by
+        )
+        SELECT
+          id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+          origin_id, origin_kind, severity,
+          CASE severity WHEN 'severe' THEN 'critical' WHEN 'moderate' THEN 'warning' ELSE 'routine' END,
+          status, operations_json, proposal_json, decision_id, amendment_sha256,
+          based_on_batch_revision, idempotency_key, created_at, decided_at, decided_by
+        FROM daily_operation_amendments;
+        DROP TABLE daily_operation_amendments;
+        ALTER TABLE daily_operation_amendments_v9 RENAME TO daily_operation_amendments;
+      `);
+    }
+    this.#database.exec(`
+      CREATE TABLE IF NOT EXISTS daily_operation_amendment_actions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        amendment_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply')),
+        idempotency_key TEXT NOT NULL,
+        expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+        expected_amendment_sha256 TEXT NOT NULL,
+        resulting_status TEXT NOT NULL,
+        decision_id TEXT,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (amendment_id) REFERENCES daily_operation_amendments(id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS daily_operation_amendment_actions_amendment_idx
+        ON daily_operation_amendment_actions(amendment_id, created_at DESC);
+    `);
   }
 
   #backfillLegacyFrozenSnapshots(): void {
@@ -1250,6 +1338,7 @@ export class SqliteLocalStore implements LocalStore {
     const originId = requiredText(input.originId, "originId");
     const originKind = input.originKind;
     const severity = input.severity;
+    const priority = input.priority;
     const idempotencyKey = requiredText(input.idempotencyKey, "idempotencyKey");
     const basedOnBatchRevision = nonNegativeInteger(
       input.basedOnBatchRevision,
@@ -1258,8 +1347,11 @@ export class SqliteLocalStore implements LocalStore {
     if (originKind !== "diarrhea" && originKind !== "creep_control") {
       throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid originKind");
     }
-    if (severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+    if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
       throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid severity");
+    }
+    if (priority !== "routine" && priority !== "warning" && priority !== "critical") {
+      throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid priority");
     }
     const operations = dailyOperationItems(input.operations);
     const proposal = input.proposal ?? null;
@@ -1283,10 +1375,15 @@ export class SqliteLocalStore implements LocalStore {
     `).get(userId, originId) as Row | undefined;
     if (existing) {
       const amendment = dailyOperationAmendmentFromRow(existing);
-      if (amendment.batchId !== batchId || amendment.businessDate !== dateLocal) {
+      if (amendment.batchId !== batchId ||
+          amendment.businessDate !== dateLocal ||
+          amendment.originKind !== originKind ||
+          amendment.amendmentSha256 !== digest ||
+          amendment.basedOnBatchRevision !== basedOnBatchRevision ||
+          amendment.priority !== priority) {
         throw new LocalStoreError(
-          "LOCAL_STORE_IDEMPOTENCY_CONFLICT",
-          "origin_id is already bound to another amendment",
+          "LOCAL_STORE_AMENDMENT_ORIGIN_CONFLICT",
+          "origin_id is already bound to a different amendment payload",
         );
       }
       return { amendment, replayed: false };
@@ -1310,10 +1407,21 @@ export class SqliteLocalStore implements LocalStore {
         SELECT * FROM daily_operation_amendments
         WHERE user_id = ? AND origin_id = ?
       `).get(userId, originId) as Row | undefined;
-      if (transactionExisting) return {
-        amendment: dailyOperationAmendmentFromRow(transactionExisting),
-        replayed: false,
-      };
+      if (transactionExisting) {
+        const amendment = dailyOperationAmendmentFromRow(transactionExisting);
+        if (amendment.batchId !== batchId ||
+            amendment.businessDate !== dateLocal ||
+            amendment.originKind !== originKind ||
+            amendment.amendmentSha256 !== digest ||
+            amendment.basedOnBatchRevision !== basedOnBatchRevision ||
+            amendment.priority !== priority) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_ORIGIN_CONFLICT",
+            "origin_id is already bound to a different amendment payload",
+          );
+        }
+        return { amendment, replayed: false };
+      }
 
       const batch = this.getBatch(userId, batchId);
       if (!batch) this.#batchNotFound();
@@ -1343,10 +1451,10 @@ export class SqliteLocalStore implements LocalStore {
       this.#database.prepare(`
         INSERT INTO daily_operation_amendments (
           id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
-          origin_id, origin_kind, severity, status, operations_json, proposal_json,
+          origin_id, origin_kind, severity, priority, status, operations_json, proposal_json,
           decision_id, amendment_sha256, based_on_batch_revision, idempotency_key,
           created_at, decided_at, decided_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, NULL, ?, ?, ?, ?, NULL, NULL)
       `).run(
         id,
         userId,
@@ -1357,6 +1465,7 @@ export class SqliteLocalStore implements LocalStore {
         originId,
         originKind,
         severity,
+        priority,
         JSON.stringify(operations),
         proposal ? JSON.stringify(proposal) : null,
         digest,
@@ -1379,6 +1488,7 @@ export class SqliteLocalStore implements LocalStore {
           originId,
           originKind,
           severity,
+          priority,
           amendmentSha256: digest,
           basedOnBatchRevision,
         }),
@@ -1421,23 +1531,38 @@ export class SqliteLocalStore implements LocalStore {
     `).get(userId, batchId, amendmentId) as Row | undefined;
     if (!row) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "amendment not found");
 
-    const replay = this.#database.prepare(`
-      SELECT * FROM daily_operation_amendments
+    const actionReplay = this.#database.prepare(`
+      SELECT * FROM daily_operation_amendment_actions
       WHERE user_id = ? AND idempotency_key = ?
     `).get(userId, idempotencyKey) as Row | undefined;
-    if (replay) {
-      const replayed = dailyOperationAmendmentFromRow(replay);
-      if (replayed.id !== amendmentId || replayed.batchId !== batchId) {
+    if (actionReplay) {
+      if (String(actionReplay.amendment_id) !== amendmentId ||
+          String(actionReplay.action) !== action ||
+          Number(actionReplay.expected_batch_revision) !== expectedRevision ||
+          String(actionReplay.expected_amendment_sha256).toUpperCase() !== expectedSha256) {
         this.#idempotencyConflict();
       }
-      return { amendment: replayed, replayed: true };
+      const response = JSON.parse(
+        stringValue(actionReplay.response_json, "daily_operation_amendment_actions.response_json"),
+      ) as { amendment: DailyOperationAmendment; decisionId: string | null };
+      return { amendment: response.amendment, replayed: true };
     }
 
     const stored = dailyOperationAmendmentFromRow(row);
-    const allowed = action === "apply"
-      ? stored.status === "confirmed"
-      : stored.status === "pending";
-    if (!allowed) {
+    if (action === "apply") {
+      if (!stored.proposal) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_MANUAL_ONLY",
+          "manual-only amendment cannot be applied automatically",
+        );
+      }
+      if (stored.status !== "confirmed") {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+          `amendment status ${stored.status} does not allow ${action}`,
+        );
+      }
+    } else if (stored.status !== "pending") {
       throw new LocalStoreError(
         "LOCAL_STORE_AMENDMENT_NOT_PENDING",
         `amendment status ${stored.status} does not allow ${action}`,
@@ -1463,13 +1588,42 @@ export class SqliteLocalStore implements LocalStore {
 
     const now = new Date().toISOString();
     return this.#transaction(() => {
+      const transactionActionReplay = this.#database.prepare(`
+        SELECT * FROM daily_operation_amendment_actions
+        WHERE user_id = ? AND idempotency_key = ?
+      `).get(userId, idempotencyKey) as Row | undefined;
+      if (transactionActionReplay) {
+        if (String(transactionActionReplay.amendment_id) !== amendmentId ||
+            String(transactionActionReplay.action) !== action ||
+            Number(transactionActionReplay.expected_batch_revision) !== expectedRevision ||
+            String(transactionActionReplay.expected_amendment_sha256).toUpperCase() !== expectedSha256) {
+          this.#idempotencyConflict();
+        }
+        const response = JSON.parse(
+          stringValue(transactionActionReplay.response_json, "daily_operation_amendment_actions.response_json"),
+        ) as { amendment: DailyOperationAmendment; decisionId: string | null };
+        return { amendment: response.amendment, replayed: true };
+      }
       const transactionRow = this.#database.prepare(`
         SELECT * FROM daily_operation_amendments
         WHERE user_id = ? AND batch_id = ? AND id = ?
       `).get(userId, batchId, amendmentId) as Row | undefined;
       if (!transactionRow) throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "amendment not found");
       const current = dailyOperationAmendmentFromRow(transactionRow);
-      if (!(action === "apply" ? current.status === "confirmed" : current.status === "pending")) {
+      if (action === "apply") {
+        if (!current.proposal) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_MANUAL_ONLY",
+            "manual-only amendment cannot be applied automatically",
+          );
+        }
+        if (current.status !== "confirmed") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+            "amendment changed concurrently",
+          );
+        }
+      } else if (current.status !== "pending") {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_NOT_PENDING",
           "amendment changed concurrently",
@@ -1480,8 +1634,8 @@ export class SqliteLocalStore implements LocalStore {
         : action === "reject"
           ? "rejected" as const
           : "applied" as const;
-      let decisionId: string | null = null;
-      if (action === "confirm" && current.proposal) {
+      let decisionId: string | null = current.decisionId;
+      if (action === "apply" && current.proposal) {
         const plan = this.#database.prepare(`
           SELECT * FROM daily_operation_plans
           WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
@@ -1501,7 +1655,7 @@ export class SqliteLocalStore implements LocalStore {
               sopVersion: planRef?.sopTemplateId ?? "amendment",
               modelVersion: "daily-operation-amendment@1",
               calculationDate: current.businessDate,
-              reasons: ["操作员确认确认后异常修订；原已确认计划保持不变。"],
+              reasons: ["操作员应用确认后异常修订；原已确认计划保持不变。"],
               inputs: {
                 amendmentId,
                 originId: current.originId,
@@ -1510,9 +1664,9 @@ export class SqliteLocalStore implements LocalStore {
               },
               steps: [
                 {
-                  name: "amendment_confirmation",
+                  name: "amendment_apply",
                   value: { decidedBy, amendmentSha256: current.amendmentSha256 },
-                  explanation: "确认后异常修订由已认证操作员独立确认。",
+                  explanation: "确认后异常修订由已认证操作员应用并写入 active decision。",
                 },
               ],
             },
@@ -1548,6 +1702,29 @@ export class SqliteLocalStore implements LocalStore {
           decisionId,
         }),
         `daily-operation-amendment-${actionName}:${idempotencyKey}`,
+        now,
+      );
+      const actionResult = dailyOperationAmendmentFromRow(this.#database.prepare(
+        "SELECT * FROM daily_operation_amendments WHERE id = ?",
+      ).get(amendmentId) as Row);
+      this.#database.prepare(`
+        INSERT INTO daily_operation_amendment_actions (
+          id, user_id, batch_id, amendment_id, action, idempotency_key,
+          expected_batch_revision, expected_amendment_sha256, resulting_status,
+          decision_id, response_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        userId,
+        batchId,
+        amendmentId,
+        action,
+        idempotencyKey,
+        expectedRevision,
+        expectedSha256,
+        nextStatus,
+        decisionId,
+        JSON.stringify({ amendment: actionResult, decisionId }),
         now,
       );
       const updated = this.#database.prepare(
@@ -2654,11 +2831,68 @@ export class SqliteLocalStore implements LocalStore {
     const requestedLimit = options.limit ?? 100;
     const limit = Math.min(nonNegativeInteger(requestedLimit, "limit"), 1_000);
     const rows = this.#database.prepare(`
+      SELECT * FROM (
+        SELECT * FROM agent_messages
+        WHERE user_id = ? AND batch_id = ? AND session_id = ?
+        ORDER BY created_at DESC, rowid DESC
+        LIMIT ?
+      )
+      ORDER BY created_at ASC, id ASC
+    `).all(normalizedUserId, normalizedBatchId, normalizedSessionId, limit) as Row[];
+    return rows.map(messageFromRow);
+  }
+
+  findMessagesByClientMessageId(
+    userId: string,
+    batchId: string,
+    sessionId: string,
+    clientMessageId: string,
+  ): AgentMessage[] {
+    this.#ensureOpen();
+    const normalizedUserId = requiredText(userId, "userId");
+    const normalizedBatchId = requiredText(batchId, "batchId");
+    const normalizedSessionId = requiredText(sessionId, "sessionId");
+    const normalizedClientMessageId = requiredText(clientMessageId, "clientMessageId");
+    if (!this.#sessionExists(normalizedUserId, normalizedBatchId, normalizedSessionId)) return [];
+    const rows = this.#database.prepare(`
       SELECT * FROM agent_messages
       WHERE user_id = ? AND batch_id = ? AND session_id = ?
-      ORDER BY created_at ASC, rowid ASC
-      LIMIT ?
-    `).all(normalizedUserId, normalizedBatchId, normalizedSessionId, limit) as Row[];
+        AND json_extract(evidence_json, '$.clientMessageId') = ?
+      ORDER BY created_at ASC, id ASC
+      LIMIT 2
+    `).all(
+      normalizedUserId,
+      normalizedBatchId,
+      normalizedSessionId,
+      normalizedClientMessageId,
+    ) as Row[];
+    return rows.map(messageFromRow);
+  }
+
+  findMessagesByResponseMessageId(
+    userId: string,
+    batchId: string,
+    sessionId: string,
+    responseMessageId: string,
+  ): AgentMessage[] {
+    this.#ensureOpen();
+    const normalizedUserId = requiredText(userId, "userId");
+    const normalizedBatchId = requiredText(batchId, "batchId");
+    const normalizedSessionId = requiredText(sessionId, "sessionId");
+    const normalizedResponseMessageId = requiredText(responseMessageId, "responseMessageId");
+    if (!this.#sessionExists(normalizedUserId, normalizedBatchId, normalizedSessionId)) return [];
+    const rows = this.#database.prepare(`
+      SELECT * FROM agent_messages
+      WHERE user_id = ? AND batch_id = ? AND session_id = ?
+        AND json_extract(evidence_json, '$.responseMessageId') = ?
+      ORDER BY created_at ASC, id ASC
+      LIMIT 2
+    `).all(
+      normalizedUserId,
+      normalizedBatchId,
+      normalizedSessionId,
+      normalizedResponseMessageId,
+    ) as Row[];
     return rows.map(messageFromRow);
   }
 
