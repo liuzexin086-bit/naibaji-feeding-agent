@@ -234,9 +234,9 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.setting.mode).toBe("timed_quantity");
     expect(preview.setting.dailyPowderGrams).toBe(450);
     expect(preview.setting.timedMeals).toEqual([
-      { timeLocal: "06:00", powderGrams: 150 },
       { timeLocal: "12:00", powderGrams: 150 },
       { timeLocal: "18:00", powderGrams: 150 },
+      { timeLocal: "23:00", powderGrams: 150 },
     ]);
     expect(preview.evidence.reasons.join(" ")).toContain("减少一次配奶");
   });
@@ -265,7 +265,7 @@ describe("diarrhea adjustment preview", () => {
       grades: ["moderate"],
       cumulativePowderGrams: 0,
     });
-    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["17:00", "20:00", "23:00", "02:00", "05:00"]);
+    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["20:00", "23:00", "02:00", "05:00", "08:00"]);
     expect(preview.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(500);
   });
 
@@ -285,7 +285,39 @@ describe("diarrhea adjustment preview", () => {
       cumulativePowderGrams: 0,
     });
     expect(preview.setting.mode).toBe("free_feeding");
-    expect(preview.setting.freeWindows.map((window) => window.startLocal)).toEqual(["06:00", "09:00"]);
+    expect(preview.setting.freeWindows.map((window) => window.startLocal)).toEqual(["06:00", "15:00"]);
     expect(preview.setting.mealCount).toBe(decision.setting.mealCount - 1);
+  });
+
+  it("removes the fixed 10:00 meal and 09:00–09:30 free window for diarrhea", () => {
+    const timedDecision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 4 },
+      timedMealTimes: ["10:00", "14:00", "18:00", "22:00"],
+    }));
+    const timedPreview = previewDiarrheaAdjustment({
+      decision: timedDecision,
+      observedAt: "2026-07-31T13:00:00+08:00",
+      grades: ["mild"],
+      cumulativePowderGrams: 0,
+    });
+    expect(timedPreview.setting.timedMeals.map((meal) => meal.timeLocal))
+      .toEqual(["14:00", "18:00", "22:00"]);
+
+    const freeDecision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [
+        { startLocal: "09:00", endLocal: "09:30" },
+        { startLocal: "10:00", endLocal: "10:30" },
+        { startLocal: "15:00", endLocal: "15:30" },
+      ],
+    }));
+    const freePreview = previewDiarrheaAdjustment({
+      decision: freeDecision,
+      observedAt: "2026-07-31T13:00:00+08:00",
+      grades: ["mild"],
+      cumulativePowderGrams: 0,
+    });
+    expect(freePreview.setting.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`))
+      .toEqual(["10:00–10:30", "15:00–15:30"]);
   });
 });

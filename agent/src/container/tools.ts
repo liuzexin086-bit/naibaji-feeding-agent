@@ -101,6 +101,23 @@ async function loadBatch(context: AgentRequestContext): Promise<BatchRecord | nu
   }
 }
 
+/**
+ * The newest record that explicitly states a diarrhea grade, including "none".
+ * A later "none" closes an earlier diarrhea event for the preview tool.
+ */
+function latestDiarrheaStatusRecord(
+  records: Array<Record<string, unknown>>,
+): Record<string, unknown> | undefined {
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const row = records[index];
+    const grade = String(row?.diarrheaGrade ?? "");
+    if (grade === "none" || grade === "mild" || grade === "moderate" || grade === "severe") {
+      return row;
+    }
+  }
+  return undefined;
+}
+
 async function loadSopTasks(
   context: AgentRequestContext,
   run: Record<string, unknown> | null,
@@ -755,7 +772,7 @@ export function createFeedingTools(
   const previewDiarrhea: FeedingTool<any, any> = {
     name: "preview_diarrhea_adjustment",
     label: "预览腹泻调整",
-    description: "按腹泻档位生成未生效草案：定时定量减少一次配奶，自由采食减少一个窗口；不按时间重排，不切换模式。",
+    description: "按腹泻档位生成未生效草案：定时定量固定减少 10:00 配奶，自由采食固定减少 09:00–09:30 窗口；不按确认时间重排，不切换模式。最近记录为无时返回已结束。",
     parameters: Type.Object({
       grades: Type.Optional(Type.Array(Type.Union([
         Type.Literal("none"),
@@ -785,13 +802,14 @@ export function createFeedingTools(
         return leftAt.localeCompare(rightAt);
       });
       const latestRecord = sortedRecords[sortedRecords.length - 1] as Record<string, unknown> | undefined;
+      const latestDiarrheaStatus = latestDiarrheaStatusRecord(sortedRecords);
       const observedGrade = context.observation?.diarrheaGrade &&
         context.observation.diarrheaGrade !== "none"
         ? context.observation.diarrheaGrade
         : undefined;
       const requestedGrades = (params.grades ?? []).filter((grade): grade is DiarrheaGrade =>
         grade === "mild" || grade === "moderate" || grade === "severe");
-      const recordGradeRaw = latestRecord?.diarrheaGrade;
+      const recordGradeRaw = latestDiarrheaStatus?.diarrheaGrade;
       const recordGrade = typeof recordGradeRaw === "string" &&
         recordGradeRaw !== "none" &&
         ["mild", "moderate", "severe"].includes(recordGradeRaw)
@@ -804,7 +822,24 @@ export function createFeedingTools(
           : recordGrade
             ? [recordGrade]
             : [];
-      if (!grades.length) throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
+      const production = await productionDecisionsForBatch(context);
+      if (!grades.length) {
+        if (recordGradeRaw === "none") {
+          return record(context, "preview_diarrhea_adjustment", {
+            status: "ended",
+            reason: "最近腹泻记录已恢复为无，无需生成腹泻减餐预览。",
+            deviceOperation: null,
+            manualDispositionRequired: false,
+          }, {
+            sopVersion: production.state.sopVersion,
+            modelVersion: production.selectedDecision?.evidence.modelVersion,
+            calculationDate: production.state.dateLocal,
+            basis: "最近腹泻记录为无，不生成腹泻减餐预览。",
+            frozenReceipt: frozenReceipt(production.state),
+          });
+        }
+        throw new Error("NBJ_DIARRHEA_GRADE_REQUIRED");
+      }
       const recordActualRaw = latestRecord?.actualPowderGrams;
       const recordActual = recordActualRaw == null || recordActualRaw === ""
         ? Number.NaN
@@ -826,7 +861,6 @@ export function createFeedingTools(
             : hasRecordActual
               ? "latest_record"
               : "assumed_zero";
-      const production = await productionDecisionsForBatch(context);
       const originalDecision = computeFrozenBatchDecision(production.state.frozenContext).decision;
       const preview = previewDiarrheaAdjustment({
         decision: originalDecision,
@@ -861,7 +895,7 @@ export function createFeedingTools(
         sopVersion: preview.evidence.sopVersion,
         modelVersion: preview.evidence.modelVersion,
         calculationDate: preview.evidence.calculationDate,
-        basis: "previewDiarrheaAdjustment 仅减少一次配奶/自由采食窗口，不按时间或累计下粉量重排；预览不自动生效。",
+        basis: "previewDiarrheaAdjustment 固定减少 10:00 配奶或 09:00–09:30 自由采食窗口，仅减少一次，不按确认时间或累计下粉量重排；预览不自动生效。",
         evidence: preview.evidence,
         frozenReceipt: frozenReceipt(production.state),
       });

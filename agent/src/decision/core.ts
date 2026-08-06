@@ -8,6 +8,7 @@ import type {
   CreepGrade,
   DayDecisionInput,
   DeviceSetting,
+  DeviceWindow,
   DiarrheaAdjustmentInput,
   DiarrheaGrade,
   ExceptionAction,
@@ -33,6 +34,23 @@ const FIXED_TEACHING_TIMES = [
   "08:00",
 ] as const;
 export const FREE_FEEDING_SUGGESTED_MEAL_COUNT = 12;
+const DIARRHEA_REDUCED_TIMED_MEAL_LOCAL = "10:00";
+const DIARRHEA_REDUCED_FREE_WINDOW = { startLocal: "09:00", endLocal: "09:30" } as const;
+
+function removeDiarrheaTimedMeal(meals: TimedMeal[]): TimedMeal[] {
+  if (meals.length === 0) return meals;
+  const index = meals.findIndex((meal) => meal.timeLocal === DIARRHEA_REDUCED_TIMED_MEAL_LOCAL);
+  return meals.filter((_, itemIndex) => itemIndex !== (index >= 0 ? index : 0));
+}
+
+function removeDiarrheaFreeWindow(windows: DeviceWindow[]): DeviceWindow[] {
+  if (windows.length === 0) return windows;
+  const index = windows.findIndex((window) =>
+    window.startLocal === DIARRHEA_REDUCED_FREE_WINDOW.startLocal &&
+    window.endLocal === DIARRHEA_REDUCED_FREE_WINDOW.endLocal,
+  );
+  return windows.filter((_, itemIndex) => itemIndex !== (index >= 0 ? index : 0));
+}
 
 function fail(code: string): never {
   throw new Error(`NBJ_DECISION_${code}`);
@@ -507,15 +525,15 @@ export function previewDiarrheaAdjustment(
   const source = input.decision.setting;
   const precision = source.precisionGrams;
   const mode = source.mode;
-  const timedMeals = [...source.timedMeals];
-  const freeWindows = [...source.freeWindows];
+  let timedMeals = [...source.timedMeals];
+  let freeWindows = [...source.freeWindows];
   let dailyPowderGrams = source.dailyPowderGrams;
   let singlePowderGrams = source.singlePowderGrams;
   let mealCount = source.mealCount;
   let suggestedDailyPowderGrams = source.suggestedDailyPowderGrams;
   let suggestedDailyMealCount = source.suggestedDailyMealCount;
   if (mode === "free_feeding") {
-    if (freeWindows.length > 0) freeWindows.pop();
+    freeWindows = removeDiarrheaFreeWindow(freeWindows);
     mealCount = Math.max(0, mealCount - 1);
     dailyPowderGrams = Math.max(0, floorToPrecision(dailyPowderGrams - singlePowderGrams, precision));
     if (suggestedDailyPowderGrams !== undefined) {
@@ -525,7 +543,7 @@ export function previewDiarrheaAdjustment(
       suggestedDailyMealCount = Math.max(0, suggestedDailyMealCount - 1);
     }
   } else {
-    if (timedMeals.length > 0) timedMeals.pop();
+    timedMeals = removeDiarrheaTimedMeal(timedMeals);
     dailyPowderGrams = timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0);
     singlePowderGrams = timedMeals.length
       ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
@@ -549,7 +567,7 @@ export function previewDiarrheaAdjustment(
         fromDailyPowderGrams: source.dailyPowderGrams,
         toDailyPowderGrams: dailyPowderGrams,
       },
-      explanation: "不按确认时间或累计下粉量重排；发现腹泻时仅减少一次配奶/一个自由采食窗口。",
+      explanation: "发现腹泻时固定减少 10:00 配奶或 09:00–09:30 自由采食窗口，仅减少一次，不按确认时间或累计下粉量重排。",
     },
   ];
 
@@ -583,8 +601,8 @@ export function previewDiarrheaAdjustment(
     evidence: {
       ...input.decision.evidence,
       reasons: [
-        ...input.decision.evidence.reasons,
-        "腹泻调整仅减少一次配奶/自由采食窗口，不按时间或累计下粉量重排。",
+      ...input.decision.evidence.reasons,
+        "腹泻调整仅减少一次配奶/自由采食窗口：定时定量固定减少 10:00 配奶，自由采食固定减少 09:00–09:30 窗口；不按确认时间或累计下粉量重排。",
       ],
       inputs: {
         ...input.decision.evidence.inputs,

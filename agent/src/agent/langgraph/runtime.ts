@@ -17,7 +17,12 @@ import type { BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
 import type { FeedingTool } from "../../container/tools.js";
 import { classifyDeterministicIntent, staticEvidencePlan, staticToolArguments } from "./router.js";
 import { selectSopSubgraph } from "./subgraphs/handlers.js";
-import { deterministicDiarrheaResponse, deterministicResponse, knowledgeResponseText } from "./subgraphs/responses.js";
+import {
+  deterministicDiarrheaEndedResponse,
+  deterministicDiarrheaResponse,
+  deterministicResponse,
+  knowledgeResponseText,
+} from "./subgraphs/responses.js";
 import type {
   AgentEvidenceRef,
   AgentGraphStateContract,
@@ -87,6 +92,7 @@ const GraphState = Annotation.Root({
   todayOperations: Annotation<TodayOperationSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   knowledgeResults: Annotation<KnowledgeResultRef[] | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   diarrheaPreview: Annotation<DiarrheaPreviewSummary | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
+  diarrheaEnded: Annotation<boolean | undefined>({ reducer: (_left, right) => right, default: () => undefined }),
   dailyOperations: Annotation<AgentGraphStateContract["dailyOperations"]>({ reducer: (_left, right) => right, default: () => undefined }),
   approval: Annotation<AgentGraphStateContract["approval"]>({ reducer: (_left, right) => right, default: () => null }),
   toolExecutions: Annotation<number>({ reducer: (_left, right) => right, default: () => 0 }),
@@ -246,8 +252,8 @@ function narrationContextText(state: AgentGraphState): string {
     const preview = state.diarrheaPreview;
     const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
     const adjustmentText = preview.mode === "free_feeding"
-      ? `减少一个自由采食窗口；剩余窗口：${preview.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`).join("、") || "无"}`
-      : `减少一次配奶；当前${preview.mealCount}餐：${preview.timedMeals.map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`).join("、") || "无"}`;
+      ? `减少一个自由采食窗口（固定 09:00–09:30）；剩余窗口：${preview.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`).join("、") || "无"}`
+      : `减少一次配奶（固定 10:00）；当前${preview.mealCount}餐：${preview.timedMeals.map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`).join("、") || "无"}`;
     const sourceLabel = preview.cumulativeSource === "observation"
       ? "本次观察"
       : preview.cumulativeSource === "request"
@@ -411,6 +417,7 @@ function latestDiarrheaFromRecords(records: unknown): CurrentBatchSummary["lates
   for (let index = sorted.length - 1; index >= 0; index -= 1) {
     const row = object(sorted[index]);
     const grade = String(row?.diarrheaGrade ?? "");
+    if (grade === "none") return undefined;
     if (grade === "mild" || grade === "moderate" || grade === "severe") {
       const rawActual = row?.actualPowderGrams;
       const actual = rawActual == null || rawActual === "" ? null : finite(rawActual);
@@ -620,6 +627,12 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
   };
 }
 
+function diarrheaEndedFromToolResult(result: unknown): boolean {
+  const envelope = envelopeFromToolResult(result);
+  const data = object(envelope?.data);
+  return data?.status === "ended" || data?.ended === true;
+}
+
 function stableTurnId(input: Pick<AgentGraphRunInput, "userId" | "batchId" | "sessionId" | "clientMessageId">): string {
   return createHash("sha256").update([
     "nbj-langgraph-v2", input.userId, input.batchId, input.sessionId, input.clientMessageId,
@@ -805,7 +818,10 @@ const executeEvidenceNode = async (state: AgentGraphState, config: RunnableConfi
         ? { knowledgeResults: knowledgeResultsFromToolResult(result) }
         : {}),
       ...(name === "preview_diarrhea_adjustment"
-        ? { diarrheaPreview: diarrheaPreviewFromToolResult(result) }
+        ? {
+            diarrheaPreview: diarrheaPreviewFromToolResult(result),
+            diarrheaEnded: diarrheaEndedFromToolResult(result),
+          }
         : {}),
     };
   } catch (error) {
@@ -878,6 +894,9 @@ const renderResponseNode = async (state: AgentGraphState, config: RunnableConfig
     return { finalText: safeBlockText(state.errorCode), status: state.status };
   }
   if (state.intent.kind === "exception" || state.intent.kind === "laggard") {
+    if (state.intent.kind === "exception" && state.diarrheaEnded) {
+      return { finalText: deterministicDiarrheaEndedResponse(state.batchSummary) };
+    }
     if (state.intent.kind === "exception" && state.diarrheaPreview) {
       return { finalText: deterministicDiarrheaResponse(state.batchSummary, state.diarrheaPreview) };
     }
@@ -1075,6 +1094,7 @@ export function createAgentGraphRuntime(options: AgentGraphRuntimeOptions) {
         todayOperations: undefined,
         knowledgeResults: undefined,
         diarrheaPreview: undefined,
+        diarrheaEnded: undefined,
         dailyOperations: undefined,
         approval: null,
         toolExecutions: 0,

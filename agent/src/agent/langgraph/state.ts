@@ -120,6 +120,7 @@ export interface AgentGraphStateContract {
   todayOperations?: TodayOperationSummary;
   knowledgeResults?: KnowledgeResultRef[];
   diarrheaPreview?: DiarrheaPreviewSummary;
+  diarrheaEnded?: boolean;
   dailyOperations?: {
     planId: string;
     businessDate: string;

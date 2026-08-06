@@ -64,12 +64,17 @@ function sortedRecords(records: JsonObject[]): JsonObject[] {
   });
 }
 
-function latestDiarrheaRecord(records: JsonObject[]): JsonObject | undefined {
+/**
+ * Returns the newest record that explicitly states a diarrhea grade, including
+ * "none". A later "none" therefore closes an earlier diarrhea event instead of
+ * leaving the old abnormal record active forever.
+ */
+function latestDiarrheaStatusRecord(records: JsonObject[]): JsonObject | undefined {
   const sorted = sortedRecords(records);
   for (let index = sorted.length - 1; index >= 0; index -= 1) {
     const row = sorted[index];
-    const grade = String(row.diarrheaGrade ?? "none");
-    if (grade !== "none" && DIARRHEA_ORDER.includes(grade as DiarrheaGrade)) return row;
+    const grade = String(row.diarrheaGrade ?? "");
+    if (DIARRHEA_ORDER.includes(grade as DiarrheaGrade)) return row;
   }
   return undefined;
 }
@@ -223,7 +228,7 @@ function creepControlProposal(
 }
 
 export function evaluateObservationFeedback(input: FeedbackEngineInput): FeedbackEngineResult | null {
-  const diarrheaRecord = latestDiarrheaRecord(input.records);
+  const diarrheaRecord = latestDiarrheaStatusRecord(input.records);
   const diarrheaGradeRaw = diarrheaRecord?.diarrheaGrade;
   const observedGrade = input.observation?.diarrheaGrade;
   const grade = diarrheaRecord

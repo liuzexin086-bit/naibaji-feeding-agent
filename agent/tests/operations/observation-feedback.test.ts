@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
+import type { DailyOperationItem } from "../../src/shared/local-store-contract.js";
 import {
   digestFeedbackProposal,
   evaluateObservationFeedback,
@@ -106,6 +107,43 @@ describe("observation feedback engine", () => {
     }));
     expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
     expect(result?.proposedSetting).not.toBeNull();
+  });
+
+  it("closes diarrhea when the latest explicit grade returns to none", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [
+        { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 },
+        { recordedAt: "2026-08-05T15:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 180 },
+      ],
+    }));
+    expect(result).toBeNull();
+  });
+
+  it("drops previously materialized diarrhea feedback when the latest grade is none", () => {
+    const base = [{
+      code: "daily_patrol",
+      title: "日常巡栏",
+      dueWindow: { startLocal: "09:00", endLocal: "10:00" },
+      sopSection: "SOP.日常巡栏",
+      requiredObservationFields: [],
+      safetyNotes: [],
+    }] as DailyOperationItem[];
+    const existing = [{
+      code: "feedback_diarrhea_confirm",
+      title: "腹泻处置确认（轻度）",
+      dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
+      sopSection: "现场反馈.腹泻",
+      requiredObservationFields: [],
+      safetyNotes: [],
+      feedbackRef: {
+        originId: "origin-1",
+        kind: "diarrhea",
+        proposalDigest: "A".repeat(64),
+        requiresDeviceConfirmation: true,
+      },
+    }] as DailyOperationItem[];
+    const merged = mergeFeedbackOperations(base, existing, null);
+    expect(merged.map((item) => item.code)).not.toContain("feedback_diarrhea_confirm");
   });
 
   it("starts creep control confirmation on the configured control day", () => {

@@ -262,6 +262,49 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).toContain("轻度腹泻调整预览");
   });
 
+  it("returns an ended response when the latest diarrhea record returns to none", async () => {
+    const contextData = {
+      batch: {
+        current_day_index: 1,
+        config: { name: "批次 A" },
+        records: [
+          { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 120 },
+          { recordedAt: "2026-08-05T15:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 180 },
+        ],
+      },
+      canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+      selectedDecision: {
+        setting: {
+          dayAge: 4,
+          timedMeals: [{ timeLocal: "10:00", powderGrams: 30 }],
+          freeWindows: [],
+        },
+      },
+    };
+    const endedData = {
+      status: "ended",
+      reason: "最近腹泻记录已恢复为无，无需生成腹泻减餐预览。",
+      deviceOperation: null,
+      manualDispositionRequired: false,
+    };
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        syncTool(),
+        tool("get_batch_context", async () => receiptResult(
+          "get_batch_context", "b", contextData, 3, [0, 1, 2, 4, 10, 30, 120, 180],
+        )),
+        tool("preview_diarrhea_adjustment", async () => receiptResult(
+          "preview_diarrhea_adjustment", "b", endedData, 3, [0, 1, 2, 4, 10, 30, 120, 180],
+        )),
+      ],
+    });
+    const result = await runtime.run(input("腹泻结束了，现在怎么办"));
+    expect(result).toMatchObject({ intent: "exception", status: "completed" });
+    expect(result.text).toContain("最近腹泻记录已恢复为“无”");
+    expect(result.text).toContain("不再保留待确认的腹泻处置项");
+  });
+
   it("renders reduce-one-meal diarrhea response instead of time-based allowance", async () => {
     const contextData = {
       batch: {

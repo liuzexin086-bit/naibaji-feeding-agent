@@ -273,6 +273,67 @@ describe("today operations API", () => {
     expect(batchAfterBody.today.setting.mealCount).toBe(confirmedBody.confirmation.deviceSetting.mealCount);
   });
 
+  it("removes pending diarrhea handling after the latest grade returns to none", async () => {
+    const { base, cookie } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "腹泻结束清理", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+
+    const mild = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "diarrhea-then-none-mild",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 120 },
+      }),
+    });
+    expect(mild.status).toBe(200);
+    const mildBody = await mild.json() as {
+      feedback: { kind: string; operations: Array<{ code: string }> } | null;
+    };
+    expect(mildBody.feedback).toMatchObject({
+      kind: "diarrhea",
+      operations: [{ code: "feedback_diarrhea_confirm" }],
+    });
+
+    const activePlan = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const activeBody = await activePlan.json() as {
+      plan: { operations: Array<{ code: string }> };
+    };
+    expect(activeBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+
+    const none = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "diarrhea-then-none-none",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 180 },
+      }),
+    });
+    expect(none.status).toBe(200);
+    const noneBody = await none.json() as {
+      feedback: { kind: string } | null;
+    };
+    expect(noneBody.feedback).toBeNull();
+
+    const clearedPlan = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const clearedBody = await clearedPlan.json() as {
+      plan: { operations: Array<{ code: string }> };
+    };
+    expect(clearedBody.plan.operations.map((item) => item.code))
+      .not.toContain("feedback_diarrhea_confirm");
+  });
+
   it("materializes creep-control feedback into the next day plan after sustained creep", async () => {
     const { base, cookie } = await startApi();
     const created = await request(base, "/api/batches", {
