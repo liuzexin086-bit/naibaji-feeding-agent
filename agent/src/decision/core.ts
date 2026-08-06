@@ -289,7 +289,8 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const selected = resolveSopTarget(input, curveLimit);
   const safeDailyTotal = floorToPrecision(selected.target, precision);
   const exceptionActions = exceptionActionsFor(input, selected.target, curveLimit);
-  const forcedTimed = exceptionActions.length > 0 || input.milkControlActive === true;
+  const forcedTimed = exceptionActions.some((action) => action.type !== "diarrhea") ||
+    input.milkControlActive === true;
   const mode = forcedTimed ? "timed_quantity" : (input.requestedMode ?? "timed_quantity");
 
   let times: string[];
@@ -360,7 +361,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       : "not_recorded";
   const reasons = [selected.explanation];
   if (selected.target > curveLimit) reasons.push("SOP 目标量超过模型曲线，已生成现场人工确认处置。 ");
-  if (forcedTimed) reasons.push("异常或控奶条件触发定时定量模式。 ");
+  if (forcedTimed) reasons.push("非腹泻异常或控奶条件触发定时定量模式。 ");
   if (input.teachingProgram?.enabled) reasons.push("教奶程序持续至次日 08:00（含 08:00 餐）。");
   if (input.teachingProgram?.enabled && selected.source !== "production_model") {
     reasons.push("首日教奶量采用冻结 SOP，按实际 6 个教奶时间点形成设备程序。");
@@ -498,54 +499,57 @@ function gradeTargetRatio(grade: DiarrheaGrade): number {
 export function previewDiarrheaAdjustment(
   input: DiarrheaAdjustmentInput,
 ): FeedingDecision {
-  const observed = new Date(input.observedAt);
-  if (!Number.isFinite(observed.getTime())) fail("INVALID_OBSERVED_AT");
-  const actual = finiteNonNegative(
-    input.cumulativePowderGrams,
-    "INVALID_CUMULATIVE_POWDER",
-  );
   const worstGrade = worstDiarrheaGrade(input.grades);
   const targetRatio = input.targetRatio ?? gradeTargetRatio(worstGrade);
   if (!Number.isFinite(targetRatio) || targetRatio < 0 || targetRatio > 1) {
     fail("INVALID_DIARRHEA_TARGET_RATIO");
   }
-  const precision = input.decision.setting.precisionGrams;
-  const adjustedDayCap = floorToPrecision(
-    input.decision.setting.dailyPowderGrams * targetRatio,
-    precision,
-  );
-  const remainingAllowance = floorToPrecision(
-    Math.max(0, adjustedDayCap - actual),
-    precision,
-  );
-  const observedTime = observedLocalHourMinute(input.observedAt);
-  const remainingTimes = input.remainingMealTimes ??
-    remainingBusinessDayTimes(
-      input.decision.setting.timedMeals.map((meal) => meal.timeLocal),
-      observedTime,
-    );
-  remainingTimes.forEach(minuteOfDay);
-  const timedMeals = allocate(remainingAllowance, remainingTimes, precision);
+  const source = input.decision.setting;
+  const precision = source.precisionGrams;
+  const mode = source.mode;
+  const timedMeals = [...source.timedMeals];
+  const freeWindows = [...source.freeWindows];
+  let dailyPowderGrams = source.dailyPowderGrams;
+  let singlePowderGrams = source.singlePowderGrams;
+  let mealCount = source.mealCount;
+  let suggestedDailyPowderGrams = source.suggestedDailyPowderGrams;
+  let suggestedDailyMealCount = source.suggestedDailyMealCount;
+  if (mode === "free_feeding") {
+    if (freeWindows.length > 0) freeWindows.pop();
+    mealCount = Math.max(0, mealCount - 1);
+    dailyPowderGrams = Math.max(0, floorToPrecision(dailyPowderGrams - singlePowderGrams, precision));
+    if (suggestedDailyPowderGrams !== undefined) {
+      suggestedDailyPowderGrams = Math.max(0, floorToPrecision(suggestedDailyPowderGrams - singlePowderGrams, precision));
+    }
+    if (suggestedDailyMealCount !== undefined) {
+      suggestedDailyMealCount = Math.max(0, suggestedDailyMealCount - 1);
+    }
+  } else {
+    if (timedMeals.length > 0) timedMeals.pop();
+    dailyPowderGrams = timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0);
+    singlePowderGrams = timedMeals.length
+      ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
+      : 0;
+    mealCount = timedMeals.length;
+  }
   const adjustmentSteps = [
     {
       name: "diarrhea_grade",
-      value: { grades: [...input.grades], worstGrade, targetRatio },
-      explanation: "按最严重腹泻档位或显式 SOP/兽医比例确定当日调整上限。",
+      value: { grades: [...input.grades], worstGrade, targetRatio, mode },
+      explanation: "按最严重腹泻档位识别，只减少一次配奶/自由采食窗口。",
     },
     {
-      name: "cumulative_actual_powder",
-      value: actual,
-      explanation: "使用设备累计实际下粉量，而不是计划量或估算量。",
-    },
-    {
-      name: "remaining_allowance",
-      value: { adjustedDayCap, cumulativePowderGrams: actual, remainingAllowance },
-      explanation: "剩余额度 = 调整后当日上限 - 累计实际粉量，最低为 0，并向下按设备精度取整。",
-    },
-    {
-      name: "remaining_timed_meals",
-      value: timedMeals,
-      explanation: "只在剩余定时餐中分配剩余额度，合计不超过剩余额度。",
+      name: "reduce_one_feeding",
+      value: {
+        mode,
+        fromMealCount: source.mealCount,
+        toMealCount: mealCount,
+        fromWindows: source.freeWindows.length,
+        toWindows: freeWindows.length,
+        fromDailyPowderGrams: source.dailyPowderGrams,
+        toDailyPowderGrams: dailyPowderGrams,
+      },
+      explanation: "不按确认时间或累计下粉量重排；发现腹泻时仅减少一次配奶/一个自由采食窗口。",
     },
   ];
 
@@ -553,25 +557,24 @@ export function previewDiarrheaAdjustment(
     ...input.decision,
     revision: input.decision.revision + 1,
     setting: {
-      ...input.decision.setting,
-      mode: "timed_quantity",
-      dailyPowderGrams: remainingAllowance,
-      singlePowderGrams: timedMeals.length
-        ? Math.max(...timedMeals.map((meal) => meal.powderGrams))
-        : 0,
-      mealCount: timedMeals.length,
+      ...source,
+      mode,
+      dailyPowderGrams,
+      singlePowderGrams,
+      mealCount,
       timedMeals,
-      freeWindows: [],
+      freeWindows,
+      ...(suggestedDailyPowderGrams !== undefined ? { suggestedDailyPowderGrams } : {}),
+      ...(suggestedDailyMealCount !== undefined ? { suggestedDailyMealCount } : {}),
     },
     exceptionActions: [
       ...input.decision.exceptionActions.filter((action) => action.type !== "diarrhea"),
       {
         type: "diarrhea",
         severity: "urgent",
-        title: `腹泻调整预览：${worstGrade}`,
+        title: `腹泻调整预览：${worstGrade}（减少一次配奶/自由采食窗口）`,
         actions: [
-          "暂停常规增量。",
-          "按剩余额度设置定时定量餐。",
+          "仅减少一次配奶/自由采食窗口。",
           "现场检查并按兽医/场区 SOP 处置。",
         ],
         requiresHumanConfirmation: true,
@@ -581,15 +584,16 @@ export function previewDiarrheaAdjustment(
       ...input.decision.evidence,
       reasons: [
         ...input.decision.evidence.reasons,
-        "腹泻调整仅为草案，必须人工审批后生效。",
+        "腹泻调整仅减少一次配奶/自由采食窗口，不按时间或累计下粉量重排。",
       ],
       inputs: {
         ...input.decision.evidence.inputs,
         diarrheaAdjustment: {
-          observedAt: input.observedAt,
           grades: [...input.grades],
-          cumulativePowderGrams: actual,
+          mode,
           targetRatio,
+          reducedMealCount: Math.max(0, source.mealCount - mealCount),
+          reducedWindowCount: Math.max(0, source.freeWindows.length - freeWindows.length),
         },
       },
       steps: [...input.decision.evidence.steps, ...adjustmentSteps],

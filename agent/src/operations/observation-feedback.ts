@@ -168,7 +168,6 @@ function diarrheaProposal(
   kind: FeedbackOriginKind,
   businessDate: string,
   grade: Exclude<DiarrheaGrade, "none">,
-  cumulativePowderGrams: number,
   preview: FeedingDecision,
 ): FeedbackDeviceProposal {
   const proposal: FeedbackDeviceProposal = {
@@ -183,12 +182,12 @@ function diarrheaProposal(
     freeWindows: preview.setting.freeWindows,
     precisionGrams: preview.setting.precisionGrams,
     source: preview.setting.source,
-    rationale: preview.evidence.reasons.slice(-3),
+    rationale: [
+      ...preview.evidence.reasons.slice(-2),
+      "确认后减少一次配奶/自由采食窗口。",
+    ],
     manualDispositionRequired: false,
     proposalDigest: "",
-    cumulativePowderGrams,
-    targetRatio: DIARRHEA_RATIO[grade],
-    remainingMealTimes: preview.setting.timedMeals.map((meal) => meal.timeLocal),
   };
   proposal.proposalDigest = digestFeedbackProposal(proposal);
   return proposal;
@@ -239,9 +238,6 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       ? diarrheaRecord.actualPowderGrams
       : input.observation?.actualPowderGrams;
     const cumulativePowderGrams = rawActual == null || rawActual === "" ? null : Number(rawActual);
-    const hasCumulative = cumulativePowderGrams !== null &&
-      Number.isFinite(cumulativePowderGrams) && cumulativePowderGrams >= 0;
-    const canPropose = diarrheaGrade !== "severe" && hasCumulative;
     const sourceRecord = diarrheaRecord ?? input.observation ?? {};
     const sourceRef = {
       recordedAt: String(sourceRecord.recordedAt ?? sourceRecord.created_at ?? ""),
@@ -256,56 +252,38 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       sourceObservation: {
         recordedAt: String(sourceRecord.recordedAt ?? sourceRecord.created_at ?? new Date().toISOString()),
         ...(diarrheaGrade ? { diarrheaGrade } : {}),
-        ...(hasCumulative ? { actualPowderGrams: cumulativePowderGrams } : {}),
+        ...(cumulativePowderGrams !== null ? { actualPowderGrams: cumulativePowderGrams } : {}),
       },
       reason: "",
       createdAt: new Date().toISOString(),
     };
-    if (canPropose) {
-      const preview = previewDiarrheaAdjustment({
-        decision: input.decision,
-        grades: [diarrheaGrade],
-        cumulativePowderGrams: cumulativePowderGrams as number,
-        observedAt: String(sourceRecord.recordedAt ?? new Date().toISOString()),
-      });
-      const proposal = diarrheaProposal(
-        "diarrhea",
-        input.businessDate,
-        diarrheaGrade,
-        cumulativePowderGrams as number,
-        preview,
-      );
-      const origin: FeedbackOrigin = {
-        ...originBase,
-        reason: `已录入${diarrheaGrade === "mild" ? "轻度" : "中度"}腹泻且累计实际下粉${cumulativePowderGrams}g，生成待确认设备方案。`,
-        proposal,
-      };
-      const operation = feedbackOperation(
-        origin,
-        proposal,
-        "feedback_diarrhea_confirm",
-        `腹泻处置确认（${diarrheaGrade === "mild" ? "轻度" : "中度"}）`,
-        "确认后按待确认方案写入当日设备设定；未确认前设备保持不变。",
-        ["diarrheaGrade", "actualPowderGrams"],
-      );
-      return { kind: "diarrhea", reason: origin.reason, operations: [operation], feedbackOrigin: origin, proposedSetting: proposal };
-    }
-    const manualLabel = diarrheaGrade === "severe" ? "重度" : "缺少累计实际下粉";
+    const gradeLabel = diarrheaGrade === "mild" ? "轻度" : diarrheaGrade === "moderate" ? "中度" : "重度";
+    const preview = previewDiarrheaAdjustment({
+      decision: input.decision,
+      grades: [diarrheaGrade],
+      cumulativePowderGrams: cumulativePowderGrams ?? 0,
+      observedAt: String(sourceRecord.recordedAt ?? new Date().toISOString()),
+    });
+    const proposal = diarrheaProposal(
+      "diarrhea",
+      input.businessDate,
+      diarrheaGrade,
+      preview,
+    );
     const origin: FeedbackOrigin = {
       ...originBase,
-      reason: diarrheaGrade === "severe"
-        ? "重度腹泻进入人工处置路径，不生成自动设备方案。"
-        : "已识别腹泻但缺少设备累计实际下粉量，无法确定调整额度，进入人工处置路径。",
+      reason: `已记录${gradeLabel}腹泻，按规则减少一次配奶/自由采食窗口，生成待确认设备方案。`,
+      proposal,
     };
     const operation = feedbackOperation(
       origin,
-      null,
-      "feedback_diarrhea_manual",
-      `腹泻人工处置（${manualLabel}）`,
-      "执行现场检查与人工处置；不自动写入设备方案。",
+      proposal,
+      "feedback_diarrhea_confirm",
+      `腹泻处置确认（${gradeLabel}）`,
+      "确认后减少一次配奶/自由采食窗口；未确认前设备保持不变。",
       ["diarrheaGrade", "actualPowderGrams"],
     );
-    return { kind: "diarrhea", reason: origin.reason, operations: [operation], feedbackOrigin: origin, proposedSetting: null };
+    return { kind: "diarrhea", reason: origin.reason, operations: [operation], feedbackOrigin: origin, proposedSetting: proposal };
   }
 
   const controlStartDay = typeof input.config.controlStartDay === "number"

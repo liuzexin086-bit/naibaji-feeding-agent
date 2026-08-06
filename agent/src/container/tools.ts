@@ -755,7 +755,7 @@ export function createFeedingTools(
   const previewDiarrhea: FeedingTool<any, any> = {
     name: "preview_diarrhea_adjustment",
     label: "预览腹泻调整",
-    description: "先调用确定性决策核心，按腹泻档位、设备累计实际下粉量和剩余餐次生成未生效的设备调整草案；严重异常转人工处置。",
+    description: "按腹泻档位生成未生效草案：定时定量减少一次配奶，自由采食减少一个窗口；不按时间重排，不切换模式。",
     parameters: Type.Object({
       grades: Type.Optional(Type.Array(Type.Union([
         Type.Literal("none"),
@@ -834,7 +834,6 @@ export function createFeedingTools(
         observedAt: params.observedAt ?? shanghaiLocalNowIso(),
         remainingMealTimes: params.remainingMealTimes,
       });
-      const severe = grades.includes("severe");
       const worstGrade = grades.reduce<DiarrheaGrade>((worst, grade) =>
         ["none", "mild", "moderate", "severe"].indexOf(grade) >
         ["none", "mild", "moderate", "severe"].indexOf(worst)
@@ -849,20 +848,19 @@ export function createFeedingTools(
           remainingDailyPowderGrams: preview.setting.dailyPowderGrams,
           singlePowderGrams: preview.setting.singlePowderGrams,
           timedMeals: preview.setting.timedMeals,
-          clearFreeFeedingWindows: true,
+          freeWindows: preview.setting.freeWindows,
+          clearFreeFeedingWindows: false,
           requiresHumanApproval: true,
-          manualDispositionRequired: severe,
+          manualDispositionRequired: false,
         },
         cumulativePowderGrams: cumulativeValue,
         cumulativeSource,
-        severeException: severe
-          ? "严重异常：暂停常规增量，执行现场检查并进入人工处置。"
-          : null,
+        severeException: null,
       }, {
         sopVersion: preview.evidence.sopVersion,
         modelVersion: preview.evidence.modelVersion,
         calculationDate: preview.evidence.calculationDate,
-        basis: "previewDiarrheaAdjustment 使用设备累计实际下粉量，只重排剩余定时餐；预览不自动生效。",
+        basis: "previewDiarrheaAdjustment 仅减少一次配奶/自由采食窗口，不按时间或累计下粉量重排；预览不自动生效。",
         evidence: preview.evidence,
         frozenReceipt: frozenReceipt(production.state),
       });

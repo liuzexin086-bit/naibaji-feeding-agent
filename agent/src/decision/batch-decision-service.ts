@@ -241,7 +241,6 @@ function freeFeedingBlockers(
   const configured = new Set(context.devicePlan.templates.free_feeding.exceptionBlockers);
   const signalBlockers: Array<[string, boolean]> = [
     ["milk_control", (context.modelInput.controlStartDay ?? -1) >= 0 && dayIndex >= (context.modelInput.controlStartDay ?? -1)],
-    ["diarrhea", typeof latest?.diarrheaGrade === "string" && latest.diarrheaGrade !== "none"],
     ["refusal", latest?.feedingResponse === "refusal" || latest?.refusal === true],
     ["blockage", latest?.deviceStatus === "blocked" || latest?.blockage === true],
     ["probe_contamination", latest?.deviceStatus === "probe_contaminated" || latest?.probeContaminated === true],
@@ -353,7 +352,9 @@ export function computeFrozenBatchDecision(
   const outputBlockers = new Set(initialFreeFeedingBlockers);
   if (context.selectedMode === "free_feeding" && dayIndex > 0) {
     for (const action of decision.exceptionActions) {
-      if (FREE_FEEDING_BLOCKERS.has(action.type)) outputBlockers.add(action.type);
+      if (FREE_FEEDING_BLOCKERS.has(action.type) && action.type !== "diarrhea") {
+        outputBlockers.add(action.type);
+      }
     }
   }
   return {

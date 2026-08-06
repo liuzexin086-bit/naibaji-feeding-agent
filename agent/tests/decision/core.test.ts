@@ -139,7 +139,7 @@ describe("deterministic day decision", () => {
     expect(decision.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(211);
   });
 
-  it("limits free feeding to eight windows and forces timed mode for risk/control/diarrhea", () => {
+  it("limits free feeding to eight windows and forces timed only for control, not diarrhea", () => {
     const windows = Array.from({ length: 8 }, (_, index) => ({
       startLocal: `${String(index).padStart(2, "0")}:00`,
       endLocal: `${String(index).padStart(2, "0")}:30`,
@@ -153,7 +153,7 @@ describe("deterministic day decision", () => {
     expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", milkControlActive: true })).setting.mode)
       .toBe("timed_quantity");
     expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", diarrheaGrades: ["mild"] })).setting.mode)
-      .toBe("timed_quantity");
+      .toBe("free_feeding");
   });
 
   it("normalizes free-feeding windows on the 09:00 business-day axis", () => {
@@ -218,7 +218,7 @@ describe("deterministic day decision", () => {
 });
 
 describe("diarrhea adjustment preview", () => {
-  it("subtracts cumulative actual powder and allocates only across remaining timed meals", () => {
+  it("reduces one timed meal regardless of observed time or cumulative powder", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -232,20 +232,16 @@ describe("diarrhea adjustment preview", () => {
     });
     expect(preview.status).toBe("draft");
     expect(preview.setting.mode).toBe("timed_quantity");
-    expect(preview.setting.dailyPowderGrams).toBe(140);
+    expect(preview.setting.dailyPowderGrams).toBe(450);
     expect(preview.setting.timedMeals).toEqual([
-      { timeLocal: "06:00", powderGrams: 47 },
-      { timeLocal: "18:00", powderGrams: 47 },
-      { timeLocal: "23:00", powderGrams: 46 },
+      { timeLocal: "06:00", powderGrams: 150 },
+      { timeLocal: "12:00", powderGrams: 150 },
+      { timeLocal: "18:00", powderGrams: 150 },
     ]);
-    expect(preview.evidence.steps.at(-2)?.value).toEqual({
-      adjustedDayCap: 450,
-      cumulativePowderGrams: 310,
-      remainingAllowance: 140,
-    });
+    expect(preview.evidence.reasons.join(" ")).toContain("减少一次配奶");
   });
 
-  it("returns zero allowance when actual powder already exceeds the adjusted cap", () => {
+  it("still reduces exactly one meal even when cumulative powder already exceeds the day cap", () => {
     const decision = computeDayDecision(baseInput());
     const preview = previewDiarrheaAdjustment({
       decision,
@@ -254,12 +250,11 @@ describe("diarrhea adjustment preview", () => {
       cumulativePowderGrams: 500,
       remainingMealTimes: ["12:00", "18:00"],
     });
-    expect(preview.setting.dailyPowderGrams).toBe(0);
-    expect(preview.setting.timedMeals).toEqual([]);
-    expect(preview.setting.mealCount).toBe(0);
+    expect(preview.setting.dailyPowderGrams).toBe(630);
+    expect(preview.setting.mealCount).toBe(9);
   });
 
-  it("keeps the next-day overnight meals after a 23:30 observation", () => {
+  it("removes one meal without depending on the observation time", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 6 },
       timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
@@ -270,22 +265,27 @@ describe("diarrhea adjustment preview", () => {
       grades: ["moderate"],
       cumulativePowderGrams: 0,
     });
-    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["02:00", "05:00", "08:00"]);
-    expect(preview.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(450);
+    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal)).toEqual(["17:00", "20:00", "23:00", "02:00", "05:00"]);
+    expect(preview.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(500);
   });
 
-  it("treats UTC observed timestamps as Asia/Shanghai local time", () => {
+  it("keeps free-feeding mode and removes one free window for diarrhea", () => {
     const decision = computeDayDecision(baseInput({
-      sop: { directTotalPowderGrams: 600, mealCount: 6 },
-      timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
+      requestedMode: "free_feeding",
+      freeWindows: [
+        { startLocal: "06:00", endLocal: "06:30" },
+        { startLocal: "09:00", endLocal: "09:30" },
+        { startLocal: "15:00", endLocal: "15:30" },
+      ],
     }));
     const preview = previewDiarrheaAdjustment({
       decision,
-      observedAt: "2026-07-31T09:00:00.000Z",
+      observedAt: "2026-07-31T12:00:00+08:00",
       grades: ["moderate"],
       cumulativePowderGrams: 0,
     });
-    expect(preview.setting.timedMeals.map((meal) => meal.timeLocal))
-      .toEqual(["20:00", "23:00", "02:00", "05:00", "08:00"]);
+    expect(preview.setting.mode).toBe("free_feeding");
+    expect(preview.setting.freeWindows.map((window) => window.startLocal)).toEqual(["06:00", "09:00"]);
+    expect(preview.setting.mealCount).toBe(decision.setting.mealCount - 1);
   });
 });

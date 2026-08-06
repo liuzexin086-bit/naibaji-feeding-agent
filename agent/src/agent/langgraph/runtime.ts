@@ -245,9 +245,9 @@ function narrationContextText(state: AgentGraphState): string {
   if (state.diarrheaPreview) {
     const preview = state.diarrheaPreview;
     const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
-    const times = preview.timedMeals
-      .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
-      .join("、");
+    const adjustmentText = preview.mode === "free_feeding"
+      ? `减少一个自由采食窗口；剩余窗口：${preview.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`).join("、") || "无"}`
+      : `减少一次配奶；当前${preview.mealCount}餐：${preview.timedMeals.map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`).join("、") || "无"}`;
     const sourceLabel = preview.cumulativeSource === "observation"
       ? "本次观察"
       : preview.cumulativeSource === "request"
@@ -255,7 +255,7 @@ function narrationContextText(state: AgentGraphState): string {
         : preview.cumulativeSource === "latest_record"
           ? "最近记录"
           : "未录入按0估算";
-    parts.push(`腹泻调整预览：${gradeLabel}；剩余${preview.mealCount}餐；${times}；剩余程序总量${preview.remainingDailyPowderGrams}g；单次最大下粉${preview.singlePowderGrams}g；按累计实际下粉${preview.cumulativePowderGrams}g（${sourceLabel}）计算。`);
+    parts.push(`腹泻调整预览：${gradeLabel}；${adjustmentText}；程序总量${preview.remainingDailyPowderGrams}g；单次最大下粉${preview.singlePowderGrams}g；按累计实际下粉${preview.cumulativePowderGrams}g（${sourceLabel}）计算。`);
   }
   parts.push("以上数字均已通过确定性证据校验。");
   return parts.join("\n");
@@ -571,6 +571,9 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
   if (!deviceOperation || !setting || !["mild", "moderate", "severe"].includes(worstGrade)) {
     return undefined;
   }
+  const mode = deviceOperation.mode === "free_feeding" || setting.mode === "free_feeding"
+    ? "free_feeding"
+    : "timed_quantity";
   const timedMeals: DiarrheaPreviewSummary["timedMeals"] = [];
   if (Array.isArray(setting.timedMeals)) {
     for (const meal of setting.timedMeals) {
@@ -582,26 +585,38 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
       }
     }
   }
+  const freeWindows: DiarrheaPreviewSummary["freeWindows"] = [];
+  if (Array.isArray(setting.freeWindows)) {
+    for (const window of setting.freeWindows) {
+      const row = object(window);
+      const startLocal = localTime(row?.startLocal);
+      const endLocal = localTime(row?.endLocal);
+      if (startLocal && endLocal) freeWindows.push({ startLocal, endLocal });
+    }
+  }
   const remainingDailyPowderGrams = finite(deviceOperation.remainingDailyPowderGrams);
   const singlePowderGrams = finite(deviceOperation.singlePowderGrams);
   const mealCount = finite(deviceOperation.mealCount ?? setting.mealCount);
-  const cumulativePowderGrams = finite(data?.cumulativePowderGrams);
+  const cumulativePowderGrams = finite(data?.cumulativePowderGrams) ?? 0;
   const cumulativeSource = String(data?.cumulativeSource ?? "");
   if (remainingDailyPowderGrams === undefined || singlePowderGrams === undefined ||
-      mealCount === undefined || cumulativePowderGrams === undefined ||
-      !["observation", "request", "latest_record", "assumed_zero"].includes(cumulativeSource)) {
+      mealCount === undefined) {
     return undefined;
   }
   return {
     worstGrade: worstGrade as DiarrheaPreviewSummary["worstGrade"],
-    mode: "timed_quantity",
+    mode,
     remainingDailyPowderGrams,
     singlePowderGrams,
     mealCount,
     timedMeals,
+    freeWindows,
     manualDispositionRequired: deviceOperation.manualDispositionRequired === true,
     cumulativePowderGrams,
-    cumulativeSource: cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"],
+    cumulativeSource: (["observation", "request", "latest_record", "assumed_zero"] as const)
+      .includes(cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"])
+      ? cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"]
+      : "observation",
   };
 }
 

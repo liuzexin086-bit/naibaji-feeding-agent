@@ -79,13 +79,12 @@ describe("observation feedback engine", () => {
     expect(result?.proposedSetting).toMatchObject({
       kind: "diarrhea",
       manualDispositionRequired: false,
-      cumulativePowderGrams: 120,
     });
     expect(result?.proposedSetting?.proposalDigest).toMatch(/^[A-F0-9]{64}$/);
     expect(result?.feedbackOrigin.status).toBe("proposed");
   });
 
-  it("keeps severe diarrhea manual-only without a proposal", () => {
+  it("generates a reduce-one-meal proposal for severe diarrhea", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
         recordedAt: "2026-08-05T09:00:00.000Z",
@@ -93,11 +92,11 @@ describe("observation feedback engine", () => {
         actualPowderGrams: 120,
       }],
     }));
-    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_manual");
-    expect(result?.proposedSetting).toBeNull();
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
+    expect(result?.proposedSetting).not.toBeNull();
   });
 
-  it("keeps diarrhea manual-only when cumulative powder is missing", () => {
+  it("generates a proposal even when cumulative powder is missing", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
         recordedAt: "2026-08-05T09:00:00.000Z",
@@ -105,8 +104,8 @@ describe("observation feedback engine", () => {
         actualPowderGrams: null,
       }],
     }));
-    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_manual");
-    expect(result?.proposedSetting).toBeNull();
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
+    expect(result?.proposedSetting).not.toBeNull();
   });
 
   it("starts creep control confirmation on the configured control day", () => {

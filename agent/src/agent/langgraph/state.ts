@@ -70,11 +70,12 @@ export interface KnowledgeResultRef {
 
 export interface DiarrheaPreviewSummary {
   worstGrade: "mild" | "moderate" | "severe";
-  mode: "timed_quantity";
+  mode: FeedingMode;
   remainingDailyPowderGrams: number;
   singlePowderGrams: number;
   mealCount: number;
   timedMeals: Array<{ timeLocal: string; powderGrams: number }>;
+  freeWindows: Array<{ startLocal: string; endLocal: string }>;
   manualDispositionRequired: boolean;
   cumulativePowderGrams: number;
   cumulativeSource: "observation" | "request" | "latest_record" | "assumed_zero";

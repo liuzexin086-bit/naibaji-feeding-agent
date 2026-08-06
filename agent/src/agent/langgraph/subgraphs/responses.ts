@@ -104,23 +104,16 @@ export function deterministicDiarrheaResponse(
 ): string {
   const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
   const prefix = batchPrefix(summary);
-  if (preview.manualDispositionRequired) {
-    return `${prefix}严重腹泻：暂停常规增量，执行现场检查并进入人工处置；系统不提供常规增量建议，也不会自动更改设备程序。`;
-  }
-  if (preview.cumulativeSource === "assumed_zero") {
-    return `${prefix}已识别${gradeLabel}腹泻，但未录入设备实际累计下粉量。为避免超喂，不能给出可执行粉量；请先录入当日实际总量，或按现场人工处置原则执行。`;
-  }
-  if (preview.remainingDailyPowderGrams === 0) {
-    return `${prefix}今日剩余调整额度已为 0，暂停今日继续下粉；执行现场检查并按兽医/场区 SOP 处置。该预览不会自动生效，需人工确认。`;
-  }
-  if (preview.mealCount === 0) {
-    return `${prefix}今日剩余调整额度 ${preview.remainingDailyPowderGrams}g，但当前时间后已无待执行餐次；请按现场异常处置流程人工确认是否补执行。该预览不会自动生效，需人工确认。`;
+  if (preview.mode === "free_feeding") {
+    const windows = preview.freeWindows
+      .map((window) => `${window.startLocal}–${window.endLocal}`)
+      .join("、") || "无";
+    return `${prefix}已生成${gradeLabel}腹泻调整预览：减少一个自由采食窗口；剩余 ${preview.freeWindows.length} 个窗口：${windows}。该预览不会自动生效，需人工确认后写入设备。`;
   }
   const times = preview.timedMeals
     .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
-    .join("、");
-  const base = `${prefix}已生成${gradeLabel}腹泻调整预览：设备切换为定时定量；剩余 ${preview.mealCount} 餐：${times}；剩余程序总量 ${preview.remainingDailyPowderGrams}g，单次最大下粉 ${preview.singlePowderGrams}g。`;
-  return `${base}该预览不会自动生效，需人工确认后写入设备。`;
+    .join("、") || "无";
+  return `${prefix}已生成${gradeLabel}腹泻调整预览：减少一次配奶；当前 ${preview.mealCount} 餐：${times}；程序总量 ${preview.remainingDailyPowderGrams}g，单次最大下粉 ${preview.singlePowderGrams}g。该预览不会自动生效，需人工确认后写入设备。`;
 }
 
 /** Deterministic rendering of verified knowledge retrieved from the frozen SOP. */

@@ -262,7 +262,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(result.text).toContain("轻度腹泻调整预览");
   });
 
-  it("renders zero-allowance diarrhea response without an empty meal list", async () => {
+  it("renders reduce-one-meal diarrhea response instead of time-based allowance", async () => {
     const contextData = {
       batch: {
         current_day_index: 1,
@@ -318,11 +318,12 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("腹泻后设备怎么设"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("剩余调整额度已为 0");
+    expect(result.text).toContain("减少一次配奶");
+    expect(result.text).not.toContain("剩余调整额度已为 0");
     expect(result.text).not.toContain("剩余 0 餐：");
   });
 
-  it("explains when remaining allowance exists but no meals remain", async () => {
+  it("keeps reduce-one-meal wording even when no meals remain", async () => {
     const contextData = {
       batch: {
         current_day_index: 1,
@@ -378,8 +379,9 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("腹泻后设备怎么设"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("剩余调整额度 89g");
-    expect(result.text).toContain("已无待执行餐次");
+    expect(result.text).toContain("减少一次配奶");
+    expect(result.text).toContain("程序总量 89g");
+    expect(result.text).not.toContain("已无待执行餐次");
   });
 
   it("gives every general turn the verified batch context", async () => {
@@ -411,7 +413,7 @@ describe("LangGraph v2 deterministic runtime", () => {
     expect(String(contextMessage?.content ?? "")).toContain("日龄3");
   });
 
-  it("does not output executable diarrhea numbers when cumulative powder is missing", async () => {
+  it("outputs reduce-one-meal diarrhea numbers even when cumulative powder is missing", async () => {
     const contextData = {
       batch: { current_day_index: 1, config: { name: "批次 A" } },
       canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -461,12 +463,11 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("已录入轻度腹泻，请给出具体设备操作。"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("未录入");
-    expect(result.text).not.toContain("剩余程序总量");
-    expect(result.text).not.toContain("单次最大下粉");
+    expect(result.text).toContain("减少一次配奶");
+    expect(result.text).not.toContain("未录入");
   });
 
-  it("keeps severe diarrhea responses manual-only", async () => {
+  it("applies reduce-one-meal response for severe diarrhea", async () => {
     const contextData = {
       batch: { current_day_index: 1, config: { name: "批次 A" } },
       canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
@@ -496,7 +497,7 @@ describe("LangGraph v2 deterministic runtime", () => {
         timedMeals: [],
         clearFreeFeedingWindows: true,
         requiresHumanApproval: true,
-        manualDispositionRequired: true,
+        manualDispositionRequired: false,
       },
       cumulativePowderGrams: 120,
       cumulativeSource: "observation",
@@ -516,10 +517,9 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
     const result = await runtime.run(input("已录入重度腹泻，请给出具体设备操作。"));
     expect(result.status).toBe("completed");
-    expect(result.text).toContain("严重腹泻");
-    expect(result.text).toContain("人工处置");
-    expect(result.text).not.toContain("剩余程序总量");
-    expect(result.text).not.toContain("单次最大下粉");
+    expect(result.text).toContain("减少一次配奶");
+    expect(result.text).toContain("人工确认");
+    expect(result.text).not.toContain("人工处置");
   });
 
   it("asks for the diarrhea grade when the preview cannot derive one", async () => {

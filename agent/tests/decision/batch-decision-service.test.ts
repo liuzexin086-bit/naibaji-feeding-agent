@@ -92,15 +92,15 @@ describe("BatchDecisionService frozen inputs", () => {
     ]);
   });
 
-  it("preserves selected free-feeding mode while an eligible frozen blocker forces timed quantity", () => {
+  it("keeps selected free-feeding mode when diarrhea is recorded and does not block free feeding", () => {
     const context = loadFrozenBatchDecisionContext({
       ...source(),
       records: [{ diarrheaGrade: "moderate" }],
     });
     const canonical = computeFrozenBatchDecision(context);
     expect(canonical.selectedMode).toBe("free_feeding");
-    expect(canonical.effectiveMode).toBe("timed_quantity");
-    expect(canonical.freeFeedingBlockers).toContain("diarrhea");
+    expect(canonical.effectiveMode).toBe("free_feeding");
+    expect(canonical.freeFeedingBlockers).not.toContain("diarrhea");
   });
 
   it("fails closed for a missing or tampered frozen SOP snapshot", () => {
