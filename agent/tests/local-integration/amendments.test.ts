@@ -111,7 +111,7 @@ describe("post-confirmation amendments", () => {
         feedbackRef: { originId, kind: "diarrhea" as const, requiresDeviceConfirmation: true },
       }],
       proposal: null,
-      basedOnBatchRevision: batch.revision,
+      basedOnBatchRevision: batch.revision + 1,
     };
     const first = Promise.resolve().then(() => store.ensureDailyOperationAmendment({
       ...baseInput,
@@ -180,7 +180,7 @@ describe("post-confirmation amendments", () => {
       effectiveHeads: 20,
       creepGrade: "none",
       diarrheaGrade: "mild",
-      actualPowderGrams: 120,
+      actualPowderGrams: 0,
     };
     const saved = await request(base, `/api/batches/${batchId}/records`, {
       method: "POST",
@@ -222,7 +222,7 @@ describe("post-confirmation amendments", () => {
       headers: { cookie },
       body: JSON.stringify({
         expectedRevision: store.getBatch(userId, batchId)?.revision ?? 0,
-        idempotencyKey: "record-amendment-2",
+        idempotencyKey: "record-amendment-1",
         observation,
       }),
     });
@@ -456,5 +456,202 @@ describe("post-confirmation amendments", () => {
     };
     expect(rejectedBody.amendment.status).toBe("rejected");
     expect(rejectedBody.amendment.decisionId).toBeNull();
+  });
+
+  it("does not create an amendment when the observation commit fails", async () => {
+    const { store, filename, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "失败回滚", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { id: string; operationsSha256: string; businessDate: string };
+    };
+    await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-rollback-base",
+      }),
+    });
+    const stale = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 999,
+        idempotencyKey: "record-rollback-stale",
+        observation: {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 120,
+        },
+      }),
+    });
+    expect(stale.status).toBeGreaterThanOrEqual(400);
+    expect(store.getDailyOperationAmendments(userId, batchId, planBody.plan.businessDate))
+      .toHaveLength(0);
+    const database = new DatabaseSync(filename, { readOnly: true });
+    expect(database.prepare("SELECT count(*) AS count FROM daily_observations").get())
+      .toEqual({ count: 0 });
+    database.close();
+  });
+
+  it("blocks stale or superseded amendments from being confirmed or applied", async () => {
+    const { store, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "过期修订", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { id: string; operationsSha256: string; businessDate: string };
+    };
+    const confirmResponse = await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-stale-base",
+      }),
+    });
+    const confirmation = (await confirmResponse.json() as { confirmation: { id: string } }).confirmation;
+    const batch = store.getBatch(userId, batchId)!;
+    const amendment = store.ensureDailyOperationAmendment({
+      userId,
+      batchId,
+      businessDate: planBody.plan.businessDate,
+      basePlanId: planBody.plan.id,
+      baseConfirmationId: confirmation.id,
+      originId: "origin-stale",
+      originKind: "diarrhea",
+      severity: "mild",
+      priority: "routine",
+      operations: [{
+        code: "feedback_diarrhea_confirm",
+        title: "腹泻处置确认（轻度）",
+        dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 as const },
+        sopSection: "现场反馈.腹泻",
+        requiredObservationFields: ["diarrheaGrade"],
+        safetyNotes: [],
+      }],
+      proposal: null,
+      basedOnBatchRevision: batch.revision + 1,
+      idempotencyKey: "amendment-stale-create",
+    }).amendment;
+    expect(() => store.decideDailyOperationAmendment({
+      userId,
+      batchId,
+      amendmentId: amendment.id,
+      action: "confirm",
+      decidedBy: userId,
+      expectedRevision: batch.revision,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "stale-revision-confirm",
+    })).toThrow("amendment based on revision");
+    store.supersedeDailyOperationAmendments({
+      userId,
+      batchId,
+      businessDate: planBody.plan.businessDate,
+      originKind: "diarrhea",
+    });
+    expect(() => store.decideDailyOperationAmendment({
+      userId,
+      batchId,
+      amendmentId: amendment.id,
+      action: "confirm",
+      decidedBy: userId,
+      expectedRevision: batch.revision,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "superseded-confirm",
+    })).toThrow("amendment status");
+  });
+
+  it("supersedes pending diarrhea amendments when an explicit none is recorded", async () => {
+    const { store, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "明确结束", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { id: string; operationsSha256: string; businessDate: string };
+    };
+    const confirmResponse = await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-supersede-base",
+      }),
+    });
+    const confirmation = (await confirmResponse.json() as { confirmation: { id: string } }).confirmation;
+    const batch = store.getBatch(userId, batchId)!;
+    store.ensureDailyOperationAmendment({
+      userId,
+      batchId,
+      businessDate: planBody.plan.businessDate,
+      basePlanId: planBody.plan.id,
+      baseConfirmationId: confirmation.id,
+      originId: "origin-superseded-by-none",
+      originKind: "diarrhea",
+      severity: "mild",
+      priority: "routine",
+      operations: [{
+        code: "feedback_diarrhea_confirm",
+        title: "腹泻处置确认（轻度）",
+        dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 as const },
+        sopSection: "现场反馈.腹泻",
+        requiredObservationFields: ["diarrheaGrade"],
+        safetyNotes: [],
+      }],
+      proposal: null,
+      basedOnBatchRevision: batch.revision,
+      idempotencyKey: "amendment-superseded-create",
+    });
+    const none = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: batch.revision,
+        idempotencyKey: "record-supersede-none",
+        observation: {
+          recordedAt: "2026-08-05T14:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          actualPowderGrams: 180,
+        },
+      }),
+    });
+    expect(none.status).toBe(200);
+    const amendments = store.getDailyOperationAmendments(
+      userId,
+      batchId,
+      planBody.plan.businessDate,
+    );
+    expect(amendments).toHaveLength(1);
+    expect(amendments[0]?.status).toBe("superseded");
   });
 });

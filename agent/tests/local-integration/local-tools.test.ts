@@ -191,7 +191,7 @@ describe("local deterministic tools", () => {
       const previewContext = {
         ...context,
         evidence: new Map<string, unknown>(),
-        observation: { diarrheaGrade: "mild" as const, actualPowderGrams: 120 },
+        observation: { diarrheaGrade: "mild" as const, actualPowderGrams: 0 },
       };
       const tool = createFeedingTools(previewContext)
         .find((item) => item.name === "preview_diarrhea_adjustment");
@@ -211,7 +211,7 @@ describe("local deterministic tools", () => {
         evidenceReceipt: { receiptId: string };
       };
       expect(details.data.worstGrade).toBe("mild");
-      expect(details.data.cumulativePowderGrams).toBe(120);
+      expect(details.data.cumulativePowderGrams).toBe(0);
       expect(details.data.cumulativeSource).toBe("observation");
       expect(details.data.deviceOperation.mode).toBe("timed_quantity");
       expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
@@ -224,7 +224,7 @@ describe("local deterministic tools", () => {
   it("falls back to the latest record grade when observation and params carry none", async () => {
     const { store, context } = contextFor("user-a", [
       { recordedAt: "2026-08-05T08:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 80 },
-      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 100 },
+      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 0 },
     ]);
     try {
       const tool = createFeedingTools(context)
@@ -244,7 +244,7 @@ describe("local deterministic tools", () => {
         };
       };
       expect(details.data.worstGrade).toBe("mild");
-      expect(details.data.cumulativePowderGrams).toBe(100);
+      expect(details.data.cumulativePowderGrams).toBe(0);
       expect(details.data.cumulativeSource).toBe("latest_record");
       expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
     } finally {
@@ -258,7 +258,7 @@ describe("local deterministic tools", () => {
         recordedAt: "2026-08-05T09:00:00.000Z",
         dayIndex: 0,
         diarrheaGrade: "mild",
-        actualPowderGrams: 120,
+        actualPowderGrams: 0,
       },
     ]);
     try {

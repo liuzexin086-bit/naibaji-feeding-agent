@@ -1,7 +1,8 @@
-"""Growth-only field tuning for feeding-parameters-v3.
+"""Growth-only field tuning simulator for feeding-parameters-v3.
 
-The tuner adjusts only scaleFactor and peakAdjust. Diarrhea sensitivity is
-not identifiable from ADG weight data alone and is deliberately excluded.
+This is a simulation/demonstration entry, not production field tuning. It
+adjusts only scaleFactor and peakAdjust. Diarrhea sensitivity is not
+identifiable from ADG weight data alone and is deliberately excluded.
 """
 
 from __future__ import annotations

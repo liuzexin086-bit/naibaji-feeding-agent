@@ -1140,7 +1140,6 @@ export async function handleLocalApi(
           } as LocalBatch;
           const nextToday = decisionForToday(store, auth.user.id, nextBatch);
           const session = agentSessionPublic(store, auth.user.id, batchId);
-          const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
           const result = {
             batch: batchPublic(nextBatch),
             today: nextToday,
@@ -1148,7 +1147,8 @@ export async function handleLocalApi(
             committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
             agentSession: session,
             messages: session.messages,
-            feedback: feedbackResult ? feedbackPublic(feedbackResult) : null,
+            feedback: null,
+            amendments: [],
           };
           const committed = store.commitAdvance({
             userId: auth.user.id,
@@ -1161,20 +1161,21 @@ export async function handleLocalApi(
             nextDayIndex: batch.currentDay + 1,
             nextData,
             result,
+            feedbackBatch: nextBatch,
           });
           json(response, committed.result);
           return true;
         }
         const nextBatch = { ...batch, revision: batch.revision + 1, data: nextData } as LocalBatch;
-        const feedbackResult = materializeFeedbackPlan(store, auth.user.id, nextBatch, observation).feedback;
         const result = {
           batch: batchPublic(nextBatch),
           today: decisionForToday(store, auth.user.id, nextBatch),
           records: allRecords(nextBatch),
           committedRecord: recordPublic(observation, { dayIndex: Number(observation.dayIndex), dayAge: Number(observation.dayAge), heads: Number(observation.effectiveHeads), revision: batch.revision }),
-          feedback: feedbackResult ? feedbackPublic(feedbackResult) : null,
+          feedback: null,
+          amendments: [],
         };
-        const committed = store.commitRecord({ userId: auth.user.id, batchId, expectedRevision, idempotencyKey: key, dateLocal: String(observation.dateLocal ?? today.dateLocal ?? addDays(String(configOf(batch).planStartDate ?? batch.createdAt.slice(0, 10)), batch.currentDay)), observedAt: String(observation.recordedAt), observation, nextData, result });
+        const committed = store.commitRecord({ userId: auth.user.id, batchId, expectedRevision, idempotencyKey: key, dateLocal: String(observation.dateLocal ?? today.dateLocal ?? addDays(String(configOf(batch).planStartDate ?? batch.createdAt.slice(0, 10)), batch.currentDay)), observedAt: String(observation.recordedAt), observation, nextData, result, feedbackBatch: nextBatch });
         json(response, committed.result);
         return true;
       }

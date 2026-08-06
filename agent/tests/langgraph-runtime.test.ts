@@ -689,6 +689,42 @@ describe("LangGraph v2 deterministic runtime", () => {
     });
   });
 
+  it("renders amendment state in deterministic today-operation output", async () => {
+    const runtime = createAgentGraphRuntime({
+      model: fakeModel([new AIMessage("不应调用")]) as never,
+      tools: [
+        syncTool(),
+        tool("get_batch_context", async () => receiptResult("get_batch_context", "b", {
+          batch: { current_day_index: 1, config: { name: "批次 A" } },
+          canonicalDecision: { selectedMode: "timed_quantity", effectiveMode: "timed_quantity" },
+          selectedDecision: { setting: { dayAge: 4, timedMeals: [], freeWindows: [] } },
+        }, 3, [1, 2, 4, 9, 0, 10])),
+        tool("get_today_timeline", async () => receiptResult("get_today_timeline", "b", {
+          dailyOperationPlan: {
+            id: "plan-1",
+            businessDate: "2026-08-05",
+            operationsSha256: "c".repeat(64),
+            status: "confirmed",
+            operations: [{ title: "日常巡栏", dueWindow: { startLocal: "09:00", endLocal: "10:00" } }],
+          },
+          amendments: [{
+            id: "amendment-1",
+            originKind: "diarrhea",
+            severity: "mild",
+            priority: "routine",
+            status: "pending",
+            decisionId: null,
+            proposalDigest: "D".repeat(64),
+          }],
+        }, 3, [0, 1, 2, 4, 5, 8, 9, 10, 2026])),
+      ],
+    });
+    const result = await runtime.run(input("今天有哪些今日操作？"));
+    expect(result).toMatchObject({ intent: "timeline_or_today_operations", status: "completed" });
+    expect(result.text).toContain("确认后修订 1 项");
+    expect(result.text).toContain("待确认 1");
+  });
+
   it("renders protected batch facts deterministically without calling the LLM", async () => {
     const model = fakeModel([new AIMessage("不应调用")]);
     const runtime = createAgentGraphRuntime({

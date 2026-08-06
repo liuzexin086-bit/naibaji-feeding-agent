@@ -203,7 +203,7 @@ describe("today operations API", () => {
       body: JSON.stringify({
         expectedRevision: 0,
         idempotencyKey: "record-diarrhea-1",
-        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 120 },
+        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 0 },
       }),
     });
     expect(saved.status).toBe(200);

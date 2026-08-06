@@ -268,6 +268,118 @@ describe("SQLite local store", () => {
     upgraded.close();
   });
 
+  it("rebuilds v8 amendment tables and restores their indexes during migration to 9", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-v8-index",
+      revision: 3,
+      data: { config: {}, records: [] },
+    });
+    const operations = dailyOperations();
+    const plan = store.ensureDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v8-index",
+      businessDate: "2026-08-06",
+      basedOnBatchRevision: 3,
+      sopTemplateId: "sop-v8",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v8",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity",
+      effectiveMode: "timed_quantity",
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+    });
+    const confirmation = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v8-index",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-v8-index-base",
+    }).confirmation;
+    store.ensureDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v8-index",
+      businessDate: plan.businessDate,
+      basePlanId: plan.id,
+      baseConfirmationId: confirmation.id,
+      originId: "origin-v8-index",
+      originKind: "diarrhea",
+      severity: "mild",
+      priority: "routine",
+      operations,
+      proposal: null,
+      basedOnBatchRevision: 3,
+      idempotencyKey: "amendment-v8-index",
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec(`
+      ALTER TABLE daily_operation_amendments RENAME TO daily_operation_amendments_v9_old;
+      CREATE TABLE daily_operation_amendments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        business_date TEXT NOT NULL,
+        base_plan_id TEXT NOT NULL,
+        base_confirmation_id TEXT,
+        origin_id TEXT NOT NULL,
+        origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+        severity TEXT NOT NULL CHECK (severity IN ('mild', 'moderate', 'severe')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
+        operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+        proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+        decision_id TEXT,
+        amendment_sha256 TEXT NOT NULL,
+        based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        UNIQUE (user_id, origin_id),
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (base_plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+        FOREIGN KEY (base_confirmation_id) REFERENCES daily_operation_confirmations(id) ON DELETE SET NULL,
+        FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+      ) STRICT;
+      INSERT INTO daily_operation_amendments (
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, status, operations_json, proposal_json,
+        decision_id, amendment_sha256, based_on_batch_revision, idempotency_key,
+        created_at, decided_at, decided_by
+      )
+      SELECT
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, status, operations_json, proposal_json,
+        decision_id, amendment_sha256, based_on_batch_revision, idempotency_key,
+        created_at, decided_at, decided_by
+      FROM daily_operation_amendments_v9_old;
+      DROP TABLE daily_operation_amendments_v9_old;
+      DELETE FROM schema_migrations WHERE version = 9;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (8, '2026-08-06T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const indexes = database.prepare("PRAGMA index_list('daily_operation_amendments')").all()
+      .map((row) => String(row.name));
+    expect(indexes).toContain("daily_operation_amendments_batch_date_idx");
+    expect(database.prepare("SELECT count(*) AS count FROM daily_operation_amendments").get())
+      .toEqual({ count: 1 });
+    expect(database.prepare("SELECT count(*) AS count FROM daily_operation_amendment_actions").get())
+      .toEqual({ count: 0 });
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    database.close();
+    upgraded.close();
+  });
+
   it("isolates batches and safely binds SQL-injection-shaped identifiers", () => {
     const store = memoryStore();
     const injected = "batch'; DROP TABLE batches; --";

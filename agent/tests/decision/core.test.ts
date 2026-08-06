@@ -228,7 +228,7 @@ describe("diarrhea adjustment preview", () => {
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
       grades: ["mild"],
-      cumulativePowderGrams: 310,
+      cumulativePowderGrams: 100,
       reductionPriority: ["18:00", "23:00"],
     });
     expect(mild.kind).toBe("proposal");
@@ -241,14 +241,14 @@ describe("diarrhea adjustment preview", () => {
       { timeLocal: "12:00", powderGrams: 150 },
       { timeLocal: "23:00", powderGrams: 150 },
     ]);
-    expect(mild.remainingDeliverable).toBe(140);
+    expect(mild.remainingDeliverable).toBe(350);
     expect(mild.decision?.evidence.reasons.join(" ")).toContain("待确认设备提案");
 
     const moderate = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
       grades: ["moderate"],
-      cumulativePowderGrams: 310,
+      cumulativePowderGrams: 100,
       reductionPriority: ["18:00", "23:00"],
     });
     expect(moderate.kind).toBe("preview_only");
@@ -270,9 +270,9 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.decision).toBeNull();
     expect(preview.proposal).toBeNull();
     expect(preview.manualDispositionRequired).toBe(true);
-    expect(preview.adjustedProgramTotal).toBe(decision.setting.dailyPowderGrams);
+    expect(preview.adjustedProgramTotal).not.toBe(decision.setting.dailyPowderGrams);
     expect(preview.remainingDeliverable).toBe(
-      Math.max(0, decision.setting.dailyPowderGrams - 500),
+      Math.max(0, preview.adjustedProgramTotal - 500),
     );
   });
 
@@ -309,6 +309,41 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.kind).toBe("manual_only");
     expect(preview.proposal).toBeNull();
     expect(preview.manualDispositionRequired).toBe(true);
+  });
+
+  it("returns manual-only when cumulative powder equals the adjusted program total", () => {
+    const decision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 4 },
+      timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T13:00:00+08:00",
+      grades: ["mild"],
+      cumulativePowderGrams: 450,
+      reductionPriority: ["18:00", "23:00"],
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.remainingDeliverable).toBe(0);
+  });
+
+  it("returns manual-only when future meal powder exceeds remaining deliverable", () => {
+    const decision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 4 },
+      timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T13:00:00+08:00",
+      grades: ["mild"],
+      cumulativePowderGrams: 400,
+      reductionPriority: ["18:00", "23:00"],
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.futureDeliverable).toBe(300);
+    expect(preview.remainingDeliverable).toBe(50);
   });
 
   it("fails closed when the frozen reduction slot is missing", () => {

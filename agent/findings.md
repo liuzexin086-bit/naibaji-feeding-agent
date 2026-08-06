@@ -76,6 +76,15 @@ Real Device Control Gate: CLOSED
 - 最近消息 SQL 改为先取最新 N 条再升序；client/response message id 使用精确 evidence JSON 查询。
 - 复审中的 P1-7 请求体大小/登录限速仍按原计划归入 P3，不伪装为 P1 已关闭。
 
+## NBJ-SAFETY-P1-R1 — 2026-08-06
+
+- `commitRecord()`/`commitAdvance()` 现在可在同一事务内完成 observation、batch update、feedback materialization 和 amendment creation；commit 失败不会残留 amendment。
+- `decideDailyOperationAmendment()` 同时校验 batch revision 与 amendment `basedOnBatchRevision`，事务内重新读取并校验当前状态。
+- 新增 `superseded/cancelled` 状态；显式 `none` 或更新观察会 supersede 旧 diarrhea amendment。
+- Diarrhea preview 在 `cumulativeActual >= adjustedProgramTotal` 或未来餐次计划量超过 `remainingDeliverable` 时转 manual-only，不再返回完整设备 proposal。
+- LangGraph `TodayOperationSummary` 增加 amendments 投影；确定性今日操作回复包含待确认/已确认待应用/已应用修订数量。
+- V8→V9 重建 amendment 表后显式恢复 batch/date 索引，并新增真实旧表迁移测试。
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

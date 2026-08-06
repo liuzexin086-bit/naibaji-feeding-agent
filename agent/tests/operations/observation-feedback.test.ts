@@ -78,7 +78,7 @@ describe("observation feedback engine", () => {
       records: [{
         recordedAt: "2026-08-05T09:00:00+08:00",
         diarrheaGrade: "mild",
-        actualPowderGrams: 120,
+        actualPowderGrams: 0,
       }],
     }));
     expect(result).not.toBeNull();
@@ -207,7 +207,7 @@ describe("observation feedback engine", () => {
       safetyNotes: [],
     }];
     const result = evaluateObservationFeedback(engineInput({
-      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 0 }],
     }))!;
     const merged = mergeFeedbackOperations(base, [], result);
     expect(merged.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
@@ -216,7 +216,7 @@ describe("observation feedback engine", () => {
 
   it("hashes proposals and maps them to device settings deterministically", () => {
     const result = evaluateObservationFeedback(engineInput({
-      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 120 }],
+      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 0 }],
     }))!;
     const proposal = result.proposedSetting!;
     expect(digestFeedbackProposal(proposal)).toBe(proposal.proposalDigest);

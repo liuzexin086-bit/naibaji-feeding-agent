@@ -151,6 +151,7 @@ export interface DiarrheaAdjustmentResult {
   adjustedProgramTotal: number;
   cumulativeActual: number;
   remainingDeliverable: number;
+  futureDeliverable: number;
   reason: string;
   evidence: Record<string, unknown>;
 }

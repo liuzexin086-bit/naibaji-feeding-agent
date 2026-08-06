@@ -250,6 +250,10 @@ function narrationContextText(state: AgentGraphState): string {
       });
       parts.push(`现场反馈：${feedbackLines.join("\n")}`);
     }
+    if (today.amendments && today.amendments.length > 0) {
+      parts.push(`确认后修订：${today.amendments.map((amendment) =>
+        `${amendment.originKind === "diarrhea" ? "腹泻" : "教槽控奶"}:${amendment.status}`).join("、")}`);
+    }
   }
   if (state.knowledgeResults && state.knowledgeResults.length > 0) {
     const rows = state.knowledgeResults.map((row) => `- ${row.title}：${row.text}`).join("\n");
@@ -425,6 +429,28 @@ function protectedFacts(state: AgentGraphState): DeterministicFact[] {
       facts.push({ field: "feedbackMealCount", value: feedback.proposal.mealCount, unit: "count", ...refs });
     }
   }
+  for (const amendment of today?.amendments ?? []) {
+    facts.push({
+      field: `amendment_${amendment.id}`,
+      value: amendment.status,
+      ...refs,
+    });
+    if (amendment.decisionId) {
+      facts.push({
+        field: `amendment_decision_${amendment.id}`,
+        value: amendment.decisionId,
+        ...refs,
+      });
+    }
+  }
+  if (today?.amendments?.length) {
+    const pending = today.amendments.filter((amendment) => amendment.status === "pending").length;
+    const confirmed = today.amendments.filter((amendment) => amendment.status === "confirmed").length;
+    const applied = today.amendments.filter((amendment) => amendment.status === "applied").length;
+    facts.push({ field: "pendingAmendmentCount", value: pending, unit: "count", ...refs });
+    facts.push({ field: "confirmedAmendmentCount", value: confirmed, unit: "count", ...refs });
+    facts.push({ field: "appliedAmendmentCount", value: applied, unit: "count", ...refs });
+  }
   const preview = state.diarrheaPreview;
   if (preview) {
     facts.push({ field: "diarrheaWorstGrade", value: preview.worstGrade, ...refs });
@@ -591,12 +617,55 @@ function todayOperationSummaryFromToolResult(result: unknown): TodayOperationSum
   if (!operations.length) return undefined;
   const status = plan.status === "pending" || plan.status === "confirmed" ? plan.status : undefined;
   const feedback = feedbackSummaryFromToolResult(result);
+  const amendments = amendmentSummaryFromToolResult(data?.amendments);
   return {
     ...(typeof plan.businessDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(plan.businessDate) ? { businessDate: plan.businessDate } : {}),
     ...(status ? { status } : {}),
     operations,
     ...(feedback ? { feedback } : {}),
+    ...(amendments && amendments.length ? { amendments } : {}),
   };
+}
+
+function amendmentSummaryFromToolResult(
+  value: unknown,
+): NonNullable<TodayOperationSummary["amendments"]> {
+  if (!Array.isArray(value)) return [];
+  const amendments: NonNullable<TodayOperationSummary["amendments"]> = [];
+  for (const raw of value) {
+    const row = object(raw);
+    if (!row) continue;
+    const id = typeof row.id === "string" && row.id ? row.id : "";
+    const originKind = String(row.originKind ?? "");
+    const priority = String(row.priority ?? "");
+    const status = String(row.status ?? "");
+    const severity = row.severity == null
+      ? null
+      : String(row.severity);
+    const decisionId = row.decisionId == null
+      ? null
+      : String(row.decisionId);
+    if (!id ||
+        (originKind !== "diarrhea" && originKind !== "creep_control") ||
+        (priority !== "routine" && priority !== "warning" && priority !== "critical") ||
+        (status !== "pending" && status !== "confirmed" && status !== "rejected" &&
+         status !== "applied" && status !== "superseded" && status !== "cancelled") ||
+        (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe")) {
+      continue;
+    }
+    amendments.push({
+      id,
+      originKind,
+      severity,
+      priority,
+      status,
+      decisionId,
+      ...(typeof row.proposalDigest === "string" && row.proposalDigest
+        ? { proposalDigest: row.proposalDigest }
+        : {}),
+    });
+  }
+  return amendments;
 }
 
 function feedbackSummaryFromToolResult(result: unknown): TodayFeedbackSummary[] | undefined {

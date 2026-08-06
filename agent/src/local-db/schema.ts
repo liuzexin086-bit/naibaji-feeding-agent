@@ -208,7 +208,7 @@ CREATE TABLE IF NOT EXISTS daily_operation_amendments (
   origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
   severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
   priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
-  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied')),
+  status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied', 'superseded', 'cancelled')),
   operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
   proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
   decision_id TEXT,

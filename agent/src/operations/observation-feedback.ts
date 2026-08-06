@@ -474,6 +474,16 @@ export function materializeObservationFeedbackPlan(input: {
     reductionPriority: context.devicePlan.templates.timed_quantity.reductionPriority,
     freeReductionPriority: context.devicePlan.templates.free_feeding.reductionPriority,
   });
+  const records = recordsOf(batch);
+  const latestDiarrhea = latestDiarrheaStatusRecord(records);
+  if (latestDiarrhea?.diarrheaGrade === "none") {
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: "diarrhea",
+    });
+  }
   const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
   if (existing?.status === "confirmed") {
     if (!result?.operations.length) {
@@ -512,6 +522,13 @@ export function materializeObservationFeedbackPlan(input: {
       proposal: result.proposedSetting,
       basedOnBatchRevision: batch.revision,
       idempotencyKey: `daily-operation-amendment:${result.feedbackOrigin.id}`,
+    });
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: result.kind,
+      excludeAmendmentId: amendmentResult.amendment.id,
     });
     return {
       plan: existing,

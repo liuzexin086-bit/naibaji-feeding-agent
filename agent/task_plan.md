@@ -25,6 +25,15 @@
 - P1-6: 最近消息改为最新 N 条后升序返回；evidence 精确 SQL 查询。
 - P1-7 请求体/登录限速按原计划保留为 P3 范围，不在本次 P1 修复。
 
+## NBJ-SAFETY-P1-R1 Execution State
+
+- R1-1 Observation + Batch + Feedback 原子事务: complete
+- R1-2 Amendment revision/source lifecycle: complete
+- R1-3 Explicit-none 自动 supersede: complete
+- R1-4 Remaining-deliverable 设备方案约束: complete
+- R1-5 LangGraph amendment 状态投影: complete
+- R1-6 V8→V9 索引迁移测试: complete
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

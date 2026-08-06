@@ -87,7 +87,13 @@ export function deterministicResponse(
           ? `${operation.startLocal}–${operation.endLocal} ` : "";
         return `${window}${operation.title}`;
       });
-      return `${batchPrefix(summary)}今日操作（${status}${timeline.businessDate ? `，${timeline.businessDate}` : ""}）：${items.length ? items.join("；") : "未返回操作项"}。仅支持当天一次完整确认，不逐项确认。`;
+      const amendments = timeline.amendments ?? [];
+      const pendingAmendments = amendments.filter((amendment) => amendment.status === "pending").length;
+      const confirmedAmendments = amendments.filter((amendment) => amendment.status === "confirmed").length;
+      const amendmentText = amendments.length
+        ? `；确认后修订 ${amendments.length} 项（待确认 ${pendingAmendments}，已确认待应用 ${confirmedAmendments}）`
+        : "";
+      return `${batchPrefix(summary)}今日操作（${status}${timeline.businessDate ? `，${timeline.businessDate}` : ""}）：${items.length ? items.join("；") : "未返回操作项"}${amendmentText}。仅支持当天一次完整确认，不逐项确认；确认后修订走独立审批。`;
     }
     return "今日常规操作已按冻结 SOP 汇总到“今日操作”栏。该栏仅支持当天一次完整确认，不逐项确认。";
   }

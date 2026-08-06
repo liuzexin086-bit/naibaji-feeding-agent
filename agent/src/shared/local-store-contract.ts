@@ -157,6 +157,7 @@ export interface CommitAdvanceInput {
   nextDayIndex: number;
   nextData: Record<string, unknown>;
   result: Record<string, unknown>;
+  feedbackBatch?: LocalBatch;
 }
 
 export interface CommitRecordInput {
@@ -169,6 +170,7 @@ export interface CommitRecordInput {
   observation: Record<string, unknown>;
   nextData: Record<string, unknown>;
   result: Record<string, unknown>;
+  feedbackBatch?: LocalBatch;
 }
 
 export interface CommitModeSwitchInput {
@@ -325,7 +327,9 @@ export type DailyOperationAmendmentStatus =
   | "pending"
   | "confirmed"
   | "rejected"
-  | "applied";
+  | "applied"
+  | "superseded"
+  | "cancelled";
 
 export interface DailyOperationAmendment {
   id: string;
@@ -531,6 +535,13 @@ export interface LocalStore {
     batchId: string,
     amendmentId: string,
   ): DailyOperationAmendment | null;
+  supersedeDailyOperationAmendments(input: {
+    userId: string;
+    batchId: string;
+    businessDate: string;
+    originKind?: FeedbackOriginKind;
+    excludeAmendmentId?: string;
+  }): number;
   ensureDailyOperationAmendment(
     input: EnsureDailyOperationAmendmentInput,
   ): { amendment: DailyOperationAmendment; replayed: boolean };

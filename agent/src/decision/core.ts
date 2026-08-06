@@ -570,6 +570,22 @@ function diarrheaAdjustedSetting(
   };
 }
 
+function futureDeliverableFor(
+  setting: DeviceSetting,
+  observedAt: string,
+): number {
+  const observedLocal = observedLocalHourMinute(observedAt);
+  if (setting.mode === "free_feeding") {
+    const futureWindows = setting.freeWindows.filter(
+      (window) => remainingBusinessDayTimes([window.startLocal], observedLocal).length > 0,
+    );
+    return futureWindows.length * setting.singlePowderGrams;
+  }
+  return setting.timedMeals
+    .filter((meal) => remainingBusinessDayTimes([meal.timeLocal], observedLocal).length > 0)
+    .reduce((sum, meal) => sum + meal.powderGrams, 0);
+}
+
 function diarrheaEvidenceDecision(
   decision: FeedingDecision,
   setting: DeviceSetting,
@@ -665,6 +681,7 @@ export function previewDiarrheaAdjustment(
         0,
         input.decision.setting.dailyPowderGrams - cumulativeActual,
       ),
+      futureDeliverable: 0,
       reason: "最近腹泻档位为无，不生成腹泻调整。",
       evidence: { grades: [...input.grades], worstGrade: "none" },
     };
@@ -685,6 +702,7 @@ export function previewDiarrheaAdjustment(
     0,
     adjusted.adjustedProgramTotal - cumulativeActual,
   );
+  const futureDeliverable = futureDeliverableFor(adjusted.setting, input.observedAt);
 
   let kind: Exclude<DiarrheaAdjustmentResult["kind"], "none">;
   let manualDispositionRequired: boolean;
@@ -693,7 +711,8 @@ export function previewDiarrheaAdjustment(
   if (
     worstGrade === "severe" ||
     targetAlreadyHappened ||
-    cumulativeActual > adjusted.adjustedProgramTotal
+    cumulativeActual >= adjusted.adjustedProgramTotal ||
+    futureDeliverable > remainingDeliverable
   ) {
     kind = "manual_only";
     manualDispositionRequired = true;
@@ -731,9 +750,7 @@ export function previewDiarrheaAdjustment(
     proposal = decision.setting;
   }
 
-  const evidenceAdjustedTotal = kind === "manual_only"
-    ? source.dailyPowderGrams
-    : adjusted.adjustedProgramTotal;
+  const evidenceAdjustedTotal = adjusted.adjustedProgramTotal;
   const evidenceRemaining = Math.max(0, evidenceAdjustedTotal - cumulativeActual);
   return {
     kind,
@@ -746,7 +763,8 @@ export function previewDiarrheaAdjustment(
     adjustedProgramTotal: evidenceAdjustedTotal,
     cumulativeActual,
     remainingDeliverable: evidenceRemaining,
-    reason: `腹泻${worstGrade}：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g。`,
+    futureDeliverable,
+    reason: `腹泻${worstGrade}：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g，未来餐次计划 ${futureDeliverable}g。`,
     evidence: {
       grades: [...input.grades],
       worstGrade,
@@ -756,6 +774,7 @@ export function previewDiarrheaAdjustment(
       cumulativePowderGrams: cumulativeActual,
       adjustedProgramTotal: evidenceAdjustedTotal,
       remainingDeliverable: evidenceRemaining,
+      futureDeliverable,
     },
   };
 }

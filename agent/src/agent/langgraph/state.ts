@@ -44,6 +44,15 @@ export interface TodayOperationSummary {
   status?: "pending" | "confirmed";
   operations: Array<{ title: string; startLocal?: string; endLocal?: string }>;
   feedback?: TodayFeedbackSummary[];
+  amendments?: Array<{
+    id: string;
+    originKind: "diarrhea" | "creep_control";
+    severity: "mild" | "moderate" | "severe" | null;
+    priority: "routine" | "warning" | "critical";
+    status: "pending" | "confirmed" | "rejected" | "applied" | "superseded" | "cancelled";
+    decisionId: string | null;
+    proposalDigest?: string;
+  }>;
 }
 
 export interface TodayFeedbackSummary {

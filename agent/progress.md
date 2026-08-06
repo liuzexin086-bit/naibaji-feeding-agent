@@ -79,6 +79,15 @@ Real Device Control Gate: CLOSED
 - Verified full Agent suite (33 files / 287 tests), Python 12 tests, and CLI smoke.
 - P1-7 request-size/login-rate-limit remains deferred to P3 per the original scope boundary.
 
+### NBJ-SAFETY-P1-R1 — 2026-08-06
+
+- Implemented atomic observation/batch/feedback/amendment commit path; failed stale observation commit leaves no amendment or observation row.
+- Added amendment lifecycle states and `basedOnBatchRevision` revalidation inside decision transactions; explicit `none` supersedes pending/confirmed diarrhea amendments.
+- Added remaining-deliverable and future-meal-capacity checks to diarrhea preview.
+- Added amendment projection to LangGraph today-operation state and deterministic response.
+- Added real V8→V9 table rebuild/index test.
+- Verified full Agent suite (33 files / 294 tests), `p1-safety-gate` (99 tests), Python 12 tests, root npm test, and agent build.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
