@@ -827,8 +827,9 @@ export function createFeedingTools(
               ? "latest_record"
               : "assumed_zero";
       const production = await productionDecisionsForBatch(context);
+      const originalDecision = computeFrozenBatchDecision(production.state.frozenContext).decision;
       const preview = previewDiarrheaAdjustment({
-        decision: production.selectedDecision,
+        decision: originalDecision,
         grades,
         cumulativePowderGrams: cumulativeValue,
         observedAt: params.observedAt ?? shanghaiLocalNowIso(),
