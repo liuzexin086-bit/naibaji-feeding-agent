@@ -123,6 +123,18 @@ Real Device Control Gate: CLOSED
 - Added regressions: only-invalid diarrhea is ignored, only-invalid creep does not trigger control, and valid mild wins over invalid mild.
 - Verified under exact Node 24.18.0: Agent full suite 34 files / 307 tests, `p1-safety-gate` 8 files / 109 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
 
+### NBJ-SAFETY-P1 Final Acceptance — 2026-08-07
+
+- Final diff/release review approved by user.
+- Recorded final gate state:
+
+```text
+NBJ-SAFETY-P1: PASS
+Safety Contract Gate: OPEN
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
 ## Session: 2026-08-04
 
 ### Plan authoring

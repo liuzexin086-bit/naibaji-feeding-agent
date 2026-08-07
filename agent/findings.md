@@ -114,6 +114,14 @@ Real Device Control Gate: CLOSED
 - Feedback engine, `preview_diarrhea_adjustment`, and LangGraph batch summaries all use the same timestamp quarantine before selecting source observations.
 - Added regressions proving an only-invalid diarrhea record is ignored, invalid-only creep records do not trigger control, and a valid mild record wins over an invalid mild record.
 
+## NBJ-SAFETY-P1 Final Acceptance — 2026-08-07
+
+- NBJ-SAFETY-P1: PASS
+- Safety Contract Gate: OPEN
+- Merge to main Gate: OPEN
+- Optimizer Production Gate: CLOSED
+- Real Device Control Gate: CLOSED
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

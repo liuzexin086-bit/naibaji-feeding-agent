@@ -61,6 +61,14 @@
 - R3.2-2 Feedback, Agent tool, and LangGraph summary paths filter malformed timestamps: complete
 - R3.2-3 Only-invalid diarrhea, only-invalid creep, and valid-source preference regressions: complete
 
+## NBJ-SAFETY-P1 Final Acceptance — 2026-08-07
+
+- NBJ-SAFETY-P1: PASS
+- Safety Contract Gate: OPEN
+- Merge to main Gate: OPEN
+- Optimizer Production Gate: CLOSED
+- Real Device Control Gate: CLOSED
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal
