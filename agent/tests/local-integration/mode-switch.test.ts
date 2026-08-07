@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { handleLocalApi } from "../../src/container/local-api.js";
+import {
+  computeFrozenBatchDecision,
+  loadFrozenBatchDecisionContext,
+} from "../../src/decision/batch-decision-service.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
 import type { DevicePlanSnapshot } from "../../src/shared/local-store-contract.js";
@@ -227,9 +231,20 @@ describe("batch device plan snapshot and mode switching", () => {
     });
     expect(advanced.status).toBe(200);
 
+    const day1ActualZero = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "day1-actual-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(day1ActualZero.status).toBe(200);
+
     const switchPayload = {
       mode: "free_feeding",
-      expectedRevision: 1,
+      expectedRevision: 2,
       idempotencyKey: "switch-free-1",
     };
     const switched = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
@@ -242,7 +257,7 @@ describe("batch device plan snapshot and mode switching", () => {
       batch: { revision: number; selectedMode: string; devicePlanSha256: string };
       today: { freeWindows: unknown[]; setting: { mode: string; freeWindows: unknown[] } };
     };
-    expect(switchedBody.batch).toMatchObject({ revision: 2, selectedMode: "free_feeding" });
+    expect(switchedBody.batch).toMatchObject({ revision: 3, selectedMode: "free_feeding" });
     expect(switchedBody.batch.devicePlanSha256).toBe(frozen.sha256);
     expect(switchedBody.today.setting.mode).toBe("free_feeding");
     expect(switchedBody.today.setting.freeWindows).toEqual(frozen.templates.free_feeding.windows);
@@ -264,7 +279,7 @@ describe("batch device plan snapshot and mode switching", () => {
     const stale = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
-      body: JSON.stringify({ mode: "timed_quantity", expectedRevision: 1, idempotencyKey: "stale-switch" }),
+      body: JSON.stringify({ mode: "timed_quantity", expectedRevision: 2, idempotencyKey: "stale-switch" }),
     });
     expect(stale.status).toBe(409);
     expect(await stale.json()).toEqual({ code: "NBJ_BATCH_STALE" });
@@ -272,17 +287,17 @@ describe("batch device plan snapshot and mode switching", () => {
     const switchedBack = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
-      body: JSON.stringify({ mode: "timed_quantity", expectedRevision: 2, idempotencyKey: "switch-timed-2" }),
+      body: JSON.stringify({ mode: "timed_quantity", expectedRevision: 3, idempotencyKey: "switch-timed-2" }),
     });
     expect(switchedBack.status).toBe(200);
     expect((await switchedBack.json() as { batch: { revision: number; selectedMode: string } }).batch)
-      .toMatchObject({ revision: 3, selectedMode: "timed_quantity" });
+      .toMatchObject({ revision: 4, selectedMode: "timed_quantity" });
 
     const secondAdvance = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
       method: "POST",
       headers: { cookie },
       body: JSON.stringify({
-        expectedRevision: 3,
+        expectedRevision: 4,
         idempotencyKey: "advance-day-1",
         observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none" },
       }),
@@ -308,8 +323,8 @@ describe("batch device plan snapshot and mode switching", () => {
     expect(JSON.parse(auditRows[0]!.details_json)).toMatchObject({
       fromMode: "timed_quantity",
       toMode: "free_feeding",
-      previousRevision: 1,
-      newRevision: 2,
+      previousRevision: 2,
+      newRevision: 3,
       devicePlanVersion: frozen.version,
       devicePlanSha256: frozen.sha256,
     });
@@ -455,6 +470,16 @@ describe("batch device plan snapshot and mode switching", () => {
       }),
     });
     expect(advanced.status).toBe(200);
+    const day1ActualZero = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "mode-amendment-day1-actual-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(day1ActualZero.status).toBe(200);
     const day1 = await apiRequest(base, `/api/batches/${created.batch.id}/today-operations`, {
       headers: { cookie },
     });
@@ -473,13 +498,54 @@ describe("batch device plan snapshot and mode switching", () => {
       },
     );
     expect(day1Confirm.status).toBe(200);
+    const currentBatch = store.getBatch(userId, created.batch.id)!;
+    const currentData = currentBatch.data as {
+      config: Record<string, unknown>;
+      records?: unknown[];
+    };
+    const canonical = computeFrozenBatchDecision(loadFrozenBatchDecisionContext({
+      batchId: currentBatch.batchId,
+      revision: currentBatch.revision,
+      currentDayIndex: currentBatch.currentDay,
+      config: currentData.config,
+      records: Array.isArray(currentData.records) ? currentData.records : [],
+    }));
+    store.saveDecision({
+      userId,
+      batchId: created.batch.id,
+      decision: canonical.decision,
+    });
+    const activeBefore = store.getActiveDecisionRecord(userId, created.batch.id);
+    expect(activeBefore).not.toBeNull();
+    const beforeRecordToday = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    const beforeRecordTodayBody = await beforeRecordToday.json() as {
+      today: { activeDecisionId: string | null };
+    };
+    expect(beforeRecordTodayBody.today.activeDecisionId).toBe(activeBefore!.id);
+    const recordAfterConfirm = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 2,
+        idempotencyKey: "mode-amendment-record-after-confirm",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(recordAfterConfirm.status).toBe(200);
+    const recordAfterConfirmBody = await recordAfterConfirm.json() as {
+      records: Array<{ activeDecisionIdAtCommit: string | null }>;
+    };
+    expect(recordAfterConfirmBody.records.at(-1)?.activeDecisionIdAtCommit)
+      .toBe(activeBefore!.id);
 
     const switched = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
       body: JSON.stringify({
         mode: "free_feeding",
-        expectedRevision: 1,
+        expectedRevision: 3,
         idempotencyKey: "mode-amendment-create",
       }),
     });
@@ -506,7 +572,7 @@ describe("batch device plan snapshot and mode switching", () => {
         method: "POST",
         headers: { cookie },
         body: JSON.stringify({
-          expectedRevision: 1,
+          expectedRevision: 3,
           expectedAmendmentSha256: amendmentBody.amendment.amendmentSha256,
           idempotencyKey: "confirm-mode-amendment",
         }),
@@ -525,7 +591,7 @@ describe("batch device plan snapshot and mode switching", () => {
         method: "POST",
         headers: { cookie },
         body: JSON.stringify({
-          expectedRevision: 1,
+          expectedRevision: 3,
           expectedAmendmentSha256: amendmentBody.amendment.amendmentSha256,
           idempotencyKey: "apply-mode-amendment",
         }),
@@ -539,7 +605,26 @@ describe("batch device plan snapshot and mode switching", () => {
     expect(appliedBody.amendment.decisionId).toBeTruthy();
     expect(store.getBatch(userId, created.batch.id)?.data.config)
       .toMatchObject({ selectedMode: "free_feeding" });
-    expect(store.getBatch(userId, created.batch.id)?.revision).toBe(2);
+    expect(store.getBatch(userId, created.batch.id)?.revision).toBe(4);
+
+    const activeAfter = store.getActiveDecisionRecord(userId, created.batch.id);
+    expect(activeAfter).not.toBeNull();
+    expect(activeAfter!.id).not.toBe(activeBefore!.id);
+    const recordAfterApply = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 4,
+        idempotencyKey: "mode-amendment-record-after-apply",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(recordAfterApply.status).toBe(200);
+    const recordAfterApplyBody = await recordAfterApply.json() as {
+      records: Array<{ activeDecisionIdAtCommit: string | null }>;
+    };
+    expect(recordAfterApplyBody.records.at(-1)?.activeDecisionIdAtCommit)
+      .toBe(activeAfter!.id);
   });
 
   it("rejects mode switch when cumulative actual is unknown or already executed", async () => {
@@ -578,18 +663,165 @@ describe("batch device plan snapshot and mode switching", () => {
       }),
     });
     expect(executedAdvance.status).toBe(200);
+    const executedDayActual = await apiRequest(base, `/api/batches/${executedBatch.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "executed-day-actual",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 180 },
+      }),
+    });
+    expect(executedDayActual.status).toBe(200);
     const executedSwitch = await apiRequest(base, `/api/batches/${executedBatch.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
       body: JSON.stringify({
         mode: "free_feeding",
-        expectedRevision: 1,
+        expectedRevision: 2,
         idempotencyKey: "switch-executed-actual",
       }),
     });
     expect(executedSwitch.status).toBe(409);
     expect(await executedSwitch.json())
       .toEqual({ code: "NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED" });
+
+    const allowedBatch = await createBatch(base, cookie);
+    const allowedAdvance = await apiRequest(base, `/api/batches/${allowedBatch.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "advance-allowed-actual",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(allowedAdvance.status).toBe(200);
+    const allowedDayActual = await apiRequest(base, `/api/batches/${allowedBatch.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "allowed-day-actual",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(allowedDayActual.status).toBe(200);
+    const allowedSwitch = await apiRequest(base, `/api/batches/${allowedBatch.batch.id}/mode`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        mode: "free_feeding",
+        expectedRevision: 2,
+        idempotencyKey: "switch-allowed-actual",
+      }),
+    });
+    expect(allowedSwitch.status).toBe(200);
+  });
+
+  it("fails mode_change apply when batch state changes after confirm", async () => {
+    const { base, cookie, store, userId } = await startApi();
+    const created = await createBatch(base, cookie);
+    const advance = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "apply-blocked-advance",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(advance.status).toBe(200);
+    const dayActual = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "apply-blocked-day-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(dayActual.status).toBe(200);
+    const today = await apiRequest(base, `/api/batches/${created.batch.id}/today-operations`, {
+      headers: { cookie },
+    });
+    const todayBody = await today.json() as { plan: { id: string; operationsSha256: string } };
+    const confirmed = await apiRequest(
+      base,
+      `/api/batches/${created.batch.id}/today-operations/confirm`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          planId: todayBody.plan.id,
+          operationsSha256: todayBody.plan.operationsSha256,
+          idempotencyKey: "apply-blocked-confirm-plan",
+        }),
+      },
+    );
+    expect(confirmed.status).toBe(200);
+    const batch = store.getBatch(userId, created.batch.id)!;
+    const data = batch.data as { config: Record<string, unknown>; records?: unknown[] };
+    const canonical = computeFrozenBatchDecision(loadFrozenBatchDecisionContext({
+      batchId: batch.batchId,
+      revision: batch.revision,
+      currentDayIndex: batch.currentDay,
+      config: data.config,
+      records: Array.isArray(data.records) ? data.records : [],
+    }));
+    store.saveDecision({ userId, batchId: created.batch.id, decision: canonical.decision });
+    const modeSwitch = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        mode: "free_feeding",
+        expectedRevision: 2,
+        idempotencyKey: "apply-blocked-mode-create",
+      }),
+    });
+    expect(modeSwitch.status).toBe(200);
+    const amendment = (await modeSwitch.json() as {
+      amendment: { id: string; amendmentSha256: string };
+    }).amendment;
+    const confirmAmendment = await apiRequest(
+      base,
+      `/api/batches/${created.batch.id}/amendments/${amendment.id}/confirm`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: 2,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "apply-blocked-confirm-amendment",
+        }),
+      },
+    );
+    expect(confirmAmendment.status).toBe(200);
+    const executed = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 2,
+        idempotencyKey: "apply-blocked-executed",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 180 },
+      }),
+    });
+    expect(executed.status).toBe(200);
+    const applied = await apiRequest(
+      base,
+      `/api/batches/${created.batch.id}/amendments/${amendment.id}/apply`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: 3,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "apply-blocked-apply",
+        }),
+      },
+    );
+    expect(applied.status).toBe(400);
+    expect(await applied.json()).toEqual({ code: "NBJ_AMENDMENT_STALE" });
   });
 
   it("fails closed on a stale or tampered frozen SOP receipt and returns no numeric payload", async () => {
@@ -643,10 +875,20 @@ describe("batch device plan snapshot and mode switching", () => {
       }),
     });
     expect(advanced.status).toBe(200);
+    const day1ActualZero = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "diarrhea-day1-actual-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(day1ActualZero.status).toBe(200);
     const switched = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
-      body: JSON.stringify({ mode: "free_feeding", expectedRevision: 1, idempotencyKey: "free-blocked" }),
+      body: JSON.stringify({ mode: "free_feeding", expectedRevision: 2, idempotencyKey: "free-blocked" }),
     });
     expect(switched.status).toBe(200);
     const body = await switched.json() as {

@@ -288,6 +288,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 344 tests, p0 gate 94 tests, p1 gate 140 tests.
 - Verified `npm run smoke:dist` and Docker agent build.
 
+### EC-P1-5.1 / EC-P1-6.1 Authority Seal — complete
+
+- Fixed cumulative actual scope to current `dayIndex` in `/mode` and mode-change apply; D0 actual=0 no longer makes D1 look executable.
+- Added `getActiveDecisionRecord()` and exposed real active decision row id in `today.activeDecisionId` and `activeDecisionIdAtCommit`.
+- Fixed `planPerPigAtCommit` to use server planned heads; observation `effectiveHeads` cannot rewrite the planned program snapshot.
+- Added `DECISION_POLICY_VERSION` constant and used it for `policyVersionAtCommit`.
+- Added regressions: D1 unknown/zero/executed actual, mode amendment apply after state change, active id before/after mode apply, and plan-per-pig stability under effectiveHeads change.
+- Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

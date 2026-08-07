@@ -25,7 +25,11 @@ import {
 import { computeProductionPlan, modelStandardWeight } from "../model/production-model.js";
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
 import { createLangChainModel } from "../agent/langgraph/models.js";
-import type { FeedingMode } from "../shared/agent-v2-contract.js";
+import {
+  DECISION_POLICY_VERSION,
+  type FeedingDecision,
+  type FeedingMode,
+} from "../shared/agent-v2-contract.js";
 import { normalizeIsoTimestamp, timestampOrderValue } from "../shared/iso-time.js";
 import type {
   DevicePlanSnapshot,
@@ -505,10 +509,16 @@ function batchPublic(batch: LocalBatch): JsonObject {
   };
 }
 
-function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = batch.revision, confirmedDecision?: JsonObject): JsonObject {
+function decisionFor(
+  batch: LocalBatch,
+  dayIndex = batch.currentDay,
+  revision = batch.revision,
+  confirmedDecision?: { id: string; decision: FeedingDecision },
+): JsonObject {
   const context = frozenContextOf(batch);
   const canonical = computeFrozenBatchDecision(context, dayIndex, revision);
-  const decision = (confirmedDecision ?? canonical.decision) as unknown as JsonObject;
+  const decision = (confirmedDecision?.decision ?? canonical.decision) as unknown as JsonObject;
+  const activeDecisionId = confirmedDecision?.id ?? null;
   const setting = object(decision.setting, "decision_setting");
   const exceptionActions = Array.isArray(decision.exceptionActions)
     ? decision.exceptionActions
@@ -516,6 +526,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
   const dayAge = context.modelInput.startAge + dayIndex;
   return {
     ...decision,
+    activeDecisionId,
     selectedMode: canonical.selectedMode,
     effectiveMode: setting.mode === "timed_quantity" || setting.mode === "free_feeding"
       ? setting.mode
@@ -526,6 +537,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     setting,
     dayIndex,
     dayAge,
+    effectiveHeads: context.modelInput.headCount,
     plannedTotalPowderGrams: Number(setting.dailyPowderGrams ?? 0),
     estimatedAverageWeightKg: Number(setting.estimatedAverageWeightKg ?? 0),
     estimatedEndWeightKg: Number(setting.estimatedEndWeightKg ?? 0),
@@ -552,9 +564,11 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
   };
 }
 
-function cumulativeActualForBusinessDay(records: JsonObject[]): number | null {
+function cumulativeActualForBusinessDay(records: JsonObject[], dayIndex: number): number | null {
   const valid = records
-    .filter((row) => normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
+    .filter((row) =>
+      Number(row.dayIndex) === dayIndex &&
+      normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
     .sort((left, right) => {
       const leftAt = String(left.recordedAt ?? left.created_at ?? "");
       const rightAt = String(right.recordedAt ?? right.created_at ?? "");
@@ -626,11 +640,15 @@ function modeChangeOperations(proposal: FeedbackDeviceProposal): DailyOperationI
   }];
 }
 
-function confirmedDecisionFor(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject | null {
+function confirmedDecisionFor(
+  store: SqliteLocalStore,
+  userId: string,
+  batch: LocalBatch,
+): { id: string; decision: FeedingDecision } | null {
   const context = frozenContextOf(batch);
   const canonical = computeFrozenBatchDecision(context, batch.currentDay, batch.revision);
-  const active = store.getActiveDecision(userId, batch.batchId, canonical.decision.dateLocal);
-  return active ? active as unknown as JsonObject : null;
+  const record = store.getActiveDecisionRecord(userId, batch.batchId, canonical.decision.dateLocal);
+  return record;
 }
 
 function decisionForToday(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject {
@@ -953,6 +971,9 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
   const freeDispenseLimitAtCommit = Number(
     today.freeDispenseLimit ?? setting.freeDispenseLimit ?? today.mealCount ?? 0,
   );
+  const plannedHeadsAtCommit = Number(
+    today.effectiveHeads ?? config.effectiveHeads ?? config.headCount ?? 1,
+  );
   const allowed: JsonObject = {};
   for (const key of OBSERVATION_ALLOWLIST) {
     if (source[key] !== undefined) allowed[key] = source[key];
@@ -969,8 +990,8 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     freeDispenseLimit: freeDispenseLimitAtCommit,
     mealTimes: Array.isArray(today.mealTimes) ? today.mealTimes : [],
     plannedTotalPowderGrams: planTotalAtCommit,
-    planPerPigAtCommit: heads > 0
-      ? Math.round((planTotalAtCommit / heads) * 100) / 100
+    planPerPigAtCommit: plannedHeadsAtCommit > 0
+      ? Math.round((planTotalAtCommit / plannedHeadsAtCommit) * 100) / 100
       : 0,
     planTotalAtCommit,
     feedTimesAtCommit,
@@ -979,7 +1000,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     activeDecisionIdAtCommit: today.activeDecisionId == null
       ? null
       : String(today.activeDecisionId),
-    policyVersionAtCommit: "execution-contract-v1",
+    policyVersionAtCommit: DECISION_POLICY_VERSION,
     estimatedAverageWeightKg: Number(today.estimatedAverageWeightKg ?? 0),
     estimatedEndWeightKg: Number(today.estimatedEndWeightKg ?? 0),
     actualPowderGrams: source.actualPowderGrams == null ? null : finite(source.actualPowderGrams, "actualPowderGrams", 0),
@@ -1343,7 +1364,10 @@ export async function handleLocalApi(
           batchId,
           businessDate,
         );
-        const cumulativeActual = cumulativeActualForBusinessDay(recordsOf(batch));
+        const cumulativeActual = cumulativeActualForBusinessDay(
+          recordsOf(batch),
+          batch.currentDay,
+        );
         if (cumulativeActual === null) {
           throw new Error("NBJ_MODE_SWITCH_ACTUAL_UNKNOWN");
         }
@@ -1427,7 +1451,7 @@ export async function handleLocalApi(
         const body = await readJson(request);
         const expectedRevision = integer(body.expectedRevision, "expected_revision", 0, Number.MAX_SAFE_INTEGER);
         const key = text(body.idempotencyKey, "idempotency_key", 160);
-        const today = decisionFor(batch);
+        const today = decisionForToday(store, auth.user.id, batch);
         const observation = parseObservation(body, today, batch);
         const existingRecords = recordsOf(batch);
         const nextRecords = [...existingRecords.filter((row) => Number(row.dayIndex) !== Number(observation.dayIndex)), observation];

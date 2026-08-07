@@ -200,6 +200,14 @@
 - Client-supplied `mealCount`, `mealTimes`, `singlePowderGrams`, `freeDispenseLimit`, `deviceMode`, `plannedTotalPowderGrams`, `exceptionActions`, `modelVersion`, `sopVersion`, and `waterState` are rejected rather than trusted.
 - Record public responses expose the server-authored commit snapshot for audit and Agent/local API parity.
 
+### EC-P1-5.1 / EC-P1-6.1 Authority Seal — complete
+
+- `cumulativeActualPowderGramsForBusinessDay` is now scoped to `row.dayIndex === currentDay` in both `/mode` and mode-change apply; D0 actual no longer leaks into D1.
+- Added `getActiveDecisionRecord()` so `today.activeDecisionId` is the real database decision row id, and observation commit snapshots store that id.
+- `planPerPigAtCommit` now uses planned/active server head count, not the observation-supplied `effectiveHeads`; observation heads may change the record but cannot rewrite the planned program snapshot.
+- Added `DECISION_POLICY_VERSION` shared constant and used it for `policyVersionAtCommit`.
+- Added regressions for D1 unknown/zero/executed actual, mode apply after state change, active decision id before/after mode apply, and head-count-independent plan-per-pig snapshot.
+
 Baseline:
 
 ```text

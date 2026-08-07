@@ -4,6 +4,8 @@ export type FeedingMode = "timed_quantity" | "free_feeding";
 export type CreepGrade = "none" | "low" | "medium" | "high" | "excellent";
 export type DiarrheaGrade = "none" | "mild" | "moderate" | "severe";
 
+export const DECISION_POLICY_VERSION = "execution-contract-v1";
+
 export type RuntimeStateStatus = "normal" | "manual_hold" | "blocked";
 export type DeviceRuntimeLatch = "normal" | "blocked" | "probe_contaminated";
 export type FeedingRuntimeLatch = "normal" | "refusal";

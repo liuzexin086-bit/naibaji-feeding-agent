@@ -561,6 +561,11 @@ export interface LocalStore {
     batchId: string,
     dateLocal?: string,
   ): FeedingDecision | null;
+  getActiveDecisionRecord(
+    userId: string,
+    batchId: string,
+    dateLocal?: string,
+  ): { id: string; decision: FeedingDecision } | null;
   createSession(input: CreateSessionInput): AgentSession;
   listSessions(userId: string, batchId: string): AgentSession[];
   appendMessage(input: AppendMessageInput): AgentMessage;

@@ -287,7 +287,9 @@ describe("local execution API", () => {
     });
     expect(allowed.status).toBe(200);
     const allowedBody = await allowed.json() as {
+      batch: { revision: number };
       records: Array<{
+        planPerPigAtCommit: number;
         planTotalAtCommit: number;
         feedTimesAtCommit: number;
         policyVersionAtCommit: string;
@@ -298,6 +300,27 @@ describe("local execution API", () => {
       feedTimesAtCommit: expect.any(Number),
       policyVersionAtCommit: "execution-contract-v1",
     });
+    const headsChanged = await request(base, `/api/batches/${createdBody.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: allowedBody.batch.revision,
+        idempotencyKey: "server-plan-per-pig",
+        observation: { effectiveHeads: 10, actualPowderGrams: 0 },
+      }),
+    });
+    expect(headsChanged.status).toBe(200);
+    const headsChangedBody = await headsChanged.json() as {
+      records: Array<{
+        effectiveHeads: number;
+        planPerPigAtCommit: number;
+        planTotalAtCommit: number;
+      }>;
+    };
+    const latestChangedRecord = headsChangedBody.records.at(-1)!;
+    expect(latestChangedRecord.effectiveHeads).toBe(10);
+    expect(latestChangedRecord.planPerPigAtCommit)
+      .toBe(latestChangedRecord.planTotalAtCommit / 20);
   });
 
   it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {

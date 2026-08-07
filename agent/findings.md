@@ -263,6 +263,14 @@ Real Device Control Gate: CLOSED
 - Legacy local-api test that submitted `mealCount` was replaced with a real commit-snapshot regression.
 - `p1-safety-gate` now includes `local-api.test.ts` to cover forged-field and server-authority regressions.
 
+### EC-P1-5.1 / EC-P1-6.1 Authority Seal — 2026-08-07
+
+- Review found cumulative actual was scanned across the whole batch instead of only the current business day; both API and store apply paths now filter by `dayIndex`.
+- Review found `activeDecisionIdAtCommit` could not be populated because `getActiveDecision()` returned only `decision_json`; added `getActiveDecisionRecord()` and surfaced the real row id through `today.activeDecisionId`.
+- Review found `effectiveHeads` could indirectly rewrite `planPerPigAtCommit`; planned per-pig is now computed from server planned heads, while observation `effectiveHeads` remains a separate record field.
+- `DECISION_POLICY_VERSION` is now a single shared constant for snapshot policy version.
+- Added regression coverage for D1 unknown/zero/executed actual, active decision id before/after mode apply, and head-change snapshot stability.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

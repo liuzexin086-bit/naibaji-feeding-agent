@@ -146,11 +146,12 @@ function nullableJsonObject(value: unknown, field: string): Record<string, unkno
   return jsonObject(value, field);
 }
 
-function cumulativeActualFromRecords(records: unknown): number | null {
+function cumulativeActualFromRecords(records: unknown, dayIndex: number): number | null {
   if (!Array.isArray(records)) return null;
   const valid = records
     .filter((row): row is Record<string, unknown> =>
       Boolean(row) && typeof row === "object" && !Array.isArray(row) &&
+      Number(row.dayIndex) === dayIndex &&
       normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
     .sort((left, right) => {
       const leftAt = String(left.recordedAt ?? left.created_at ?? "");
@@ -2194,7 +2195,10 @@ export class SqliteLocalStore implements LocalStore {
         }
         const targetMode = current.proposal.mode;
         const batchData = transactionBatch.data as unknown as Record<string, unknown>;
-        const cumulativeActual = cumulativeActualFromRecords(batchData.records);
+        const cumulativeActual = cumulativeActualFromRecords(
+          batchData.records,
+          transactionBatch.currentDay,
+        );
         if (cumulativeActual === null) {
           throw new LocalStoreError(
             "LOCAL_STORE_MODE_SWITCH_ACTUAL_UNKNOWN",
@@ -2801,6 +2805,33 @@ export class SqliteLocalStore implements LocalStore {
     sql += " ORDER BY date_local DESC, revision DESC, created_at DESC LIMIT 1";
     const row = this.#database.prepare(sql).get(...params) as Row | undefined;
     return row ? decisionFromRow(row) : null;
+  }
+
+  getActiveDecisionRecord(
+    userId: string,
+    batchId: string,
+    dateLocal?: string,
+  ): { id: string; decision: FeedingDecision } | null {
+    this.#ensureOpen();
+    const params: string[] = [
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+    ];
+    let sql = `
+      SELECT id, decision_json FROM feeding_decisions
+      WHERE user_id = ? AND batch_id = ? AND status = 'active'
+    `;
+    if (dateLocal !== undefined) {
+      sql += " AND date_local = ?";
+      params.push(requiredText(dateLocal, "dateLocal"));
+    }
+    sql += " ORDER BY date_local DESC, revision DESC, created_at DESC LIMIT 1";
+    const row = this.#database.prepare(sql).get(...params) as Row | undefined;
+    if (!row) return null;
+    return {
+      id: stringValue(row.id, "feeding_decisions.id"),
+      decision: decisionFromRow(row),
+    };
   }
 
   listSopTemplates(): LocalSopTemplate[] {
