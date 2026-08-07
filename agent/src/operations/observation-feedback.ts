@@ -1,5 +1,8 @@
 import { createHash } from "node:crypto";
-import { timestampOrderValue } from "../shared/iso-time.js";
+import {
+  normalizeIsoTimestamp,
+  timestampOrderValue,
+} from "../shared/iso-time.js";
 import {
   previewDiarrheaAdjustment,
   type CreepGrade,
@@ -40,7 +43,7 @@ const DIARRHEA_RATIO: Record<Exclude<DiarrheaGrade, "none">, number> = {
 };
 
 export function sustainedCreepGrade(records: JsonObject[]): CreepGrade {
-  const recent = records.slice(-3).map((row) => {
+  const recent = validObservationRecords(records).slice(-3).map((row) => {
     const grade = String(row.creepGrade ?? "none");
     return CREEP_ORDER.includes(grade as CreepGrade) ? grade as CreepGrade : "none";
   });
@@ -59,6 +62,11 @@ function recordsOf(batch: LocalBatch): JsonObject[] {
     : [];
 }
 
+export function validObservationRecords(records: JsonObject[]): JsonObject[] {
+  return records.filter((row) =>
+    normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null);
+}
+
 function observationEventRecords(
   store: LocalStore,
   userId: string,
@@ -73,7 +81,7 @@ function observationEventRecords(
 }
 
 function sortedRecords(records: JsonObject[]): JsonObject[] {
-  return [...records].sort((left, right) => {
+  return [...validObservationRecords(records)].sort((left, right) => {
     const leftAt = String(left.recordedAt ?? left.created_at ?? "");
     const rightAt = String(right.recordedAt ?? right.created_at ?? "");
     const leftMs = timestampOrderValue(leftAt);
@@ -267,22 +275,31 @@ function creepControlProposal(
 }
 
 export function evaluateObservationFeedback(input: FeedbackEngineInput): FeedbackEngineResult | null {
-  const diarrheaRecord = latestDiarrheaStatusRecord(input.records);
+  const validRecords = validObservationRecords(input.records);
+  const currentObservationValid = input.observation === undefined ||
+    input.observation.recordedAt === undefined ||
+    input.observation.recordedAt === null ||
+    normalizeIsoTimestamp(input.observation.recordedAt) !== null;
+  const diarrheaRecord = latestDiarrheaStatusRecord(validRecords);
   const diarrheaGradeRaw = diarrheaRecord?.diarrheaGrade;
-  const observedGrade = input.observation?.diarrheaGrade;
+  const observedGrade = currentObservationValid
+    ? input.observation?.diarrheaGrade
+    : undefined;
   const grade = diarrheaRecord
     ? String(diarrheaGradeRaw) as DiarrheaGrade
-    : observedGrade && observedGrade !== "none" && DIARRHEA_ORDER.includes(String(observedGrade) as DiarrheaGrade)
+    : currentObservationValid && observedGrade && observedGrade !== "none" && DIARRHEA_ORDER.includes(String(observedGrade) as DiarrheaGrade)
       ? String(observedGrade) as DiarrheaGrade
       : "none";
   const diarrheaGrade = grade === "none" ? undefined : grade as Exclude<DiarrheaGrade, "none">;
 
   if (diarrheaGrade) {
-    const rawActual = diarrheaRecord
-      ? diarrheaRecord.actualPowderGrams
-      : input.observation?.actualPowderGrams;
+  const rawActual = diarrheaRecord
+    ? diarrheaRecord.actualPowderGrams
+    : currentObservationValid
+      ? input.observation?.actualPowderGrams
+      : undefined;
     const cumulativePowderGrams = rawActual == null || rawActual === "" ? null : Number(rawActual);
-    const sourceRecord = diarrheaRecord ?? input.observation ?? {};
+    const sourceRecord = diarrheaRecord ?? (currentObservationValid ? input.observation : undefined) ?? {};
     const sourceRef = {
       recordedAt: String(sourceRecord.recordedAt ?? sourceRecord.created_at ?? ""),
       idempotencyKey: sourceRecord.idempotencyKey ?? null,
@@ -364,9 +381,11 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
   const controlStartDay = typeof input.config.controlStartDay === "number"
     ? input.config.controlStartDay
     : -1;
-  const creepGrade = sustainedCreepGrade(input.records);
+  const creepGrade = sustainedCreepGrade(validRecords);
   if (controlStartDay === input.currentDayIndex && input.currentDayIndex > 0 && creepGrade !== "none") {
-    const creepRecord = latestCreepRecord(input.records) ?? input.observation ?? {};
+    const creepRecord = latestCreepRecord(validRecords) ??
+      (currentObservationValid ? input.observation : undefined) ??
+      {};
     const sourceRef = {
       recordedAt: String(creepRecord.recordedAt ?? creepRecord.created_at ?? ""),
       idempotencyKey: creepRecord.idempotencyKey ?? null,

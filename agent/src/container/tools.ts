@@ -20,7 +20,10 @@ import {
 import { searchFrozenKnowledge, type SopKnowledgeIndex } from "../knowledge/sop-knowledge.js";
 import { ChromaKnowledgeIndex } from "../knowledge/chroma-index.js";
 import type { FrozenSopKnowledge } from "../shared/local-store-contract.js";
-import { timestampOrderValue } from "../shared/iso-time.js";
+import {
+  normalizeIsoTimestamp,
+  timestampOrderValue,
+} from "../shared/iso-time.js";
 import { shanghaiLocalNowIso } from "../shared/shanghai-time.js";
 import {
   supabaseInsert,
@@ -799,7 +802,12 @@ export function createFeedingTools(
         observedAt?: string;
       };
       const batch = await loadBatch(context);
-      const records = Array.isArray(batch?.records) ? batch.records : [];
+      const records = (Array.isArray(batch?.records) ? batch.records : [])
+        .filter((row) =>
+          normalizeIsoTimestamp(
+            (row as Record<string, unknown> | undefined)?.recordedAt ??
+            (row as Record<string, unknown> | undefined)?.created_at,
+          ) !== null);
       const sortedRecords = [...records].sort((left, right) => {
         const leftAt = String(left?.recordedAt ?? left?.created_at ?? "");
         const rightAt = String(right?.recordedAt ?? right?.created_at ?? "");

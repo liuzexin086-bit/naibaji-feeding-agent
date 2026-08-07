@@ -34,7 +34,10 @@ import type {
   TodayOperationSummary,
   TodayFeedbackSummary,
 } from "./state.js";
-import { timestampOrderValue } from "../../shared/iso-time.js";
+import {
+  normalizeIsoTimestamp,
+  timestampOrderValue,
+} from "../../shared/iso-time.js";
 
 export const LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2";
 
@@ -536,7 +539,12 @@ function localTime(value: unknown): string | undefined {
 
 function latestDiarrheaFromRecords(records: unknown): CurrentBatchSummary["latestDiarrhea"] {
   if (!Array.isArray(records)) return undefined;
-  const sorted = [...records].sort((left, right) => {
+  const validRecords = records.filter((row) =>
+    normalizeIsoTimestamp(
+      object(row)?.recordedAt ?? object(row)?.created_at,
+    ) !== null);
+  if (validRecords.length === 0) return undefined;
+  const sorted = [...validRecords].sort((left, right) => {
     const leftRow = object(left);
     const rightRow = object(right);
     const leftAt = String(leftRow?.recordedAt ?? leftRow?.created_at ?? "");

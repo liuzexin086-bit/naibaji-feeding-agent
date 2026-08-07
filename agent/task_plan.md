@@ -55,6 +55,12 @@
 - R3.1-2 Invalid legacy timestamps sort as oldest, never newest: complete
 - R3.1-3 Parser, feedback sorting, and API impossible-calendar-date regressions: complete
 
+## NBJ-SAFETY-P1-R3.2 Execution State
+
+- R3.2-1 Invalid legacy observations are quarantined before diarrhea/creep decisions: complete
+- R3.2-2 Feedback, Agent tool, and LangGraph summary paths filter malformed timestamps: complete
+- R3.2-3 Only-invalid diarrhea, only-invalid creep, and valid-source preference regressions: complete
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

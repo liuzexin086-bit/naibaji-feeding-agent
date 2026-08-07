@@ -62,14 +62,14 @@ function engineInput(overrides: Partial<FeedbackEngineInput> = {}): FeedbackEngi
 describe("observation feedback engine", () => {
   it("computes sustained creep from the latest three records", () => {
     expect(sustainedCreepGrade([
-      { creepGrade: "high" },
-      { creepGrade: "none" },
-      { creepGrade: "excellent" },
+      { recordedAt: "2026-08-05T08:00:00Z", creepGrade: "high" },
+      { recordedAt: "2026-08-05T09:00:00Z", creepGrade: "none" },
+      { recordedAt: "2026-08-05T10:00:00Z", creepGrade: "excellent" },
     ])).toBe("high");
     expect(sustainedCreepGrade([
-      { creepGrade: "high" },
-      { creepGrade: "none" },
-      { creepGrade: "none" },
+      { recordedAt: "2026-08-05T08:00:00Z", creepGrade: "high" },
+      { recordedAt: "2026-08-05T09:00:00Z", creepGrade: "none" },
+      { recordedAt: "2026-08-05T10:00:00Z", creepGrade: "none" },
     ])).toBe("none");
   });
 
@@ -183,6 +183,52 @@ describe("observation feedback engine", () => {
     }));
     expect(result).not.toBeNull();
     expect(result?.kind).toBe("diarrhea");
+  });
+
+  it("ignores an invalid legacy diarrhea record as the only source", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "invalid-legacy-time",
+        diarrheaGrade: "mild",
+        actualPowderGrams: 100,
+      }],
+    }));
+    expect(result).toBeNull();
+  });
+
+  it("does not trigger creep control from invalid legacy records", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      currentDayIndex: 2,
+      dayAge: 5,
+      config: { controlStartDay: 2 },
+      records: [
+        { recordedAt: "invalid-legacy-time", creepGrade: "high" },
+        { recordedAt: "invalid-legacy-time", creepGrade: "high" },
+      ],
+    }));
+    expect(result).toBeNull();
+  });
+
+  it("uses only the valid mild record when invalid legacy mild exists", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [
+        {
+          recordedAt: "invalid-legacy-time",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 100,
+        },
+        {
+          recordedAt: "2026-08-05T10:00:00.000Z",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 200,
+        },
+      ],
+    }));
+    expect(result).not.toBeNull();
+    expect(result?.feedbackOrigin.sourceObservation).toMatchObject({
+      recordedAt: "2026-08-05T10:00:00.000Z",
+      actualPowderGrams: 200,
+    });
   });
 
   it("drops previously materialized diarrhea feedback when the latest grade is none", () => {

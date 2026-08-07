@@ -108,6 +108,12 @@ Real Device Control Gate: CLOSED
 - `timestampOrderValue()` now uses the same strict parser and returns `Number.MIN_SAFE_INTEGER` for invalid legacy timestamps, so legacy bad data can never sort as the newest observation.
 - Added parser, feedback-sorting, and API regressions for impossible calendar dates, invalid ranges, explicit empty `recordedAt`, and omitted `recordedAt`.
 
+## NBJ-SAFETY-P1-R3.2 — 2026-08-07
+
+- `validObservationRecords()` filters malformed legacy timestamps before diarrhea and creep decision extraction; invalid rows remain stored but cannot become the latest effective diarrhea state or participate in creep-control decisions.
+- Feedback engine, `preview_diarrhea_adjustment`, and LangGraph batch summaries all use the same timestamp quarantine before selecting source observations.
+- Added regressions proving an only-invalid diarrhea record is ignored, invalid-only creep records do not trigger control, and a valid mild record wins over an invalid mild record.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

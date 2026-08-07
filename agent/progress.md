@@ -116,6 +116,13 @@ Real Device Control Gate: CLOSED
 - Added `tests/iso-time.test.ts`, feedback invalid-legacy regression, and API impossible-calendar-date regression.
 - Verified under exact Node 24.18.0: Agent full suite 34 files / 304 tests, `p1-safety-gate` 8 files / 106 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
 
+### NBJ-SAFETY-P1-R3.2 — 2026-08-07
+
+- Added `validObservationRecords()` and applied it to feedback, Agent tool, and LangGraph summary record selection.
+- Malformed legacy timestamps remain stored for audit preservation but are quarantined from latest diarrhea and creep-control decision inputs.
+- Added regressions: only-invalid diarrhea is ignored, only-invalid creep does not trigger control, and valid mild wins over invalid mild.
+- Verified under exact Node 24.18.0: Agent full suite 34 files / 307 tests, `p1-safety-gate` 8 files / 109 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
