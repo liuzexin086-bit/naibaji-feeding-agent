@@ -170,6 +170,13 @@ Real Device Control Gate: CLOSED
 - Added exact V10→V11 action-table migration regression with two action rows, payload equality, replay, cancel CHECK, FK and integrity checks.
 - Verified under exact Node 24.18.0: full Agent suite 34 files / 314 tests and `p1-safety-gate` 8 files / 116 tests pass; build, root npm test, Python 12 tests and compileall pass.
 
+### NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
+
+- P1-0 Contract Freeze complete.
+- Added `execution-contract.md` with four-layer separation: selectedMode, controlState, executionState, activeDecision.
+- Updated `agent/task_plan.md`, `agent/findings.md`, and `agent/progress.md`.
+- No decision-core implementation changes were made in P1-0; P1-1 awaits P1-0 review.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

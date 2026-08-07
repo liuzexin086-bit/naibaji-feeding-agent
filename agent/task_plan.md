@@ -101,6 +101,19 @@
 - Cancelled and superseded amendment UI labels/cards are explicit; cancelled moderate card says the plan is cancelled and device program unchanged.
 - Added exact V10 → V11 migration regression preserving two action rows, payloads, replay, cancel CHECK, FK and integrity.
 
+## NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
+
+### P1-0 Contract Freeze — complete
+
+- Created `execution-contract.md` as the frozen task contract.
+- Separated `selectedMode`, `controlState`, `executionState`, and `activeDecision`.
+- Frozen free-feeding semantics: windows remain unchanged; creep/moderate reduce dispense quota only.
+- Frozen exception mapping: refusal/manual_hold, blockage/blocked, probe/blocked-or-manual_hold, curve cap/manual_hold; no exception may silently change mode.
+- Frozen mode-change transaction and active-decision consistency invariants.
+- Frozen API trust boundary, clean-source build, and `/version` provenance requirements.
+
+P1-1 Decision Core 等后续阶段在 P1-0 验收后再开始。
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

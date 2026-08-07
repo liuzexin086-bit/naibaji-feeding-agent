@@ -154,6 +154,14 @@ Real Device Control Gate: CLOSED
 - Cancelled and superseded amendment statuses render in Chinese and cancelled moderate cards explicitly state the plan is cancelled and device program unchanged.
 - Added exact V10→V11 migration fixture with confirm/apply action rows, payload preservation, replay, cancel CHECK, FK and integrity checks.
 
+## NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
+
+- P1-0 created `execution-contract.md` as the frozen task contract.
+- The root cause is the conflation of feeding mode, control strategy, execution safety, and active device decision; the contract separates all four concepts.
+- Mode is operator-selected; creep/diarrhea only adjust quantities or quotas; exceptions only set execution state.
+- Free-feeding windows are time ranges, not dispense counts; `freeDispenseLimit` is the canonical quota.
+- Active decision mode must equal selected mode after day one; mode changes require a transaction and mode-change amendment.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
