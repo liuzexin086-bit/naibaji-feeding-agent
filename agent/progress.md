@@ -198,6 +198,16 @@ Real Device Control Gate: CLOSED
 - Provenance contract now requires both source SHA and actual artifact SHA for Agent and Web, plus deterministic source→artifact CI fixture.
 - Removed remaining `effectiveMode` implementation instructions from `agent/task_plan.md`; layered `modeState`/`activeDecision`/`runtimeState` are authoritative.
 
+### EC-P1-1 — complete
+
+- Removed `forcedTimed` from `agent/src/decision/core.ts`; mode is `requestedMode` (Day 0 remains the only timed exception).
+- Removed generic `diarrhea` action from base decision exceptions; diarrhea feedback remains the only diarrhea authority.
+- Removed `FREE_FEEDING_BLOCKERS` mode forcing from `agent/src/decision/batch-decision-service.ts`; `selectedMode` is authoritative.
+- Added regression coverage in decision core, batch service, and local mode-switch API.
+- Verified `npm run p0-release-gate`: 6 files / 75 tests passed.
+- Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
+- No migration or schema change in this phase.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

@@ -190,6 +190,14 @@ Real Device Control Gate: CLOSED
 - Provenance now requires source SHA plus actual artifact SHA for Agent and Web, with deterministic source→artifact build fixture in CI.
 - Remaining `effectiveMode` implementation instructions in `agent/task_plan.md` were replaced with layered `modeState.selectedMode/plannedMode`, `activeDecision`, and `runtimeState`.
 
+### EC-P1-1 — 2026-08-07
+
+- Decision Core no longer contains `forcedTimed`; `exceptionSignals`, `milkControlActive`, and `diarrheaGrades` cannot change `setting.mode`.
+- Generic base-decision diarrhea action was removed; diarrhea continues through `observation-feedback` and amendment/manual disposition only.
+- BatchDecisionService no longer reads `FREE_FEEDING_BLOCKERS` to derive requested mode; `selectedMode` is authoritative except Day 0.
+- `freeFeedingBlockers` remains only as a compatibility response field and is always empty under the new contract.
+- Added direct and service-level regressions proving free + milk control and free + exception signals remain free.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

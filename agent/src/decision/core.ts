@@ -182,10 +182,6 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
   };
 }
 
-function hasDiarrhea(grades: DiarrheaGrade[] = []): boolean {
-  return grades.some((grade) => grade !== "none");
-}
-
 function exceptionActionsFor(
   input: DayDecisionInput,
   target: number,
@@ -201,19 +197,6 @@ function exceptionActionsFor(
         "暂停自动套用该数量。",
         "核对当前 SOP、头数和单餐量。",
         "由现场负责人确认是否覆盖模型曲线上限。",
-      ],
-      requiresHumanConfirmation: true,
-    });
-  }
-  if (hasDiarrhea(input.diarrheaGrades)) {
-    actions.push({
-      type: "diarrhea",
-      severity: "urgent",
-      title: "记录到腹泻",
-      actions: [
-        "切换为定时定量。",
-        "暂停常规增量，按腹泻调整预览重排剩余餐次。",
-        "现场检查并按兽医/场区 SOP 处置。",
       ],
       requiresHumanConfirmation: true,
     });
@@ -291,9 +274,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const selected = resolveSopTarget(input, curveLimit);
   const safeDailyTotal = floorToPrecision(selected.target, precision);
   const exceptionActions = exceptionActionsFor(input, selected.target, curveLimit);
-  const forcedTimed = exceptionActions.some((action) => action.type !== "diarrhea") ||
-    input.milkControlActive === true;
-  const mode = forcedTimed ? "timed_quantity" : (input.requestedMode ?? "timed_quantity");
+  const mode = input.requestedMode ?? "timed_quantity";
 
   let times: string[];
   if (input.teachingProgram?.enabled) {
@@ -363,7 +344,6 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       : "not_recorded";
   const reasons = [selected.explanation];
   if (selected.target > curveLimit) reasons.push("SOP 目标量超过模型曲线，已生成现场人工确认处置。 ");
-  if (forcedTimed) reasons.push("非腹泻异常或控奶条件触发定时定量模式。 ");
   if (input.teachingProgram?.enabled) reasons.push("教奶程序持续至次日 08:00（含 08:00 餐）。");
   if (input.teachingProgram?.enabled && selected.source !== "production_model") {
     reasons.push("首日教奶量采用冻结 SOP，按实际 6 个教奶时间点形成设备程序。");

@@ -103,6 +103,19 @@ describe("BatchDecisionService frozen inputs", () => {
     expect(canonical.freeFeedingBlockers).not.toContain("diarrhea");
   });
 
+  it("keeps free-feeding mode when milk control is active and never reuses blockers to force timed", () => {
+    const context = loadFrozenBatchDecisionContext({
+      ...source({ controlStartDay: 1 }),
+      records: [{ dayAge: 4, creepGrade: "high", headCount: 20 }],
+    });
+    const canonical = computeFrozenBatchDecision(context);
+    expect(canonical.selectedMode).toBe("free_feeding");
+    expect(canonical.effectiveMode).toBe("free_feeding");
+    expect(canonical.decision.setting.mode).toBe("free_feeding");
+    expect(canonical.freeFeedingBlockers).toEqual([]);
+    expect(canonical.decision.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
+  });
+
   it("fails closed for a missing or tampered frozen SOP snapshot", () => {
     const missing = source();
     delete (missing.config as Record<string, unknown>).sopTemplate;

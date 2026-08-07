@@ -127,11 +127,19 @@
 - Provenance now requires both source SHA and real artifact SHA for Agent/Web; deterministic source→artifact build fixture is part of CI.
 - Removed remaining `effectiveMode` implementation instructions from LangGraph/today plan specs; layered mode state is authoritative.
 
+### EC-P1-1 — complete
+
+- Removed `forcedTimed` from Decision Core; mode now comes from `requestedMode` (Day 0 handled by eligibility contract).
+- Removed generic `diarrhea` exception action from base day decision; diarrhea authority remains `observation-feedback`.
+- Removed `FREE_FEEDING_BLOCKERS` mode-forcing from BatchDecisionService; `milk_control`, refusal, blockage, probe, and curve cap can no longer switch free feeding to timed.
+- Kept `freeFeedingBlockers` as a compatibility field with an empty array; it is no longer a mode selector.
+- Added regressions: free + milk control remains free, free + diarrhea has no base-diarrhea device action, exception signals preserve free mode.
+
 Baseline:
 
 ```text
 branch: nbj-execution-contract-p1
-HEAD: 2a08fbcf24a9d88f8a2d44abe9696d196d52ba1f
+HEAD: fadcd68
 merge-base main: 413a4c0
 worktree: clean
 Node: v24.16.0 (exact Node 24.18.0 available via npx)

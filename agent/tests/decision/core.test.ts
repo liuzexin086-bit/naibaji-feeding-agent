@@ -139,7 +139,7 @@ describe("deterministic day decision", () => {
     expect(decision.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(211);
   });
 
-  it("limits free feeding to eight windows and forces timed only for control, not diarrhea", () => {
+  it("limits free feeding to eight windows and preserves mode for control and diarrhea", () => {
     const windows = Array.from({ length: 8 }, (_, index) => ({
       startLocal: `${String(index).padStart(2, "0")}:00`,
       endLocal: `${String(index).padStart(2, "0")}:30`,
@@ -150,10 +150,12 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       freeWindows: [...windows, { startLocal: "09:00", endLocal: "09:30" }],
     }))).toThrow("NBJ_DECISION_FREE_WINDOWS_LIMIT");
-    expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", milkControlActive: true })).setting.mode)
-      .toBe("timed_quantity");
-    expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", diarrheaGrades: ["mild"] })).setting.mode)
-      .toBe("free_feeding");
+    const controlled = computeDayDecision(baseInput({ requestedMode: "free_feeding", milkControlActive: true }));
+    expect(controlled.setting.mode).toBe("free_feeding");
+    expect(controlled.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
+    const diarrheal = computeDayDecision(baseInput({ requestedMode: "free_feeding", diarrheaGrades: ["mild"] }));
+    expect(diarrheal.setting.mode).toBe("free_feeding");
+    expect(diarrheal.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
   });
 
   it("normalizes free-feeding windows on the 09:00 business-day axis", () => {
@@ -180,7 +182,7 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       exceptionSignals: { refusal: true, blockage: true, probeContaminated: true },
     }));
-    expect(decision.setting.mode).toBe("timed_quantity");
+    expect(decision.setting.mode).toBe("free_feeding");
     expect(decision.exceptionActions.map((action) => action.type)).toEqual([
       "refusal",
       "blockage",

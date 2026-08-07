@@ -364,7 +364,7 @@ describe("batch device plan snapshot and mode switching", () => {
     expect(await response.json()).toEqual({ code: "NBJ_FROZEN_DEVICE_PLAN_DIGEST_MISMATCH" });
   });
 
-  it("keeps free-feeding mode active when diarrhea is recorded", async () => {
+  it("keeps free-feeding mode active when diarrhea is recorded and leaves device exceptions to feedback", async () => {
     const { base, cookie } = await startApi();
     const created = await createBatch(base, cookie);
     const advanced = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
@@ -389,6 +389,6 @@ describe("batch device plan snapshot and mode switching", () => {
     };
     expect(body.batch.selectedMode).toBe("free_feeding");
     expect(body.today.setting.mode).toBe("free_feeding");
-    expect(body.today.exceptionActions.map((action) => action.type)).toContain("diarrhea");
+    expect(body.today.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
   });
 });
