@@ -19,7 +19,7 @@ describe("protected production model parity", () => {
   });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "80BF3BFE94A97A055ACDCDE80A687F53AD534AE98E7FDE82DEDD51A78CC17275",
+      "2172F0C730A8FB232AE1507C3369483BF35447539092EEBBEAD1DC3168E14F9C",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -239,6 +239,77 @@ describe("protected production model parity", () => {
     expect(Math.max(...future)).toBeLessThanOrEqual(9);
     future.slice(1).forEach((count, index) => {
       expect(count).toBeLessThanOrEqual(future[index]!);
+    });
+  });
+
+  it("fails closed when committed control history is non-monotonic", () => {
+    expect(() => computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+      ],
+    })).toThrow("NBJ_CONTROL_HISTORY_NON_MONOTONIC");
+  });
+
+  it("accepts valid committed history 10 -> 9 -> 8 and keeps future non-increasing", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 10,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 9,
+        },
+        {
+          dayAge: 7,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+      ],
+    });
+    expect(output.control.feedTimes.slice(0, 5)).toEqual([10, 10, 10, 9, 8]);
+    output.control.feedTimes.slice(1).forEach((count, index) => {
+      expect(count).toBeLessThanOrEqual(output.control.feedTimes[index]!);
     });
   });
 

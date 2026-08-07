@@ -281,6 +281,20 @@ function computeControlPlan(plan, records, controlStartDay) {
   // move a persisted latch later when historical observations are revised.
   const resolvedControlStartDay = requestedControlStart
 
+  // Committed history itself must not violate INV-007. If old or hand-edited
+  // data jumps upward after control has started, fail closed instead of hiding
+  // the contradiction and generating a new executable future program.
+  let previousCommittedCount = null
+  for (let i = resolvedControlStartDay; i < nDays; i++) {
+    const dayAge = plan.days[i].dayAge
+    const committedCount = committedPlans[dayAge]?.feedTimes
+    if (committedCount == null) continue
+    if (previousCommittedCount !== null && committedCount > previousCommittedCount) {
+      throw new Error('NBJ_CONTROL_HISTORY_NON_MONOTONIC')
+    }
+    previousCommittedCount = committedCount
+  }
+
   const creepGradeRolling = []
   let currentCount = 10
   let latestCreep = 0  // 最新录入的教槽值，用于补充日增重

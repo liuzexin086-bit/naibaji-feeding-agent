@@ -298,7 +298,9 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     precision,
   );
   const modelMealCount = Math.floor(positive(program.mealCount, "INVALID_MODEL_MEAL_COUNT"));
-  const freeDispenseLimit = modelMealCount;
+  const freeDispenseLimit = mode === "free_feeding"
+    ? Math.max(1, Math.min(modelMealCount, selected.mealCount ?? modelMealCount))
+    : modelMealCount;
   const sopSingle = selected.perMeal != null
     ? floorToPrecision(positive(selected.perMeal, "INVALID_SOP_MEAL_AMOUNT"), precision)
     : undefined;
@@ -329,6 +331,13 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       : timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0),
     precision,
   );
+  if (
+    mode === "free_feeding" &&
+    (selected.source === "sop_direct" || selected.source === "sop_indirect") &&
+    programTotal > safeDailyTotal
+  ) {
+    fail("SOP_QUANTITY_CONFLICT");
+  }
   const suggestedFreeFeedingDailyPowderGrams = mode === "free_feeding"
     ? programTotal
     : undefined;

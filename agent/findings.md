@@ -224,6 +224,14 @@ Real Device Control Gate: CLOSED
 - Free moderate result reason is free-specific and never prints `targetSlot=null`; `freeReductionPriority` is deprecated compatibility only.
 - `computeDayDecision` fails closed when `requestedMode=free_feeding` has no free window.
 
+### EC-P1-1.1 / EC-P1-2.2 / EC-P1-3.2 — 2026-08-07
+
+- Review found deleting `FREE_FEEDING_BLOCKERS` also removed free-feeding eligibility checks; mode forcing is still gone, but eligibility is now a separate pure gate.
+- `evaluateFreeFeedingEligibility()` validates `earliestBatchDay`, `requiresOperatorSelection`, free windows, and exception config shape; `/mode` maps ineligible free requests to `409 NBJ_FREE_FEEDING_NOT_ELIGIBLE`.
+- Free SOP quantity authority now caps limit by SOP `mealCount`; the previous `25g × 4 meals` becoming `24g × 10 = 240g` is closed to `24g × 4 = 96g`.
+- Free SOP settings enforce `daily <= safeSOP target`; direct/indirect conflicts fail closed.
+- Committed control history that jumps upward after control start now raises `NBJ_CONTROL_HISTORY_NON_MONOTONIC`; valid `10→9→8` history remains accepted and future counts stay non-increasing.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

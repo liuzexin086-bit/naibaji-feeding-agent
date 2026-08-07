@@ -160,6 +160,14 @@
 - Free moderate proposal reason no longer emits `targetSlot=null`; `freeReductionPriority` is marked deprecated and is not read by the free decision path.
 - Decision Core rejects executable `free_feeding` requests without at least one valid window.
 
+### EC-P1-1.1 / EC-P1-2.2 / EC-P1-3.2 Closure — complete
+
+- Added `evaluateFreeFeedingEligibility()` as a pure eligibility check over frozen stage conditions, operator selection, windows, and exception config schema.
+- `/mode` rejects free-feeding requests before the frozen earliest day with `409 NBJ_FREE_FEEDING_NOT_ELIGIBLE` and leaves `selectedMode` unchanged; no automatic timed fallback.
+- Free SOP quantity authority now caps `freeDispenseLimit` at `min(modelMealCount, SOP mealCount)` for direct/indirect SOP; free SOP settings must satisfy `daily = single × limit` and `daily <= safeSOP target`.
+- Free SOP conflicts such as `perMeal × mealCount > directTotal` fail closed with `NBJ_DECISION_SOP_QUANTITY_CONFLICT`.
+- `feeding-model.js` now rejects non-monotonic committed control history after control start with `NBJ_CONTROL_HISTORY_NON_MONOTONIC`; valid committed history remains authoritative and future counts stay non-increasing.
+
 Baseline:
 
 ```text

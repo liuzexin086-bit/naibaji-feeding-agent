@@ -314,6 +314,47 @@ export function computeFrozenBatchDecision(
   };
 }
 
+export function evaluateFreeFeedingEligibility(
+  context: FrozenBatchDecisionContext,
+  dayIndex = context.currentDayIndex,
+): { eligible: boolean; reasons: string[] } {
+  if (dayIndex === 0) {
+    return { eligible: false, reasons: ["first_day_locked"] };
+  }
+  const free = context.devicePlan.templates.free_feeding;
+  const stage = free.stageConditions ?? {};
+  const reasons: string[] = [];
+  const allowedStageKeys = new Set(["earliestBatchDay", "requiresOperatorSelection"]);
+  for (const key of Object.keys(stage)) {
+    if (!allowedStageKeys.has(key)) reasons.push("stage_conditions_invalid");
+  }
+  const earliest = stage.earliestBatchDay;
+  if (
+    earliest !== undefined &&
+    (typeof earliest !== "number" || !Number.isSafeInteger(earliest) || earliest < 1)
+  ) {
+    reasons.push("stage_earliest_batch_day_invalid");
+  } else if (earliest !== undefined && dayIndex < earliest) {
+    reasons.push("stage_earliest_batch_day");
+  }
+  const operator = stage.requiresOperatorSelection;
+  if (operator !== undefined && typeof operator !== "boolean") {
+    reasons.push("stage_operator_selection_invalid");
+  } else if (operator !== true) {
+    reasons.push("operator_selection_required");
+  }
+  if (
+    !Array.isArray(free.exceptionBlockers) ||
+    free.exceptionBlockers.some((blocker) => typeof blocker !== "string")
+  ) {
+    reasons.push("exception_blockers_invalid");
+  }
+  if (free.windows.length === 0) {
+    reasons.push("free_windows_required");
+  }
+  return { eligible: reasons.length === 0, reasons };
+}
+
 export function computeFrozenBatchCurve(
   context: FrozenBatchDecisionContext,
 ): {

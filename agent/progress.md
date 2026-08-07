@@ -239,6 +239,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 35 files / 323 tests, p0 gate 80 tests, p1 gate 121 tests.
 - Verified Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
 
+### EC-P1-1.1 / EC-P1-2.2 / EC-P1-3.2 Closure — complete
+
+- Added `evaluateFreeFeedingEligibility()` in BatchDecisionService and wired `/mode` to `409 NBJ_FREE_FEEDING_NOT_ELIGIBLE` before any selectedMode write.
+- Added API regression: frozen earliest day 3 + current day 1 free request returns 409 and selectedMode remains timed.
+- Fixed free SOP quantity amplification: `effectiveLimit = min(modelMealCount, SOP mealCount)`; `perMeal=25, mealCount=4, precision=3` now yields `single=24, limit=4, daily=96`.
+- Added `NBJ_DECISION_SOP_QUANTITY_CONFLICT` when free SOP per-meal program exceeds direct total.
+- Added `NBJ_CONTROL_HISTORY_NON_MONOTONIC` for committed history such as `8 → 10`; valid `10 → 9 → 8` remains accepted.
+- Verified `npm run check`, `npm test` 35 files / 328 tests, p0 gate 83 tests, p1 gate 122 tests.
+- Verified `npm run smoke:dist`, Docker agent build, dist server `/health=200`, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

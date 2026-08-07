@@ -212,12 +212,12 @@ describe("deterministic day decision", () => {
     }));
     expect(divided.setting).toMatchObject({
       mode: "free_feeding",
-      dailyPowderGrams: 240,
+      dailyPowderGrams: 96,
       singlePowderGrams: 24,
-      mealCount: 10,
-      freeDispenseLimit: 10,
-      suggestedDailyPowderGrams: 240,
-      suggestedDailyMealCount: 10,
+      mealCount: 4,
+      freeDispenseLimit: 4,
+      suggestedDailyPowderGrams: 96,
+      suggestedDailyMealCount: 4,
       timedMeals: [],
     });
 
@@ -240,11 +240,13 @@ describe("deterministic day decision", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       precisionGrams: 7,
-      sop: { directTotalPowderGrams: 1234, mealCount: 10 },
+      sop: { directTotalPowderGrams: 1234, mealCount: 4 },
       freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
     }));
     expect(decision.setting.source).toBe("sop_direct");
-    expect(decision.setting.freeDispenseLimit).toBe(10);
+    expect(decision.setting.freeDispenseLimit).toBe(4);
+    expect(decision.setting.singlePowderGrams).toBe(308);
+    expect(decision.setting.dailyPowderGrams).toBe(1232);
     expect(decision.setting.dailyPowderGrams).toBe(
       decision.setting.singlePowderGrams * decision.setting.mealCount,
     );
@@ -255,6 +257,15 @@ describe("deterministic day decision", () => {
   it("fails closed for executable free-feeding without at least one window", () => {
     expect(() => computeDayDecision(baseInput({ requestedMode: "free_feeding" })))
       .toThrow("NBJ_DECISION_FREE_WINDOWS_REQUIRED");
+  });
+
+  it("fails closed when free SOP per-meal program would exceed a direct total", () => {
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 1,
+      sop: { directTotalPowderGrams: 90, powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
+    }))).toThrow("NBJ_DECISION_SOP_QUANTITY_CONFLICT");
   });
 });
 

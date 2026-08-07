@@ -3,6 +3,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import {
   computeFrozenBatchDecision,
   digestFrozenSopSnapshot,
+  evaluateFreeFeedingEligibility,
   loadFrozenBatchDecisionContext,
 } from "../decision/batch-decision-service.js";
 import {
@@ -188,6 +189,7 @@ function sendError(response: ServerResponse, error: unknown): void {
       ? 403
       : code === "NBJ_BATCH_STALE" || code === "NBJ_IDEMPOTENCY_CONFLICT" ||
           code === "NBJ_BATCH_MODE_FIRST_DAY_LOCKED" || code === "NBJ_BATCH_TERMINAL" ||
+          code === "NBJ_FREE_FEEDING_NOT_ELIGIBLE" ||
           code === "NBJ_SOP_MIGRATION_TODAY_CONFIRMED" ||
           code === "NBJ_USER_EXISTS" || code === "NBJ_LAST_ADMIN"
         ? 409
@@ -1154,6 +1156,12 @@ export async function handleLocalApi(
         const config = configOf(batch);
         const context = frozenContextOf(batch);
         const devicePlan = context.devicePlan;
+        if (mode === "free_feeding") {
+          const eligibility = evaluateFreeFeedingEligibility(context, batch.currentDay);
+          if (!eligibility.eligible) {
+            throw new Error("NBJ_FREE_FEEDING_NOT_ELIGIBLE");
+          }
+        }
         const fromMode = context.selectedMode;
         const nextData: JsonObject = {
           ...batch.data,

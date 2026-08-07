@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeFrozenBatchDecision,
   digestFrozenSopSnapshot,
+  evaluateFreeFeedingEligibility,
   loadFrozenBatchDecisionContext,
 } from "../../src/decision/batch-decision-service.js";
 import { defaultFreeFeedingSlots } from "../../src/decision/free-feeding-slots.js";
@@ -120,6 +121,29 @@ describe("BatchDecisionService frozen inputs", () => {
     );
     expect(canonical.freeFeedingBlockers).toEqual([]);
     expect(canonical.decision.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
+  });
+
+  it("evaluates free-feeding eligibility without changing selected mode", () => {
+    const context = loadFrozenBatchDecisionContext(source());
+    expect(evaluateFreeFeedingEligibility(context)).toEqual({
+      eligible: true,
+      reasons: [],
+    });
+    const early = loadFrozenBatchDecisionContext(source());
+    early.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 3,
+      requiresOperatorSelection: true,
+    };
+    expect(evaluateFreeFeedingEligibility(early)).toEqual({
+      eligible: false,
+      reasons: ["stage_earliest_batch_day"],
+    });
+    const invalidStage = loadFrozenBatchDecisionContext(source());
+    invalidStage.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+      requiresOperatorSelection: "yes" as unknown as boolean,
+    };
+    expect(evaluateFreeFeedingEligibility(invalidStage).eligible).toBe(false);
   });
 
   it("fails closed for a missing or tampered frozen SOP snapshot", () => {

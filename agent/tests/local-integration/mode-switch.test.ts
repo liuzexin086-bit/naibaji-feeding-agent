@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -324,6 +325,56 @@ describe("batch device plan snapshot and mode switching", () => {
     const response = await apiRequest(base, `/api/batches/${created.batch.id}`, { headers: { cookie } });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ code: "NBJ_FROZEN_SOP_MISSING" });
+  });
+
+  it("rejects free mode before the frozen earliest day without changing selected mode", async () => {
+    const { base, cookie, filename } = await startApi();
+    const created = await createBatch(base, cookie);
+    const advanced = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "advance-eligibility",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none" },
+      }),
+    });
+    expect(advanced.status).toBe(200);
+    mutateBatchConfig(filename, created.batch.id, (config) => {
+      const snapshot = config.devicePlanSnapshot as Record<string, unknown> & {
+        templates: {
+          free_feeding: { stageConditions: Record<string, unknown> };
+        };
+      };
+      snapshot.templates.free_feeding.stageConditions = {
+        earliestBatchDay: 3,
+        requiresOperatorSelection: true,
+      };
+      snapshot.sha256 = createHash("sha256")
+        .update(JSON.stringify({
+          version: snapshot.version,
+          firstDay: snapshot.firstDay,
+          templates: snapshot.templates,
+        }).normalize("NFC"), "utf8")
+        .digest("hex")
+        .toUpperCase();
+    });
+    const switched = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        mode: "free_feeding",
+        expectedRevision: 1,
+        idempotencyKey: "eligibility-free",
+      }),
+    });
+    expect(switched.status).toBe(409);
+    expect(await switched.json()).toEqual({ code: "NBJ_FREE_FEEDING_NOT_ELIGIBLE" });
+    const batch = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    expect((await batch.json() as { batch: { selectedMode: string } }).batch.selectedMode)
+      .toBe("timed_quantity");
   });
 
   it("fails closed on a stale or tampered frozen SOP receipt and returns no numeric payload", async () => {
