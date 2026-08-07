@@ -433,6 +433,24 @@ describe("today operations API", () => {
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ code: "NBJ_RECORDED_AT_INVALID" });
     expect(store.listObservations(userId, batchId)).toHaveLength(1);
+
+    const empty = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "timestamp-api-empty",
+        observation: {
+          recordedAt: "",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(empty.status).toBe(400);
+    expect(await empty.json()).toEqual({ code: "NBJ_RECORDED_AT_INVALID" });
+    expect(store.listObservations(userId, batchId)).toHaveLength(1);
   });
 
   it("materializes creep-control feedback into the next day plan after sustained creep", async () => {

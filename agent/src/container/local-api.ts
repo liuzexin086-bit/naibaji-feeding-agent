@@ -789,7 +789,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     throw new Error("NBJ_DIARRHEA_GRADE_INVALID");
   }
   let recordedAt = new Date().toISOString();
-  if (source.recordedAt !== undefined && source.recordedAt !== null && source.recordedAt !== "") {
+  if (source.recordedAt !== undefined && source.recordedAt !== null) {
     const normalized = typeof source.recordedAt === "string"
       ? normalizeIsoTimestamp(source.recordedAt)
       : null;
