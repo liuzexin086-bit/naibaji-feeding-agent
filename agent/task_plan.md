@@ -111,11 +111,19 @@
 - Frozen runtime safety: refusal/manual_hold, blockage/blocked, probe/blocked, curve cap approval state; severe diarrhea does not auto-hold whole-pen device.
 - Frozen mode-change lifecycle, Schema V12, Observation trust boundary, clean model build, `/version` provenance, UI runtime contract, and regression matrix.
 
+### P1-0.1 Contract Closure — complete
+
+- Split current gate state from final target state; all runtime/implementation/merge gates are CLOSED until implemented.
+- Frozen `controlState` as server-owned persisted monotonic latch with `startDay`; no config/model dual authority.
+- Frozen INV-007 Control Monotonicity and INV-008 No Double Control Reduction.
+- Added Today API layered contract, Legacy Decision Reconciliation, runtime explicit lifecycle, curve-cap approval semantics, strict observation allowlist, manual audit action/severity mapping, exact V11→V12 migration evidence, clean source/model provenance, root `.dockerignore`, and CI contract.
+- Added Supersession Notice and marked conflicting legacy rules in this file; no runtime source or schema changed.
+
 Baseline:
 
 ```text
 branch: nbj-execution-contract-p1
-HEAD: 22608fc10c8996d21361f944c1e838f2c1c6e330
+HEAD: ecadecb919ff5dac8dbfcf8275deba91c007c4e1
 merge-base main: 413a4c0
 worktree: clean
 Node: v24.16.0 (exact Node 24.18.0 available via npx)
@@ -123,7 +131,7 @@ npm: 11.13.0
 Python: 3.10.9
 ```
 
-EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0 验收后再进入 EC-P1-1。
+EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0.1 验收后再进入 EC-P1-1。
 
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
@@ -163,12 +171,29 @@ volumes or a verified backup clone.
 
 ## Locked Product Rules
 
+> **Supersession Notice（2026-08-07）**
+>
+> 对于以下主题，`agent/docs/execution-contract.md` 是唯一权威合同：
+>
+> - feeding mode authority
+> - controlState
+> - free-feeding execution semantics
+> - runtime blockers
+> - active decision consistency
+> - mode change
+> - observation authority
+> - execution/build provenance
+>
+> 本文件更早的 Locked Product Rules / `effectiveMode` / exceptionBlockers / `freeReductionPriority` 描述只作为历史记录；与本合同冲突时不得执行。执行者必须先读 `agent/docs/execution-contract.md`。
+
+## Legacy Locked Product Rules（superseded by execution-contract-v1）
+
 1. 首日有效模式固定为 `timed_quantity`，餐次严格为 `17:00/20:00/23:00/02:00/05:00/08:00`。
-2. 第二日起操作员只选择已有冻结模板；`selectedMode` 与 `effectiveMode` 分离，两模板互不覆盖。
-3. 控奶只关闭冻结优先级指定的餐次，不改变保留餐次的时间和顺序。
+2. `SUPERSEDED BY execution-contract-v1`：第二日起操作员只选择已有冻结模板；不再使用 `effectiveMode` 作为第二实时权威，`selectedMode` 与 `plannedDecision.mode` / `activeDecision.mode` 分层。
+3. `SUPERSEDED BY execution-contract-v1`：控奶不再按“关闭冻结优先级指定餐次”作为通用执行规则；timed mode 使用模型输出 meal count，free mode 只改 `freeDispenseLimit`，不得重排或删除 free window。
 4. 自由采食模板在管理员 SOP 编辑页固定提供8行时间段设置；每行包含启用状态、开始时间、结束时间和可选名称。
 5. 每个自由采食模板必须启用1～8个有效时间段；允许跨午夜，但按09:00至次日09:00业务日归一化后不得重叠。
-6. SOP 发布后，自由采食8行配置、阶段条件、异常阻断、版本和 hash 随新批次冻结；旧批次不受后台后续编辑影响。
+6. SOP 发布后，自由采食8行配置、阶段条件、异常阻断、版本和 hash 随新批次冻结；旧批次不受后台后续编辑影响。`SUPERSEDED BY execution-contract-v1`：异常阻断不得直接改变 mode；runtime blocker 独立为 `manual_hold`/`blocked`，且 omitted 不解除。
 7. 一个批次在一个业务日内只生成一份常规人工操作计划、只允许一次完成确认。
 8. 现场端单独提供“今日操作”栏，汇总当天所有常规人工 SOP 操作；不为每条操作分别提供确认按钮。
 9. 每日一次确认只覆盖常规 SOP 操作。异常处置、第三日弱仔去留、模式变更和设备方案调整继续使用独立审批与审计，不能被日确认替代。
@@ -226,7 +251,7 @@ exception
 
 - 首日始终生成定时定量六餐：`17:00/20:00/23:00/02:00/05:00/08:00`。
 - 第二日起只读取随批次冻结的定时定量模板或自由采食模板。
-- 异常、控奶或设备限制可把 `effectiveMode` 临时降级为定时定量，但不得覆盖 `selectedMode`，也不得修改任一冻结模板。
+- `SUPERSEDED BY execution-contract-v1`：不再使用 `effectiveMode` 临时降级机制；异常、控奶或设备限制不得改变 `selectedMode`，runtime blocker 独立表达。
 - 所有设备计划和调整结果由确定性核心渲染；模型只解释，不生成数值。
 
 #### `first_day_subgraph`
@@ -242,11 +267,13 @@ exception
 - 控奶仅关闭明确指定或按冻结优先级命中的餐次。
 - 保留餐次的时间、顺序和数值精度不得重排或重算为另一套模板。
 
+> `SUPERSEDED BY execution-contract-v1`：timed mode 的控奶以 protected model 输出的 meal count 为数量权威，不再以“关闭冻结优先级餐次”作为自由采食通用规则；free mode 另见 execution contract。
+
 #### `free_feeding_subgraph`
 
 - 只读取管理员已发布并随批次冻结的8行时间段配置、阶段条件和异常阻断。
 - 配置必须恰有8个 slot，启用数量为 `1..8`；允许跨午夜，但须在 `09:00` 至次日 `09:00` 业务日轴上归一化且不重叠。
-- 任一阶段条件或异常阻断命中时 fail closed：生成阻断证据，并使 `effectiveMode` 使用确定性降级方案；不得改写 `selectedMode` 或自由采食模板。
+- `SUPERSEDED BY execution-contract-v1`：任一阶段条件或异常阻断命中时不得改变 mode；runtime blocker 按 execution contract 独立表达，不得改写 `selectedMode` 或自由采食模板。
 
 #### `exception_subgraph`
 

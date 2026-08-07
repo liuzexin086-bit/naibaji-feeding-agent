@@ -165,6 +165,22 @@ Real Device Control Gate: CLOSED
 - Schema V12 must add `mode_change` origin and one-active-decision uniqueness with fail-closed migration preflight.
 - Clean build must derive model assets from tracked root model sources and expose full `/version` provenance.
 
+### P1-0.1 Contract Closure — 2026-08-07
+
+- Review found the P1-0 contract was an architecture summary, not a self-contained execution contract; no runtime code is changed in this closure.
+- Current gate state is separated from final target state; EC-P1-0 Contract Freeze is PASS and all implementation/merge gates remain CLOSED.
+- `controlState` is now explicitly server-owned persisted state with monotonic `startDay`; protected model detects first trigger, persisted state owns deterministic replay, and no config/model dual authority exists.
+- Added formal invariants: INV-007 Control Monotonicity and INV-008 No Double Control Reduction; free mode maps `feedTimes` to `freeDispenseLimit` exactly once.
+- Added Legacy Decision Reconciliation: legacy mode mismatch requires reconciliation without mutation, execution-started blocks reconciliation; new-policy mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- Today API returns canonical `modeState/controlState/plannedDecision/activeDecision/runtimeState/approvalState/reconciliation`; old flat fields are deprecated and not authoritative.
+- Runtime lifecycle now requires explicit observation to clear `blocked`/`manual_hold`; omitted observations preserve state.
+- Curve cap approval semantics frozen: no mode/runtime change, `approvalState=manual_confirmation_required`, no active decision before confirmation.
+- Observation allowlist is strict `additionalProperties=false`; removed “其它真实现场观察” escape hatch; new fields require contract, validation, test.
+- Manual diarrhea audit freezes severity↔action mapping and server-computed deterministic idempotency key.
+- V11→V12 migration evidence now requires exact status/action fixtures, count/payload/replay/decisionId/FK/integrity checks.
+- Clean build contract now includes Web model from same tracked source, root `.dockerignore`, and `git archive HEAD` clean-source gate; CI contract fixes Node 24.18.0 and provenance checks.
+- `agent/task_plan.md` now has Supersession Notice and legacy rules marked `SUPERSEDED BY execution-contract-v1`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

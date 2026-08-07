@@ -174,10 +174,20 @@ Real Device Control Gate: CLOSED
 
 - P1-0 Contract Freeze complete.
 - Added `agent/docs/execution-contract.md` with five-layer separation: selectedMode, controlState, plannedDecision, activeDecision, runtimeState.
-- Recorded baseline: branch `nbj-execution-contract-p1`, HEAD `22608fc`, merge-base main `413a4c0`, clean worktree, Node v24.16.0, npm 11.13.0, Python 3.10.9.
+- Recorded baseline: branch `nbj-execution-contract-p1`, HEAD `ecadecb`, merge-base main `413a4c0`, clean worktree, Node v24.16.0, npm 11.13.0, Python 3.10.9.
 - Updated `agent/task_plan.md`, `agent/findings.md`, and `agent/progress.md`.
 - Removed the previous root `execution-contract.md` because the user superseded that freeze.
-- No decision-core implementation changes were made in P1-0; EC-P1-1 awaits P1-0 review.
+- No decision-core implementation changes were made in P1-0; EC-P1-1 awaits P1-0.1 review.
+
+### P1-0.1 Contract Closure — complete
+
+- Closed the P1-0 review gaps in `agent/docs/execution-contract.md` only; no runtime source, schema, or migration changed.
+- Added server-owned persisted `CreepControlState` with monotonic `startDay` latch and no `config.controlStartDay`/`model.controlStartDay` dual authority.
+- Added INV-007 Control Monotonicity and INV-008 No Double Control Reduction; free mode maps model `feedTimes` to `freeDispenseLimit` exactly once.
+- Added Legacy Decision Reconciliation with legacy mismatch vs new-policy invariant; added Today API layered contract and deprecated flat fields.
+- Added runtime explicit lifecycle (omitted keeps state, explicit normal clears), curve-cap approval semantics, strict observation allowlist, manual audit action/severity mapping, exact V11→V12 migration evidence, clean source/model provenance, root `.dockerignore`, and CI contract.
+- Added Supersession Notice to `agent/task_plan.md` and marked conflicting legacy rules as superseded by `execution-contract-v1`.
+- No runtime tests run because this phase is documentation-only; `git diff --check` is required before commit.
 
 ## Session: 2026-08-04
 
