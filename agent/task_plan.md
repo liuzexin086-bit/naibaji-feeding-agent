@@ -94,6 +94,13 @@
 - Manual diarrhea actions use a stable `localStorage`-backed idempotency key per batch/observation/action.
 - Removed unused `DIARRHEA_RATIO` residual values.
 
+## NBJ-DIARRHEA-CLOSURE-R3 — 2026-08-07
+
+- Mild completion uses `diarrhea.individual_intervention_completed` with explicit isolation + one piglet milk-control completion audit fields.
+- Manual-action idempotency keys are deterministic (`diarrhea-manual:<batch>:<feedbackOriginId>:<action>`) and bind `feedbackOriginId`/`observationId`.
+- Cancelled and superseded amendment UI labels/cards are explicit; cancelled moderate card says the plan is cancelled and device program unchanged.
+- Added exact V10 → V11 migration regression preserving two action rows, payloads, replay, cancel CHECK, FK and integrity.
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

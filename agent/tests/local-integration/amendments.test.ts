@@ -567,19 +567,45 @@ describe("post-confirmation amendments", () => {
     });
     const todayBody = await today.json() as {
       amendments: Array<unknown>;
-      feedback: { kind: string; proposedSetting: unknown } | null;
+      feedback: {
+        kind: string;
+        proposedSetting: unknown;
+        feedbackOrigin: { id: string; sourceObservation: { recordedAt: string } };
+      } | null;
     };
     expect(todayBody.amendments).toHaveLength(0);
     expect(todayBody.feedback).toMatchObject({
       kind: "diarrhea",
       proposedSetting: null,
     });
+    const manual = await request(base, `/api/batches/${batchId}/diarrhea/manual-action`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        action: "individual_intervention_completed",
+        feedbackOriginId: todayBody.feedback?.feedbackOrigin.id,
+        observationId: todayBody.feedback?.feedbackOrigin.sourceObservation.recordedAt,
+        idempotencyKey: `diarrhea-manual:${batchId}:${todayBody.feedback?.feedbackOrigin.id}:individual_intervention_completed`,
+      }),
+    });
+    expect(manual.status).toBe(200);
     const database = new DatabaseSync(filename, { readOnly: true });
-    const audit = database.prepare(`
-      SELECT action FROM audit_events
-      WHERE action = 'diarrhea.individual_intervention_recorded'
-    `).all();
-    expect(audit.length).toBeGreaterThan(0);
+    const audits = database.prepare(`
+      SELECT action, details_json FROM audit_events
+      WHERE action IN (
+        'diarrhea.individual_intervention_recorded',
+        'diarrhea.individual_intervention_completed'
+      )
+    `).all() as Array<{ action: string; details_json: string }>;
+    expect(audits.some((row) => row.action === "diarrhea.individual_intervention_recorded")).toBe(true);
+    const completed = audits.find((row) => row.action === "diarrhea.individual_intervention_completed");
+    expect(completed).toBeDefined();
+    expect(JSON.parse(completed?.details_json ?? "{}")).toMatchObject({
+      isolationCompleted: true,
+      affectedPigletMilkControlCompleted: true,
+      affectedPigletMilkControlCount: 1,
+      deviceSettingChanged: false,
+    });
     database.close();
   });
 

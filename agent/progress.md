@@ -162,6 +162,14 @@ Real Device Control Gate: CLOSED
 - Removed `DIARRHEA_RATIO`.
 - Verified under exact Node 24.18.0: full Agent suite 34 files / 313 tests and `p1-safety-gate` 8 files / 115 tests pass; build, root npm test, Python 12 tests and compileall pass.
 
+### NBJ-DIARRHEA-CLOSURE-R3 — 2026-08-07
+
+- Mild completion now audits `diarrhea.individual_intervention_completed` and records isolation + one piglet milk-control completion.
+- Manual-action keys are deterministic and bound to `feedbackOriginId`/`observationId`; no per-click UUID is sent.
+- Cancelled/superseded statuses and cancelled moderate card are fully rendered.
+- Added exact V10→V11 action-table migration regression with two action rows, payload equality, replay, cancel CHECK, FK and integrity checks.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 314 tests and `p1-safety-gate` 8 files / 116 tests pass; build, root npm test, Python 12 tests and compileall pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

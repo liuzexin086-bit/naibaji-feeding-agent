@@ -147,6 +147,13 @@ Real Device Control Gate: CLOSED
 - Manual-action idempotency keys are stable per batch/observation/action and stored in `localStorage` for replay.
 - `DIARRHEA_RATIO` was removed because ratios no longer represent the diarrhea contract.
 
+## NBJ-DIARRHEA-CLOSURE-R3 — 2026-08-07
+
+- Mild completion audits as `diarrhea.individual_intervention_completed` with `isolationCompleted=true`, `affectedPigletMilkControlCompleted=true`, and count `1`.
+- `diarrhea/manual-action` now accepts `individual_intervention_completed` and requires a deterministic idempotency key bound to `feedbackOriginId`/`observationId`.
+- Cancelled and superseded amendment statuses render in Chinese and cancelled moderate cards explicitly state the plan is cancelled and device program unchanged.
+- Added exact V10→V11 migration fixture with confirm/apply action rows, payload preservation, replay, cancel CHECK, FK and integrity checks.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

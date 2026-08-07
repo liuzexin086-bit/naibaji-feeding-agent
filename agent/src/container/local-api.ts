@@ -1009,15 +1009,39 @@ export async function handleLocalApi(
       if (suffix === "diarrhea/manual-action" && request.method === "POST") {
         const body = await readJson(request);
         const action = text(body.action, "diarrhea_manual_action", 80);
-        if (!["isolation_completed", "examination_recorded", "veterinary_referral"].includes(action)) {
+        if (![
+          "individual_intervention_completed",
+          "isolation_completed",
+          "examination_recorded",
+          "veterinary_referral",
+        ].includes(action)) {
           throw new Error("NBJ_DIARRHEA_MANUAL_ACTION_INVALID");
         }
+        const feedbackOriginId = body.feedbackOriginId
+          ? text(body.feedbackOriginId, "feedback_origin_id", 128)
+          : null;
+        const sourceObservationId = body.observationId
+          ? text(body.observationId, "observation_id", 128)
+          : null;
+        const details = action === "individual_intervention_completed"
+          ? {
+              severity: "mild",
+              isolationCompleted: true,
+              affectedPigletMilkControlCompleted: true,
+              affectedPigletMilkControlCount: 1,
+              deviceSettingChanged: false,
+            }
+          : {
+              deviceSettingChanged: false,
+            };
         store.audit({
           userId: auth.user.id,
           batchId,
           action: `diarrhea.${action}`,
           details: {
-            sourceObservationId: body.observationId ?? null,
+            ...details,
+            feedbackOriginId,
+            sourceObservationId,
           },
           idempotencyKey: text(body.idempotencyKey, "idempotency_key", 160),
         });

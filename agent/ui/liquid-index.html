@@ -456,7 +456,7 @@
         var grade = source.diarrheaGrade || '';
         var proposal = feedback && feedback.proposedSetting || null;
         if (grade === 'mild') {
-          return '<li class="exception-card"><strong>轻度腹泻 · 个体干预</strong><span>建议处理：标记并隔离腹泻仔猪；病猪控奶一次；其他仔猪继续执行当前饲喂程序。</span><span>当前设备程序保持不变。</span><span class="exception-actions"><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'isolation_completed\')">已完成隔离与控奶</button><button type="button" onclick="openAgent(\'已录入轻度腹泻，请给出个体隔离与病猪控奶建议；不要修改整栏设备。\', true)">打开 Agent</button></span></li>';
+          return '<li class="exception-card"><strong>轻度腹泻 · 个体干预</strong><span>建议处理：标记并隔离腹泻仔猪；病猪控奶一次；其他仔猪继续执行当前饲喂程序。</span><span>当前设备程序保持不变。</span><span class="exception-actions"><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'individual_intervention_completed\')">已完成隔离与控奶</button><button type="button" onclick="openAgent(\'已录入轻度腹泻，请给出个体隔离与病猪控奶建议；不要修改整栏设备。\', true)">打开 Agent</button></span></li>';
         }
         if (grade === 'severe') {
           return '<li class="exception-card"><strong>重度腹泻 · 紧急人工处置</strong><span>自动饲喂调整已停止。请立即隔离明显腹泻仔猪，检查精神状态、呕吐、粪便性状、体温、脱水、发病头数和传播速度，并检查栏舍温度、湿度、饮水、饲料和卫生。</span><span>设备方案保持当前方案，不自动修改。</span><span class="exception-actions"><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'examination_recorded\')">记录现场检查</button><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'isolation_completed\')">记录隔离</button><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'veterinary_referral\')">联系/转兽医处置</button></span></li>';
@@ -464,6 +464,12 @@
         if (grade === 'moderate') {
           var target = proposal && proposal.targetSlot ? String(proposal.targetSlot) : '待确认';
           var total = proposal && proposal.dailyPowderGrams != null ? number(proposal.dailyPowderGrams, 0) : '—';
+          if (amendment && amendment.status === 'cancelled') {
+            return '<li class="exception-card"><strong>中度腹泻减餐方案已取消</strong><span>设备程序未修改。如果现场仍为中度腹泻，请重新记录最新观察后重新评估。</span></li>';
+          }
+          if (amendment && amendment.status === 'superseded') {
+            return '<li class="exception-card"><strong>中度腹泻减餐方案已被更新观察替代</strong><span>不应用旧方案；请基于最新现场观察重新评估。</span></li>';
+          }
           var buttons = '';
           if (amendment && amendment.status === 'pending') {
             buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'confirm\')">确认减餐</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'reject\')">拒绝</button>';
@@ -554,7 +560,7 @@
         }).join('') : '<li class="empty">该业务日没有待执行操作</li>';
         var amendments = Array.isArray(state.todayAmendments) ? state.todayAmendments : [];
         if (amendments.length) {
-          var amendmentStatusLabels = { pending: '待独立确认', confirmed: '已独立确认', rejected: '已拒绝', applied: '已应用' };
+          var amendmentStatusLabels = { pending: '待独立确认', confirmed: '已独立确认', rejected: '已拒绝', applied: '已应用', cancelled: '已取消', superseded: '已被更新替代' };
           var amendmentSeverityLabels = { mild: '轻度', moderate: '中度', severe: '重度' };
           list.innerHTML += amendments.map(function (amendment) {
             var originLabel = amendment.originKind === 'diarrhea' ? '腹泻' : '教槽控奶';
@@ -632,14 +638,15 @@
         if (!state.batch || state.operationsBusy) return;
         var origin = state.diarrheaFeedback && state.diarrheaFeedback.feedbackOrigin || {};
         var observationId = origin.sourceObservation && origin.sourceObservation.recordedAt || 'none';
-        var stableKey = 'nbj-diarrhea-manual:' + batchId + ':' + observationId + ':' + action;
+        var feedbackOriginId = origin.id || 'none';
+        var stableKey = 'nbj-diarrhea-manual:' + batchId + ':' + feedbackOriginId + ':' + action;
         if (localStorage.getItem(stableKey)) { showToast('现场处置已记录'); return; }
-        var idempotencyKey = uuid();
+        var idempotencyKey = 'diarrhea-manual:' + batchId + ':' + feedbackOriginId + ':' + action;
         state.operationsBusy = true; render();
         try {
           await api('/api/batches/' + encodeURIComponent(batchId) + '/diarrhea/manual-action', {
             method: 'POST',
-            body: { action: action, idempotencyKey: idempotencyKey }
+            body: { action: action, feedbackOriginId: feedbackOriginId, observationId: observationId, idempotencyKey: idempotencyKey }
           });
           localStorage.setItem(stableKey, idempotencyKey);
           showToast('现场处置已记录');

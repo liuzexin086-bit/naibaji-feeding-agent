@@ -242,9 +242,12 @@ describe("local frontend contract", () => {
     expect(html).toContain("amendAction(");
     expect(html).toContain("diarrheaManualAction(");
     expect(html).toContain("已完成隔离与控奶");
+    expect(html).toContain("individual_intervention_completed");
     expect(html).toContain("确认减餐");
     expect(html).toContain("应用调整");
     expect(html).toContain("取消调整");
+    expect(html).toContain("已取消");
+    expect(html).toContain("已被更新替代");
     expect(html).not.toContain("拒绝调整");
     expect(html).toContain("if (action === 'apply') await loadBatch(batchId);");
   });
