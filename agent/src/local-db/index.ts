@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { normalizeIsoTimestamp } from "../shared/iso-time.js";
 import type {
   DeviceSetting,
   FeedingDecision,
@@ -70,7 +71,8 @@ export type LocalStoreErrorCode =
   | "LOCAL_STORE_USER_SELF_DELETE"
   | "LOCAL_STORE_USER_CONFIRM_MISMATCH"
   | "LOCAL_STORE_LAST_ADMIN"
-  | "LOCAL_STORE_INVALID_INPUT";
+  | "LOCAL_STORE_INVALID_INPUT"
+  | "LOCAL_STORE_INVALID_TIMESTAMP";
 
 export class LocalStoreError extends Error {
   constructor(
@@ -107,6 +109,17 @@ function stringValue(value: unknown, field: string): string {
 function nullableString(value: unknown, field: string): string | null {
   if (value === null) return null;
   return stringValue(value, field);
+}
+
+function normalizedObservedAt(value: string | undefined): string {
+  const normalized = normalizeIsoTimestamp(value ?? new Date().toISOString());
+  if (!normalized) {
+    throw new LocalStoreError(
+      "LOCAL_STORE_INVALID_TIMESTAMP",
+      "observedAt must be a valid ISO 8601 timestamp",
+    );
+  }
+  return normalized;
 }
 
 function numberValue(value: unknown, field: string): number {
@@ -689,6 +702,7 @@ export class SqliteLocalStore implements LocalStore {
   readonly #database: DatabaseSync;
   #closed = false;
   #transactionDepth = 0;
+  #lastMessageCreatedAtMs = 0;
 
   constructor(options: LocalStoreOptions) {
     const filename = requiredText(options.filename, "filename");
@@ -800,7 +814,52 @@ export class SqliteLocalStore implements LocalStore {
       (severity !== undefined && Number(severity.notnull) === 1) ||
       !tableSql.includes("superseded") ||
       !tableSql.includes("cancelled");
+    const amendmentCountBefore = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendments",
+      ).get() as Row).count,
+    );
+    const actionTableExists = Boolean(this.#database.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+    `).get());
+    const actionCountBefore = actionTableExists
+      ? Number((this.#database.prepare(
+          "SELECT count(*) AS count FROM daily_operation_amendment_actions",
+        ).get() as Row).count)
+      : 0;
     if (needsRebuild) {
+      if (actionTableExists) {
+        this.#database.exec(`
+          DROP TABLE IF EXISTS daily_operation_amendment_actions_v10_backup;
+          CREATE TABLE daily_operation_amendment_actions_v10_backup (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            batch_id TEXT NOT NULL,
+            amendment_id TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply')),
+            idempotency_key TEXT NOT NULL,
+            expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+            expected_amendment_sha256 TEXT NOT NULL,
+            resulting_status TEXT NOT NULL,
+            decision_id TEXT,
+            response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, idempotency_key)
+          ) STRICT;
+          INSERT INTO daily_operation_amendment_actions_v10_backup (
+            id, user_id, batch_id, amendment_id, action, idempotency_key,
+            expected_batch_revision, expected_amendment_sha256, resulting_status,
+            decision_id, response_json, created_at
+          )
+          SELECT
+            id, user_id, batch_id, amendment_id, action, idempotency_key,
+            expected_batch_revision, expected_amendment_sha256, resulting_status,
+            decision_id, response_json, created_at
+          FROM daily_operation_amendment_actions;
+          DROP TABLE daily_operation_amendment_actions;
+        `);
+      }
       this.#database.exec(`
         CREATE TABLE daily_operation_amendments_v9 (
           id TEXT PRIMARY KEY,
@@ -870,6 +929,44 @@ export class SqliteLocalStore implements LocalStore {
       CREATE INDEX IF NOT EXISTS daily_operation_amendments_batch_date_idx
         ON daily_operation_amendments(user_id, batch_id, business_date DESC);
     `);
+    const backupExists = Boolean(this.#database.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions_v10_backup'
+    `).get());
+    if (backupExists) {
+      this.#database.exec(`
+        INSERT INTO daily_operation_amendment_actions (
+          id, user_id, batch_id, amendment_id, action, idempotency_key,
+          expected_batch_revision, expected_amendment_sha256, resulting_status,
+          decision_id, response_json, created_at
+        )
+        SELECT
+          id, user_id, batch_id, amendment_id, action, idempotency_key,
+          expected_batch_revision, expected_amendment_sha256, resulting_status,
+          decision_id, response_json, created_at
+        FROM daily_operation_amendment_actions_v10_backup;
+        DROP TABLE daily_operation_amendment_actions_v10_backup;
+      `);
+    }
+    const amendmentCountAfter = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendments",
+      ).get() as Row).count,
+    );
+    const actionCountAfter = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendment_actions",
+      ).get() as Row).count,
+    );
+    if (
+      amendmentCountBefore !== amendmentCountAfter ||
+      actionCountBefore !== actionCountAfter
+    ) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_INVALID_INPUT",
+        "amendment migration would lose rows; transaction rolled back",
+      );
+    }
   }
 
   #backfillLegacyFrozenSnapshots(): void {
@@ -952,7 +1049,7 @@ export class SqliteLocalStore implements LocalStore {
     const rows = this.#database.prepare(`
       SELECT * FROM daily_observations
       WHERE user_id = ? AND batch_id = ?
-      ORDER BY json_extract(data_json, '$.dayIndex') ASC, created_at ASC
+      ORDER BY observed_at ASC, created_at ASC, id ASC
     `).all(
       requiredText(userId, "userId"),
       requiredText(batchId, "batchId"),
@@ -2110,6 +2207,8 @@ export class SqliteLocalStore implements LocalStore {
     if (!batch) this.#batchNotFound();
     const batchRevision = nonNegativeInteger(input.batchRevision, "batchRevision");
     if (batch.revision !== batchRevision) this.#staleRevision(batch.revision, batchRevision);
+    const observedAt = normalizedObservedAt(input.observedAt);
+    const data = { ...input.data, recordedAt: observedAt };
     const id = requiredText(input.id ?? randomUUID(), "id");
     const now = new Date().toISOString();
     this.#database.prepare(`
@@ -2122,9 +2221,9 @@ export class SqliteLocalStore implements LocalStore {
       id,
       batchId,
       requiredText(input.dateLocal, "dateLocal"),
-      input.observedAt ?? now,
+      observedAt,
       batchRevision,
-      serializeObject(input.data, "data"),
+      serializeObject(data, "data"),
       idempotencyKey,
       now,
     );
@@ -2516,7 +2615,11 @@ export class SqliteLocalStore implements LocalStore {
       : [];
     result.records = records.map((row) =>
       Number(row.dayIndex) === Number(observation.dayIndex)
-        ? { ...row, observationId }
+        ? {
+            ...row,
+            recordedAt: observation.recordedAt ?? row.recordedAt,
+            observationId,
+          }
         : row,
     );
     return result;
@@ -2575,8 +2678,10 @@ export class SqliteLocalStore implements LocalStore {
     const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
     if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
     const now = new Date().toISOString();
+    const observedAt = normalizedObservedAt(input.observedAt);
     const observation = {
       ...input.observation,
+      recordedAt: observedAt,
       dayIndex: Number(input.observation.dayIndex ?? batch.currentDay),
       revision: expected,
     };
@@ -2586,7 +2691,7 @@ export class SqliteLocalStore implements LocalStore {
         userId,
         batchId,
         dateLocal: requiredText(input.dateLocal, "dateLocal"),
-        observedAt: input.observedAt ?? now,
+        observedAt,
         batchRevision: expected,
         data: observation,
         idempotencyKey: key,
@@ -2644,21 +2749,27 @@ export class SqliteLocalStore implements LocalStore {
     const expected = nonNegativeInteger(input.expectedRevision, "expectedRevision");
     if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
     const now = new Date().toISOString();
+    const observedAt = normalizedObservedAt(input.observedAt);
+    const observation = {
+      ...input.observation,
+      recordedAt: observedAt,
+      revision: expected,
+    };
     let resultPayload: Record<string, unknown> = input.result;
     this.#transaction(() => {
       const inserted = this.#insertObservation({
         userId,
         batchId,
         dateLocal: requiredText(input.dateLocal, "dateLocal"),
-        observedAt: input.observedAt ?? now,
+        observedAt,
         batchRevision: expected,
-        data: { ...input.observation, revision: expected },
+        data: observation,
         idempotencyKey: key,
       });
       const persistedNextData = input.feedbackBatch
         ? this.#persistObservationIdInNextData(
             input.nextData,
-            { ...input.observation, revision: expected },
+            observation,
             inserted.id,
           )
         : input.nextData;
@@ -2680,7 +2791,7 @@ export class SqliteLocalStore implements LocalStore {
             batchId,
             expectedRevision: expected,
             observationId: inserted.id,
-            observation: { ...input.observation, revision: expected },
+            observation,
             nextData: persistedNextData,
             feedbackBatch: input.feedbackBatch,
             result: input.result,
@@ -2986,7 +3097,7 @@ export class SqliteLocalStore implements LocalStore {
       }
     }
     const id = requiredText(input.id ?? randomUUID(), "id");
-    const now = new Date().toISOString();
+    const now = this.#monotonicNow();
     this.#database.prepare(`
       INSERT INTO agent_messages (
         user_id, id, batch_id, session_id, role, content, tool_name,
@@ -3028,7 +3139,7 @@ export class SqliteLocalStore implements LocalStore {
       SELECT * FROM (
         SELECT * FROM agent_messages
         WHERE user_id = ? AND batch_id = ? AND session_id = ?
-        ORDER BY created_at DESC, rowid DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ?
       )
       ORDER BY created_at ASC, id ASC
@@ -3133,6 +3244,13 @@ export class SqliteLocalStore implements LocalStore {
 
   #ensureOpen(): void {
     if (this.#closed) throw new LocalStoreError("LOCAL_STORE_CLOSED");
+  }
+
+  #monotonicNow(): string {
+    const current = Date.now();
+    const next = Math.max(current, this.#lastMessageCreatedAtMs + 1);
+    this.#lastMessageCreatedAtMs = next;
+    return new Date(next).toISOString();
   }
 
   #transaction<T>(operation: () => T): T {

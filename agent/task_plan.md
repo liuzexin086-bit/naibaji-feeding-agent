@@ -42,6 +42,13 @@
 - R2-4 Permanent `daily_observations.id` binding: complete
 - R2-5 mild→omitted API integration regression: complete
 
+## NBJ-SAFETY-P1-R3 Execution State
+
+- R3-1 V9→V10 migration preserves `daily_operation_amendment_actions`: complete
+- R3-2 V9 confirmed/applied amendment + action-history + idempotency replay regression: complete
+- R3-3 `recordedAt`/`observedAt` UTC normalization and epoch-based observation sorting: complete
+- Message list uses monotonic `created_at` plus chronological ordering so latest-N retrieval is stable under rapid writes.
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

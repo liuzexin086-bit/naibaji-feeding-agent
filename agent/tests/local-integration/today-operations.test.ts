@@ -386,6 +386,55 @@ describe("today operations API", () => {
     expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
   });
 
+  it("normalizes recordedAt to UTC and rejects invalid timestamps", async () => {
+    const { store, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "时间正规化", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+
+    const saved = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "timestamp-api-normalized",
+        observation: {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    const observations = store.listObservations(userId, batchId);
+    expect(observations).toHaveLength(1);
+    expect(observations[0]?.observedAt).toBe("2026-08-05T02:00:00.000Z");
+    expect(observations[0]?.data.recordedAt).toBe("2026-08-05T02:00:00.000Z");
+
+    const invalid = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "timestamp-api-invalid",
+        observation: {
+          recordedAt: "2026-08-05 10:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ code: "NBJ_RECORDED_AT_INVALID" });
+    expect(store.listObservations(userId, batchId)).toHaveLength(1);
+  });
+
   it("materializes creep-control feedback into the next day plan after sustained creep", async () => {
     const { base, cookie } = await startApi();
     const created = await request(base, "/api/batches", {

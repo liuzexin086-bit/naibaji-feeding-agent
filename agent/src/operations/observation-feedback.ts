@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { timestampOrderValue } from "../shared/iso-time.js";
 import {
   previewDiarrheaAdjustment,
   type CreepGrade,
@@ -75,7 +76,11 @@ function sortedRecords(records: JsonObject[]): JsonObject[] {
   return [...records].sort((left, right) => {
     const leftAt = String(left.recordedAt ?? left.created_at ?? "");
     const rightAt = String(right.recordedAt ?? right.created_at ?? "");
-    return leftAt.localeCompare(rightAt);
+    const leftMs = timestampOrderValue(leftAt);
+    const rightMs = timestampOrderValue(rightAt);
+    if (leftMs !== rightMs) return leftMs - rightMs;
+    return leftAt.localeCompare(rightAt) ||
+      String(left.created_at ?? "").localeCompare(String(right.created_at ?? ""));
   });
 }
 

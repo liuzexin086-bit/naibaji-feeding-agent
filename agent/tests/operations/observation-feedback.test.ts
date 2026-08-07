@@ -148,6 +148,24 @@ describe("observation feedback engine", () => {
     expect(result?.kind).toBe("diarrhea");
   });
 
+  it("orders observations by instant instead of timestamp string", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [
+        {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 0,
+        },
+        {
+          recordedAt: "2026-08-05T03:00:00Z",
+          diarrheaGrade: "none",
+          actualPowderGrams: 180,
+        },
+      ],
+    }));
+    expect(result).toBeNull();
+  });
+
   it("drops previously materialized diarrhea feedback when the latest grade is none", () => {
     const base = [{
       code: "daily_patrol",

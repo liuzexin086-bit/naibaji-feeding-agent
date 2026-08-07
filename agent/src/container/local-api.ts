@@ -23,6 +23,7 @@ import { computeProductionPlan, modelStandardWeight } from "../model/production-
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
 import { createLangChainModel } from "../agent/langgraph/models.js";
 import type { FeedingMode } from "../shared/agent-v2-contract.js";
+import { normalizeIsoTimestamp } from "../shared/iso-time.js";
 import type {
   DevicePlanSnapshot,
   DailyOperationPlan,
@@ -170,6 +171,7 @@ function errorCode(error: unknown): string {
       LOCAL_STORE_DAILY_OPERATION_CONFIRMED: "NBJ_SOP_MIGRATION_TODAY_CONFIRMED",
       LOCAL_STORE_IDEMPOTENCY_CONFLICT: "NBJ_IDEMPOTENCY_CONFLICT",
       LOCAL_STORE_INVALID_INPUT: "NBJ_LOCAL_API_INVALID_INPUT",
+      LOCAL_STORE_INVALID_TIMESTAMP: "NBJ_RECORDED_AT_INVALID",
     };
     return codes[error.code] ?? `NBJ_${error.code.replace(/^LOCAL_STORE_/, "")}`;
   }
@@ -786,6 +788,14 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
   if (diarrhea !== undefined && !["none", "mild", "moderate", "severe"].includes(diarrhea)) {
     throw new Error("NBJ_DIARRHEA_GRADE_INVALID");
   }
+  let recordedAt = new Date().toISOString();
+  if (source.recordedAt !== undefined && source.recordedAt !== null && source.recordedAt !== "") {
+    const normalized = typeof source.recordedAt === "string"
+      ? normalizeIsoTimestamp(source.recordedAt)
+      : null;
+    if (!normalized) throw new Error("NBJ_RECORDED_AT_INVALID");
+    recordedAt = normalized;
+  }
   const record = {
     ...source,
     dayIndex: Number(today.dayIndex),
@@ -807,9 +817,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     exceptionActions: Array.isArray(source.exceptionActions) ? source.exceptionActions : today.exceptionActions,
     modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: String(today.sopVersion ?? "local-sop-default-v1"),
-    recordedAt: typeof source.recordedAt === "string" && source.recordedAt
-      ? source.recordedAt
-      : new Date().toISOString(),
+    recordedAt,
   };
   return record;
 }

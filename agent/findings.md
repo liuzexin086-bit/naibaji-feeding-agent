@@ -93,6 +93,14 @@ Real Device Control Gate: CLOSED
 - Automatic supersede is audited as `daily_operation_amendments.superseded` with `reason`, `sourceObservationId`, and optional `replacementAmendmentId`; `decided_by` stays null for system changes.
 - Added API regression: mild → same-day omitted → pending diarrhea feedback remains active.
 
+## NBJ-SAFETY-P1-R3 — 2026-08-07
+
+- `#ensureAmendmentV10()` now backs up `daily_operation_amendment_actions` before dropping the parent amendment table, restores the rows after rebuilding, and fails closed if amendment/action counts do not match.
+- Added an exact old V9 fixture containing a confirmed then applied amendment with two action rows; migration preserves rows, FKs, indexes, integrity, and both confirm/apply idempotency replays.
+- `recordedAt`/`observedAt` are normalized to UTC ISO timestamps at both the local API and store write boundaries; invalid timestamps are rejected with `NBJ_RECORDED_AT_INVALID` or `LOCAL_STORE_INVALID_TIMESTAMP`.
+- Diarrhea/feedback, LangGraph summary, and local tool paths now sort observations by parsed epoch rather than timestamp string, so `10:00+08:00` before `03:00Z` is ordered correctly.
+- `agent_messages.created_at` is made monotonic per store instance and latest-N message retrieval keeps stable chronological ordering under rapid writes.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

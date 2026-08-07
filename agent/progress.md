@@ -98,6 +98,16 @@ Real Device Control Gate: CLOSED
 - Added API regression for mild followed by same-day omitted `diarrheaGrade`; pending feedback remains.
 - Verified full Agent suite (33 files / 296 tests), `p1-safety-gate` (101 tests), Python 12 tests, root npm test, and agent build.
 
+### NBJ-SAFETY-P1-R3 — 2026-08-07
+
+- `#ensureAmendmentV10()` now preserves `daily_operation_amendment_actions` during the V9→V10 parent-table rebuild and restores them after the new FK table exists.
+- Added exact old V9 migration fixture with pending → confirm → apply, two action rows, preserved amendment/action counts, FK check, integrity check, and replay of both original confirm/apply idempotency keys.
+- `recordedAt`/`observedAt` are normalized to UTC ISO timestamps in local API parsing and SQLite store writes; invalid timestamps fail closed.
+- Feedback, LangGraph, and local tool observation sorting now uses parsed epoch instead of string comparison.
+- Added store/API regressions proving `10:00+08:00` is stored as `02:00Z`, `03:00Z` is later, and invalid timestamps are rejected.
+- Made `agent_messages.created_at` monotonic per store and restored stable latest-N message ordering for rapid writes.
+- Verified under exact Node 24.18.0: Agent full suite 33 files / 300 tests, `p1-safety-gate` 8 files / 105 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

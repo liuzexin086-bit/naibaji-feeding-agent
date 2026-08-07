@@ -34,6 +34,7 @@ import type {
   TodayOperationSummary,
   TodayFeedbackSummary,
 } from "./state.js";
+import { timestampOrderValue } from "../../shared/iso-time.js";
 
 export const LANGGRAPH_RUNTIME_VERSION = "nbj-langgraph-v2";
 
@@ -540,6 +541,9 @@ function latestDiarrheaFromRecords(records: unknown): CurrentBatchSummary["lates
     const rightRow = object(right);
     const leftAt = String(leftRow?.recordedAt ?? leftRow?.created_at ?? "");
     const rightAt = String(rightRow?.recordedAt ?? rightRow?.created_at ?? "");
+    const leftMs = timestampOrderValue(leftAt);
+    const rightMs = timestampOrderValue(rightAt);
+    if (leftMs !== rightMs) return leftMs - rightMs;
     return leftAt.localeCompare(rightAt);
   });
   for (let index = sorted.length - 1; index >= 0; index -= 1) {
