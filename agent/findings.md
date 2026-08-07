@@ -156,11 +156,14 @@ Real Device Control Gate: CLOSED
 
 ## NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
 
-- P1-0 created `execution-contract.md` as the frozen task contract.
-- The root cause is the conflation of feeding mode, control strategy, execution safety, and active device decision; the contract separates all four concepts.
-- Mode is operator-selected; creep/diarrhea only adjust quantities or quotas; exceptions only set execution state.
-- Free-feeding windows are time ranges, not dispense counts; `freeDispenseLimit` is the canonical quota.
+- P1-0 created `agent/docs/execution-contract.md` as the new frozen task contract and removed the previous root freeze.
+- The root cause is the conflation of mode, control, planned decision, active decision, and runtime state; the contract separates five layers.
+- `selectedMode` is operator-owned; creep/diarrhea/blockage must never silently change mode.
+- `freeWindows` are license time ranges; `freeDispenseLimit` is the canonical dispense quota and must satisfy `daily = single × limit`.
 - Active decision mode must equal selected mode after day one; mode changes require a transaction and mode-change amendment.
+- Runtime states (`normal`, `manual_hold`, `blocked`) are independent of feeding mode.
+- Schema V12 must add `mode_change` origin and one-active-decision uniqueness with fail-closed migration preflight.
+- Clean build must derive model assets from tracked root model sources and expose full `/version` provenance.
 
 ## Requirements
 

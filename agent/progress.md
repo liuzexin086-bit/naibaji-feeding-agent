@@ -173,9 +173,11 @@ Real Device Control Gate: CLOSED
 ### NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
 
 - P1-0 Contract Freeze complete.
-- Added `execution-contract.md` with four-layer separation: selectedMode, controlState, executionState, activeDecision.
+- Added `agent/docs/execution-contract.md` with five-layer separation: selectedMode, controlState, plannedDecision, activeDecision, runtimeState.
+- Recorded baseline: branch `nbj-execution-contract-p1`, HEAD `22608fc`, merge-base main `413a4c0`, clean worktree, Node v24.16.0, npm 11.13.0, Python 3.10.9.
 - Updated `agent/task_plan.md`, `agent/findings.md`, and `agent/progress.md`.
-- No decision-core implementation changes were made in P1-0; P1-1 awaits P1-0 review.
+- Removed the previous root `execution-contract.md` because the user superseded that freeze.
+- No decision-core implementation changes were made in P1-0; EC-P1-1 awaits P1-0 review.
 
 ## Session: 2026-08-04
 

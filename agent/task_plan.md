@@ -105,14 +105,25 @@
 
 ### P1-0 Contract Freeze — complete
 
-- Created `execution-contract.md` as the frozen task contract.
-- Separated `selectedMode`, `controlState`, `executionState`, and `activeDecision`.
-- Frozen free-feeding semantics: windows remain unchanged; creep/moderate reduce dispense quota only.
-- Frozen exception mapping: refusal/manual_hold, blockage/blocked, probe/blocked-or-manual_hold, curve cap/manual_hold; no exception may silently change mode.
-- Frozen mode-change transaction and active-decision consistency invariants.
-- Frozen API trust boundary, clean-source build, and `/version` provenance requirements.
+- Created `agent/docs/execution-contract.md` as the new frozen task contract; removed the old root freeze.
+- Frozen five-layer authority model: `selectedMode`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`.
+- Frozen invariants: mode is operator-selected; creep/diarrhea/blockage cannot change mode; free feeding uses dispense quota; active decision must match selected mode.
+- Frozen runtime safety: refusal/manual_hold, blockage/blocked, probe/blocked, curve cap approval state; severe diarrhea does not auto-hold whole-pen device.
+- Frozen mode-change lifecycle, Schema V12, Observation trust boundary, clean model build, `/version` provenance, UI runtime contract, and regression matrix.
 
-P1-1 Decision Core 等后续阶段在 P1-0 验收后再开始。
+Baseline:
+
+```text
+branch: nbj-execution-contract-p1
+HEAD: 22608fc10c8996d21361f944c1e838f2c1c6e330
+merge-base main: 413a4c0
+worktree: clean
+Node: v24.16.0 (exact Node 24.18.0 available via npx)
+npm: 11.13.0
+Python: 3.10.9
+```
+
+EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0 验收后再进入 EC-P1-1。
 
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
