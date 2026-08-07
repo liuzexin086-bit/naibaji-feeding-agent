@@ -181,6 +181,15 @@ Real Device Control Gate: CLOSED
 - Clean build contract now includes Web model from same tracked source, root `.dockerignore`, and `git archive HEAD` clean-source gate; CI contract fixes Node 24.18.0 and provenance checks.
 - `agent/task_plan.md` now has Supersession Notice and legacy rules marked `SUPERSEDED BY execution-contract-v1`.
 
+### P1-0.2 Final Contract Seal — 2026-08-07
+
+- Review confirmed P1-0.1 changes are present and no runtime/schema files changed, then required five final contract boundaries before EC-P1-1.
+- Mode-switch execution evidence is now frozen as `cumulativeActualPowderGramsForBusinessDay`; missing/unknown fails closed, and a later zero actual record cannot overwrite the business-day cumulative actual.
+- Runtime state aggregation is frozen as independent device/feeding domain latches with precedence `blocked > manual_hold > normal`; explicit normal clears only its own domain.
+- Decision policy compatibility is frozen: known legacy comes only from an explicit registry; `execution-contract-v1` is current; any unknown/future value returns `NBJ_DECISION_POLICY_UNSUPPORTED` and fails closed.
+- Provenance now requires source SHA plus actual artifact SHA for Agent and Web, with deterministic source→artifact build fixture in CI.
+- Remaining `effectiveMode` implementation instructions in `agent/task_plan.md` were replaced with layered `modeState.selectedMode/plannedMode`, `activeDecision`, and `runtimeState`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

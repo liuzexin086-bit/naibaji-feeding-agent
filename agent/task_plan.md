@@ -119,11 +119,19 @@
 - Added Today API layered contract, Legacy Decision Reconciliation, runtime explicit lifecycle, curve-cap approval semantics, strict observation allowlist, manual audit action/severity mapping, exact V11→V12 migration evidence, clean source/model provenance, root `.dockerignore`, and CI contract.
 - Added Supersession Notice and marked conflicting legacy rules in this file; no runtime source or schema changed.
 
+### P1-0.2 Final Contract Seal — complete
+
+- Mode switch execution test now uses `cumulativeActualPowderGramsForBusinessDay`; missing/unknown fails closed, latest-record zero cannot overwrite cumulative actual.
+- Frozen runtime aggregation with independent device/feeding domain latches and precedence `blocked > manual_hold > normal`.
+- Frozen policy compatibility: known legacy only from explicit registry; unknown/future values fail closed with `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Provenance now requires both source SHA and real artifact SHA for Agent/Web; deterministic source→artifact build fixture is part of CI.
+- Removed remaining `effectiveMode` implementation instructions from LangGraph/today plan specs; layered mode state is authoritative.
+
 Baseline:
 
 ```text
 branch: nbj-execution-contract-p1
-HEAD: ecadecb919ff5dac8dbfcf8275deba91c007c4e1
+HEAD: 2a08fbcf24a9d88f8a2d44abe9696d196d52ba1f
 merge-base main: 413a4c0
 worktree: clean
 Node: v24.16.0 (exact Node 24.18.0 available via npx)
@@ -131,7 +139,7 @@ npm: 11.13.0
 Python: 3.10.9
 ```
 
-EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0.1 验收后再进入 EC-P1-1。
+EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0.2 验收后再进入 EC-P1-1。
 
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
@@ -157,7 +165,7 @@ volumes or a verified backup clone.
 
 | ID | Defect | Required correction | Fail-closed behavior | Release proof |
 |---|---|---|---|---|
-| `P0-01` | Agent 本地 `currentRun()` 返回 `null`，Agent 与本地 API 读取的批次模式/设备方案可能漂移 | 抽取并共用 `BatchDecisionService`；Agent 必须按批次 revision 读取冻结的 `devicePlanSnapshot`、`selectedMode`、`effectiveMode`、阶段条件和异常阻断 | 找不到当前批次或冻结设备快照时阻断计划与数值建议，不得临时拼装另一套方案 | 同一批次 revision 下，Agent 与本地 API 的模式、设备 hash、餐次、窗口和数量逐项一致 |
+| `P0-01` | Agent 本地 `currentRun()` 返回 `null`，Agent 与本地 API 读取的批次模式/设备方案可能漂移 | 抽取并共用 `BatchDecisionService`；Agent 必须按批次 revision 读取冻结的 `devicePlanSnapshot`、`modeState.selectedMode/plannedMode`、`activeDecision`、`runtimeState`、阶段条件和异常阻断 | 找不到当前批次或冻结设备快照时阻断计划与数值建议，不得临时拼装另一套方案 | 同一批次 revision 下，Agent 与本地 API 的模式、设备 hash、餐次、窗口和数量逐项一致 |
 | `P0-02` | 冻结 SOP 缺失时会回退 `DEFAULT_SOP_TEMPLATE` | 数值决策只接受批次冻结 SOP/version/hash；知识检索也必须限定冻结 digest | 缺失或 digest 不匹配时：数值路径进入 `safe_block`，知识路径返回 `unavailable`；禁止使用最新或默认 SOP | 缺失、错 hash、旧 revision 三组测试均不产生设备数值，且不会读取默认模板 |
 | `P0-03` | 以 `HH:mm` 字符串判断剩余餐次会丢失跨午夜的 `02:00/05:00/08:00` | 所有餐次、排除时段和自由采食窗口统一归一化到 `09:00` 至次日 `09:00` 业务日轴 | 无法归一化、窗口重叠或日期归属不明时拒绝生成计划；控奶不得重排保留餐次 | 在 `23:30` 计算时仍正确保留次日三餐；跨午夜窗口、排除和控奶回归测试通过 |
 | `P0-04` | Agent 最终回答没有程序化数值证据校验 | `build_evidence_plan` 生成必需证据，工具回执形成 `numericWhitelist`，`validate_evidence` 与 `validate_response` 双重校验 | 任一时间、数量、餐次数或设备参数无法映射到同 revision/digest 的确定性回执时拒绝输出 | 对无证据、过期回执、篡改数值和正常数值分别测试；只有正常证据可通过 |
@@ -247,7 +255,7 @@ exception
 
 #### `device_plan_subgraph`
 
-输入必须包含冻结的 SOP、设备方案、批次 revision、`selectedMode` 和 `effectiveMode`。
+输入必须包含冻结的 SOP、设备方案、批次 revision、`modeState.selectedMode/plannedMode`、`activeDecision`、`runtimeState` 和 `controlState`。
 
 - 首日始终生成定时定量六餐：`17:00/20:00/23:00/02:00/05:00/08:00`。
 - 第二日起只读取随批次冻结的定时定量模板或自由采食模板。
@@ -337,8 +345,12 @@ interface AgentGraphState {
     batchRevision: number;
     currentDayIndex: number;
     currentDayAge: number;
-    selectedMode: FeedingMode;
-    effectiveMode: FeedingMode;
+    modeState: {
+      selectedMode: FeedingMode;
+      plannedMode: FeedingMode;
+    };
+    activeDecision: FeedingDecision;
+    runtimeState: RuntimeExecutionState;
     sopRef: FrozenSopRef;
     devicePlanRef: FrozenDevicePlanRef;
   };
@@ -480,7 +492,7 @@ interface DailyOperationPlan {
   devicePlanVersion: string;
   devicePlanSha256: string;
   selectedMode: FeedingMode;
-  effectiveMode: FeedingMode;
+  plannedMode: FeedingMode;
   operations: DailyOperationItem[];
   operationsSha256: string;
   status: "pending" | "confirmed";
@@ -540,7 +552,7 @@ Acceptance:
 - [x] Treat the P0-01 shared `BatchDecisionService` as the baseline; complete its canonical snapshot loading and `computeDayDecision` input contract without creating a second path.
 - [x] Make `local-api.ts` and `tools.ts` thin adapters over this service.
 - [x] Preserve local API transaction boundaries and mode-switch audit behavior.
-- [x] Return `selectedMode`, `effectiveMode`, SOP ref, device plan ref and deterministic evidence in one canonical result.
+- [x] Return `modeState.selectedMode / plannedMode`, `activeDecision`, `runtimeState`, SOP ref, device plan ref and deterministic evidence in one canonical result.
 - **Status:** complete
 
 Primary files:

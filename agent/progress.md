@@ -189,6 +189,15 @@ Real Device Control Gate: CLOSED
 - Added Supersession Notice to `agent/task_plan.md` and marked conflicting legacy rules as superseded by `execution-contract-v1`.
 - No runtime tests run because this phase is documentation-only; `git diff --check` is required before commit.
 
+### P1-0.2 Final Contract Seal — complete
+
+- Updated `agent/docs/execution-contract.md` for the five final review boundaries; no runtime source, schema, or migration changed.
+- Mode switch now uses `cumulativeActualPowderGramsForBusinessDay`; missing/unknown fails closed, and `actualPowderGrams=0` on the latest observation cannot erase business-day cumulative actual.
+- Runtime aggregation now uses independent device/feeding latches and precedence `blocked > manual_hold > normal`; explicit normal only clears its own domain.
+- Policy compatibility now treats only null/missing or an explicit legacy registry as legacy; unknown/future policy versions fail closed with `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Provenance contract now requires both source SHA and actual artifact SHA for Agent and Web, plus deterministic source→artifact CI fixture.
+- Removed remaining `effectiveMode` implementation instructions from `agent/task_plan.md`; layered `modeState`/`activeDecision`/`runtimeState` are authoritative.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

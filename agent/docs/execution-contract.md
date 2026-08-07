@@ -44,6 +44,8 @@ interface RuntimeExecutionState {
   state: "normal" | "manual_hold" | "blocked";
   reasons: string[];
   sourceObservationIds: string[];
+  deviceLatch: "normal" | "blocked" | "probe_contaminated";
+  feedingLatch: "normal" | "refusal";
 }
 ```
 
@@ -85,6 +87,15 @@ interface CreepControlState {
   policyVersion: "creep-control-v2";
 }
 ```
+
+`CreepControlState.policyVersion` 使用与 decision policy 相同的版本兼容规则：
+
+```text
+creep-control-v2 → current policy
+null / missing / 其它未知值 → fail closed
+```
+
+禁止把未来未知版本解释为旧版本。
 
 首次触发：
 
@@ -152,34 +163,63 @@ severe 不自动停止整栏设备，也不自动设置 runtime hold；除非现
 
 ### Runtime State Lifecycle
 
-`runtimeState` 只允许显式 observation 改变；omitted 不等于 normal。
+`runtimeState` 由两个独立 domain latch 聚合，任何 observation 都只能影响自己所属 domain；omitted 不等于 normal。
+
+```text
+device runtime latch:
+normal / blocked / probe_contaminated
+
+feeding runtime latch:
+normal / refusal
+```
+
+最终聚合优先级：
+
+```text
+blocked > manual_hold > normal
+
+任何 device blocked/probe
+→ runtimeState = blocked
+
+否则如果 feeding refusal
+→ runtimeState = manual_hold
+
+否则
+→ runtimeState = normal
+```
+
+`reasons` 为当前未解除原因的并集。
+
+domain latch 只允许显式 observation 清除，且只能清除自己 domain：
 
 ```text
 deviceStatus = blocked
 ↓
-runtimeState = blocked
+device latch = blocked
 
 下一次 observation 没有 deviceStatus
 ↓
-仍 blocked
+device latch 仍 blocked
 
 下一次显式 deviceStatus = normal
 ↓
-清除 blocked
+只清除 device latch
+feeding latch 不受影响
 ```
 
 ```text
 feedingResponse = refusal
 ↓
-runtimeState = manual_hold
+feeding latch = refusal
 
 omitted
 ↓
-保持 manual_hold
+feeding latch 保持 refusal
 
 显式 feedingResponse = normal
 ↓
-解除 manual_hold
+只清除 feeding latch
+device latch 不受影响
 ```
 
 非法时间戳或未通过 observation quarantine 的记录不得作为显式清除依据。
@@ -252,9 +292,29 @@ dailyPowderGrams = singlePowderGrams × 9
 
 ## 4.1 Legacy Decision Reconciliation
 
-### Legacy policy
+### Policy Compatibility
 
-如果 `decisionPolicyVersion` missing 或 `!= execution-contract-v1`，并发现：
+`decisionPolicyVersion` 不能通过“不等于 v1”推断为 legacy。必须使用显式版本分类：
+
+```text
+KNOWN_LEGACY_POLICY_VERSIONS = []
+
+null / missing
+→ known legacy
+
+execution-contract-v1
+→ current policy
+
+任何其它非空值（例如 execution-contract-v2、future-x、corrupted-value）
+→ NBJ_DECISION_POLICY_UNSUPPORTED
+→ FAIL CLOSED
+```
+
+未来新增 legacy version 必须先加入版本 registry、迁移和测试，不得由运行时代码临时推断。
+
+#### Known legacy policy
+
+当版本被归类为 known legacy，并发现：
 
 ```text
 selectedMode != activeDecision.mode
@@ -274,7 +334,7 @@ reconciliation: {
 如果：
 
 ```text
-actualPowder > 0
+cumulativeActualPowderGramsForBusinessDay > 0
 ```
 
 则禁止当天 reconciliation：
@@ -303,26 +363,57 @@ FAIL CLOSED
 
 ## 5. Mode Change 生命周期
 
+### Cumulative actual authority
+
+模式切换的“实际已执行”判断必须使用正式字段：
+
+```text
+cumulativeActualPowderGramsForBusinessDay
+```
+
+定义：
+
+```text
+业务日累计实际下粉量
+来自 canonical observation event history
+只使用已提交且时间戳有效的实际记录
+never estimated / planned / latest-record-with-zero replacement
+```
+
+禁止：
+
+```text
+missing actual → 0
+最新一条 actualPowderGrams = 0 → 覆盖当天累计实际量
+```
+
+### Mode switch rules
+
 ```text
 Day 0 free request → 409 NBJ_MODE_SWITCH_FIRST_DAY_LOCKED
 
-current day actualPowder > 0 → 409 NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED
+cumulativeActualPowderGramsForBusinessDay > 0
+→ 409 NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED
 
-actualPowder unknown → 409
+cumulativeActualPowderGramsForBusinessDay unknown
+→ 409
+
+显式可靠 cumulativeActualPowderGramsForBusinessDay = 0
+→ 才可进入后续模式切换判断
 
 存在 pending/confirmed safety amendment → 409 NBJ_MODE_SWITCH_AMENDMENT_PENDING
 ```
 
-Pending plan + actual=0：直接事务切换。
+Pending plan + 显式累计量 = 0：直接事务切换。
 
-Confirmed/active plan + actual=0：创建 `mode_change` amendment。
+Confirmed/active plan + 显式累计量 = 0：创建 `mode_change` amendment。
 
 mode apply 原子事务：
 
 ```text
 验证 expectedRevision
 验证 amendment digest
-重新读取 cumulative actual = 0
+重新读取 cumulativeActualPowderGramsForBusinessDay = 0
 验证无其它 pending safety amendment
 更新 batch.selectedMode
 revision +1
@@ -547,11 +638,51 @@ git archive HEAD
   "commit": "...",
   "schemaVersion": 12,
   "decisionPolicyVersion": "execution-contract-v1",
-  "feedingModelSha256": "...",
-  "v5LiteModelSha256": "...",
+  "feedingModelSourceSha256": "...",
+  "feedingModelArtifactSha256": "...",
+  "v5LiteModelSourceSha256": "...",
+  "v5LiteModelArtifactSha256": "...",
   "uiSha256": "..."
 }
 ```
+
+Provenance 必须同时证明 source 与真实运行 artifact：
+
+```text
+feedingModelSourceSha256
+= checkout /feeding-model.js SHA
+
+feedingModelArtifactSha256
+= 镜像内实际生成并执行的 Agent CJS artifact SHA
+
+v5LiteModelSourceSha256
+= checkout /v5lite-model.js SHA
+
+v5LiteModelArtifactSha256
+= 镜像内实际生成并执行的 shadow artifact SHA
+
+uiSha256
+= 镜像内实际部署 UI 的 artifact SHA
+```
+
+Web 同样必须返回：
+
+```json
+{
+  "feedingModelSourceSha256": "...",
+  "feedingModelArtifactSha256": "...",
+  "uiSha256": "..."
+}
+```
+
+CI 必须通过 deterministic build fixture 证明：
+
+```text
+source
+→ generated artifact
+```
+
+是当前 clean build 产生的；source SHA 只是标签，不能替代 artifact SHA。
 
 V5-Lite 保持影子，不得进入 DeviceSetting authority。
 
@@ -618,28 +749,30 @@ model feedTimes = 9
 
 ```text
 EC-P1-0 Contract Freeze：PASS
+EC-P1-0.1 Contract Closure：PASS
+EC-P1-0.2 Final Contract Seal：PASS
 
-Execution Contract Gate：CLOSED
-Mode Authority Gate：CLOSED
-Creep Control Gate：CLOSED
-Control Monotonicity Gate：CLOSED
-Free Feeding Semantics Gate：CLOSED
-Free Feeding Quantity Gate：CLOSED
-Diarrhea Contract Gate：CLOSED
-Runtime Safety Gate：CLOSED
+Contract Freeze Gate：OPEN
+Authority Model Gate：OPEN
+Control Contract Gate：OPEN
+Free Feeding Contract Gate：OPEN
+Runtime Contract Gate：OPEN
+Mode Lifecycle Contract Gate：OPEN
+Migration Evidence Contract Gate：OPEN
+Observation Boundary Contract Gate：OPEN
+Build Provenance Contract Gate：OPEN
+Plan Consistency Gate：OPEN
+
+EC-P1-1 Implementation Gate：OPEN
+
+其余运行时 Gate：
 Active Decision Gate：CLOSED
 Mode Transaction Gate：CLOSED
 Schema V12 Gate：CLOSED
-Observation Authority Gate：CLOSED
-Manual Audit Gate：CLOSED
-Legacy Reconciliation Gate：CLOSED
-Clean Source Build Gate：CLOSED
-Model Provenance Gate：CLOSED
 UI Runtime Contract Gate：CLOSED
 CI Gate：CLOSED
 Full Regression Gate：CLOSED
 
-EC-P1-1 Implementation Gate：CLOSED
 Merge Gate：CLOSED
 
 Optimizer Production Gate：CLOSED
@@ -701,11 +834,17 @@ Provenance 验收：
 Agent /version commit == GITHUB_SHA
 Web /version commit == GITHUB_SHA
 
-Agent feedingModelSha
+Agent feedingModelSourceSha
 == tracked feeding-model.js SHA
 
-Web feedingModelSha
+Agent feedingModelArtifactSha
+== actual generated CJS artifact SHA in image
+
+Web feedingModelSourceSha
 == same tracked source SHA
+
+Web feedingModelArtifactSha
+== actual minified JS artifact SHA in image
 ```
 
 未满足即 CI FAIL；不得以本地开发日志代替 CI 证据。
