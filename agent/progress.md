@@ -208,6 +208,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
 - No migration or schema change in this phase.
 
+### EC-P1-2 — complete
+
+- Fixed root `feeding-model.js` committed anchor: `currentCount = Math.min(currentCount, cp.feedTimes)`, preventing a stored higher anchor from increasing future control counts.
+- Changed `agent/src/model/production-model.ts` to import tracked root model files instead of ignored `agent/container-models`.
+- Updated `agent/Dockerfile` to copy root model sources into build and agent stages.
+- Added/updated model parity tests for monotonic committed anchors.
+- Verified `npx vitest run tests/production-model-parity.test.ts`: 16 tests passed.
+- Verified `npm run p0-release-gate`: 6 files / 75 tests passed.
+- Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

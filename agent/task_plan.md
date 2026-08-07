@@ -135,6 +135,13 @@
 - Kept `freeFeedingBlockers` as a compatibility field with an empty array; it is no longer a mode selector.
 - Added regressions: free + milk control remains free, free + diarrhea has no base-diarrhea device action, exception signals preserve free mode.
 
+### EC-P1-2 — complete
+
+- Root `feeding-model.js` now clamps the committed control anchor with `Math.min(currentCount, cp.feedTimes)`, so old higher committed anchors cannot increase future control counts.
+- Agent production-model imports the tracked root `feeding-model.js` / `v5lite-model.js` instead of the ignored `agent/container-models` copy.
+- Dockerfile copies root model sources into the build and agent image, keeping the runtime path aligned with the tracked source.
+- Added model parity regression proving a committed `feedTimesAtCommit=10` cannot raise a future count from 9 back to 10.
+
 Baseline:
 
 ```text

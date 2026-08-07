@@ -8,7 +8,7 @@ RUN npm ci
 
 COPY agent/tsconfig.json ./
 COPY agent/src ./src
-COPY agent/container-models ./container-models
+COPY feeding-model.js v5lite-model.js ./
 RUN npm run build
 RUN npm prune --omit=dev
 
@@ -25,7 +25,8 @@ RUN echo "$GIT_COMMIT" > /app/version
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/version ./version
-COPY --from=build /app/container-models ./container-models
+COPY --from=build /app/feeding-model.js ./feeding-model.js
+COPY --from=build /app/v5lite-model.js ./v5lite-model.js
 COPY --chmod=755 agent/docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
 EXPOSE 8080
 USER node

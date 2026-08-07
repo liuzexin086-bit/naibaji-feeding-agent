@@ -198,6 +198,13 @@ Real Device Control Gate: CLOSED
 - `freeFeedingBlockers` remains only as a compatibility response field and is always empty under the new contract.
 - Added direct and service-level regressions proving free + milk control and free + exception signals remain free.
 
+### EC-P1-2 — 2026-08-07
+
+- The protected model's committed-day anchor no longer reassigns `currentCount` upward from a stored higher `feedTimesAtCommit`; it clamps with `Math.min`.
+- Agent runtime now imports the tracked root model files directly, removing the ignored `agent/container-models` copy from the authority path.
+- Dockerfile now copies root model sources into the build and agent image.
+- Regression covers both the existing committed-anchor case and the new “old committed 10 must not increase future count” case.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

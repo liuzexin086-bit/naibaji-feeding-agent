@@ -1,10 +1,10 @@
-// The protected CommonJS models are copied into the Agent build context.
+// The protected CommonJS models are tracked at the repository root.
 // Static imports let Wrangler bundle the same source for Workers while Node
 // loads the same files from the Container image.
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.
-import feedingModel from "../../container-models/feeding-model.cjs";
+import feedingModel from "../../../feeding-model.js";
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.
-import v5LiteModel from "../../container-models/v5lite-model.cjs";
+import v5LiteModel from "../../../v5lite-model.js";
 
 export interface ProductionPlanInput {
   startAge: number;

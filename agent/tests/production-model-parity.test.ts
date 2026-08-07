@@ -19,7 +19,7 @@ describe("protected production model parity", () => {
   });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "61001D8629C51B7B9F6CCC59CEC5ECE2BB21FE5A4AD76DB186D5DCDE6A640465",
+      "0546254E35A4A8E10B7BEDC87ADEFE5FF6C16A113C53CCEF5FA542C62F710C9D",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -207,7 +207,39 @@ describe("protected production model parity", () => {
         { dayAge: 6, creepGrade: "high", headCount: 20, planPerPigAtCommit: 320, planTotalAtCommit: 6400, feedTimesAtCommit: 10 },
       ],
     });
-    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 9]);
+    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 7]);
+  });
+
+  it("never lets an old committed higher feedTimes anchor increase future control counts", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        { dayAge: 5, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+      ],
+    });
+    expect(output.controlStartDay).toBe(2);
+    expect(output.control.feedTimes.slice(0, 3)).toEqual([10, 10, 9]);
+    expect(output.control.feedTimes[3]).toBe(10);
+    const future = output.control.feedTimes.slice(4);
+    expect(future[0]).toBe(7);
+    expect(Math.max(...future)).toBeLessThanOrEqual(8);
+    future.slice(1).forEach((count, index) => {
+      expect(count).toBeLessThanOrEqual(future[index]!);
+    });
   });
 
   it("keeps all days at ten meals when no non-none grade is recorded", () => {
