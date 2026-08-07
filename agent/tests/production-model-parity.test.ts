@@ -19,7 +19,7 @@ describe("protected production model parity", () => {
   });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "0546254E35A4A8E10B7BEDC87ADEFE5FF6C16A113C53CCEF5FA542C62F710C9D",
+      "80BF3BFE94A97A055ACDCDE80A687F53AD534AE98E7FDE82DEDD51A78CC17275",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -137,7 +137,7 @@ describe("protected production model parity", () => {
     expect(output.deviceOperation.curve[0]?.meals).toHaveLength(10);
   });
 
-  it("does not let a legacy frozen start bypass the sustained-grade condition", () => {
+  it("keeps a persisted control start as replay authority even when later observations no longer sustain", () => {
     const output = computeProductionPlan({
       startAge: 3,
       endAge: 8,
@@ -146,7 +146,7 @@ describe("protected production model parity", () => {
       controlStartDay: 2,
       records: [{ dayAge: 4, creepGrade: "high", headCount: 20 }],
     });
-    expect(output.controlStartDay).toBe(6);
+    expect(output.controlStartDay).toBe(2);
     expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 10, 10]);
   });
 
@@ -207,7 +207,7 @@ describe("protected production model parity", () => {
         { dayAge: 6, creepGrade: "high", headCount: 20, planPerPigAtCommit: 320, planTotalAtCommit: 6400, feedTimesAtCommit: 10 },
       ],
     });
-    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 7]);
+    expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 9]);
   });
 
   it("never lets an old committed higher feedTimes anchor increase future control counts", () => {
@@ -232,11 +232,11 @@ describe("protected production model parity", () => {
       ],
     });
     expect(output.controlStartDay).toBe(2);
-    expect(output.control.feedTimes.slice(0, 3)).toEqual([10, 10, 9]);
+    expect(output.control.feedTimes.slice(0, 3)).toEqual([10, 10, 10]);
     expect(output.control.feedTimes[3]).toBe(10);
     const future = output.control.feedTimes.slice(4);
-    expect(future[0]).toBe(7);
-    expect(Math.max(...future)).toBeLessThanOrEqual(8);
+    expect(future[0]).toBe(9);
+    expect(Math.max(...future)).toBeLessThanOrEqual(9);
     future.slice(1).forEach((count, index) => {
       expect(count).toBeLessThanOrEqual(future[index]!);
     });

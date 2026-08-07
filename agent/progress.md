@@ -227,6 +227,18 @@ Real Device Control Gate: CLOSED
 - Exposed `freeDispenseLimit` through local API today/record public mappings.
 - Added business-day and core regressions; verified `npm run check`, `npm test` 35 files / 321 tests.
 
+### EC-P1-2.1 / EC-P1-3.1 Closure — complete
+
+- Added generated model asset pipeline: `agent/.generated-models`, `prepare-model-assets.mjs`, `dist-model-smoke.mjs`, package hooks, and Docker copy of generated assets.
+- Fixed compiled runtime import path; `npm run smoke:dist` PASS and `node dist/container/server.js` `/health=200` PASS.
+- Fixed persisted `controlStartDay` replay authority; `automaticStart` no longer overrides an explicit latch.
+- Rewrote committed-anchor state machine: committed 10 no longer hides a pre-decrement and next future is 9 instead of 7.
+- Free moderate future deliverable is discretized to whole standard dispenses; `actual=600/single=70/adjusted=630` returns manual-only, while `actual=560` returns a 70g proposal.
+- Free moderate reason no longer contains `null`; `freeReductionPriority` is deprecated compatibility only.
+- Decision Core requires at least one free window for executable free-feeding.
+- Verified `npm run check`, `npm test` 35 files / 323 tests, p0 gate 80 tests, p1 gate 121 tests.
+- Verified Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

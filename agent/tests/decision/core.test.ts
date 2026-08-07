@@ -27,6 +27,8 @@ function baseInput(overrides: Partial<DayDecisionInput> = {}): DayDecisionInput 
   };
 }
 
+const FREE_WINDOW = [{ startLocal: "09:00", endLocal: "17:00" }];
+
 describe("deterministic day decision", () => {
   it("uses direct SOP total before indirect SOP and the production model", () => {
     const decision = computeDayDecision(baseInput({
@@ -150,10 +152,18 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       freeWindows: [...windows, { startLocal: "09:00", endLocal: "09:30" }],
     }))).toThrow("NBJ_DECISION_FREE_WINDOWS_LIMIT");
-    const controlled = computeDayDecision(baseInput({ requestedMode: "free_feeding", milkControlActive: true }));
+    const controlled = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      milkControlActive: true,
+      freeWindows: FREE_WINDOW,
+    }));
     expect(controlled.setting.mode).toBe("free_feeding");
     expect(controlled.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
-    const diarrheal = computeDayDecision(baseInput({ requestedMode: "free_feeding", diarrheaGrades: ["mild"] }));
+    const diarrheal = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      diarrheaGrades: ["mild"],
+      freeWindows: FREE_WINDOW,
+    }));
     expect(diarrheal.setting.mode).toBe("free_feeding");
     expect(diarrheal.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
   });
@@ -181,6 +191,7 @@ describe("deterministic day decision", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       exceptionSignals: { refusal: true, blockage: true, probeContaminated: true },
+      freeWindows: FREE_WINDOW,
     }));
     expect(decision.setting.mode).toBe("free_feeding");
     expect(decision.exceptionActions.map((action) => action.type)).toEqual([
@@ -197,6 +208,7 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       precisionGrams: 3,
       sop: { powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
     }));
     expect(divided.setting).toMatchObject({
       mode: "free_feeding",
@@ -209,7 +221,10 @@ describe("deterministic day decision", () => {
       timedMeals: [],
     });
 
-    const modelSingle = computeDayDecision(baseInput({ requestedMode: "free_feeding" }));
+    const modelSingle = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: FREE_WINDOW,
+    }));
     expect(modelSingle.setting.singlePowderGrams).toBe(70);
     expect(modelSingle.setting.dailyPowderGrams)
       .toBe(modelSingle.setting.singlePowderGrams * modelSingle.setting.mealCount);
@@ -235,6 +250,11 @@ describe("deterministic day decision", () => {
     );
     expect(decision.setting.dailyPowderGrams).toBeLessThanOrEqual(1234);
     expect(decision.setting.freeWindows).toEqual([{ startLocal: "09:00", endLocal: "17:00" }]);
+  });
+
+  it("fails closed for executable free-feeding without at least one window", () => {
+    expect(() => computeDayDecision(baseInput({ requestedMode: "free_feeding" })))
+      .toThrow("NBJ_DECISION_FREE_WINDOWS_REQUIRED");
   });
 });
 
@@ -502,6 +522,32 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.kind).toBe("manual_only");
     expect(preview.proposal).toBeNull();
     expect(preview.futureDeliverable).toBe(0);
+  });
+
+  it("discretizes free moderate future deliverable to whole standard dispenses", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: FREE_WINDOW,
+    }));
+    const notEnoughForOne = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 600,
+    });
+    expect(notEnoughForOne.kind).toBe("manual_only");
+    expect(notEnoughForOne.proposal).toBeNull();
+    expect(notEnoughForOne.futureDeliverable).toBe(0);
+
+    const exactlyOne = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 560,
+    });
+    expect(exactlyOne.kind).toBe("feeding_reduction_proposal");
+    expect(exactlyOne.futureDeliverable).toBe(decision.setting.singlePowderGrams);
+    expect(exactlyOne.reason).not.toContain("null");
   });
 
   it("returns deterministic cumulative facts without target ratio", () => {

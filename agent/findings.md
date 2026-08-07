@@ -214,6 +214,16 @@ Real Device Control Gate: CLOSED
 - Future deliverable for free mode is no longer `windows.length × single`; it uses business-day window availability and remaining deliverable.
 - Added `hasActiveOrFutureBusinessDayWindow()` with cross-midnight tests and core regressions for direct totals, quota-only moderate, passed windows, and minimum quota.
 
+### EC-P1-2.1 / EC-P1-3.1 — 2026-08-07
+
+- Review blocked EC-P1-4 because compiled Agent runtime import, persisted control latch, committed-anchor state machine, and free moderate executable deliverable still had safety gaps.
+- Runtime model imports now use generated `agent/.generated-models` assets with the same relative path from `src/model` and `dist/model`; `npm run smoke:dist` and Docker health smoke pass.
+- `feeding-model.js` now treats an explicit persisted `controlStartDay` as the replay authority; later observation revisions cannot move it later.
+- Committed days are no longer pre-decremented before being replaced by the committed value; the next uncommitted day drops at most one from the committed anchor.
+- Free moderate future deliverable is discretized to whole standard dispenses, so `remaining=30g` with `single=70g` fails closed instead of claiming 30g is deliverable.
+- Free moderate result reason is free-specific and never prints `targetSlot=null`; `freeReductionPriority` is deprecated compatibility only.
+- `computeDayDecision` fails closed when `requestedMode=free_feeding` has no free window.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

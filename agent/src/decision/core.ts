@@ -275,6 +275,9 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const safeDailyTotal = floorToPrecision(selected.target, precision);
   const exceptionActions = exceptionActionsFor(input, selected.target, curveLimit);
   const mode = input.requestedMode ?? "timed_quantity";
+  if (mode === "free_feeding" && !input.freeWindows?.length) {
+    fail("FREE_WINDOWS_REQUIRED");
+  }
 
   let times: string[];
   if (input.teachingProgram?.enabled) {
@@ -552,9 +555,9 @@ function futureDeliverableFor(
 ): number {
   const observedLocal = observedLocalHourMinute(observedAt);
   if (setting.mode === "free_feeding") {
-    return hasActiveOrFutureBusinessDayWindow(setting.freeWindows, observedLocal)
-      ? remainingDeliverable
-      : 0;
+    if (!hasActiveOrFutureBusinessDayWindow(setting.freeWindows, observedLocal)) return 0;
+    const units = Math.floor(remainingDeliverable / setting.singlePowderGrams);
+    return floorToPrecision(units * setting.singlePowderGrams, setting.precisionGrams);
   }
   return setting.timedMeals
     .filter((meal) => remainingBusinessDayTimes([meal.timeLocal], observedLocal).length > 0)
@@ -852,7 +855,7 @@ export function previewDiarrheaAdjustment(
     input.observedAt,
     remainingDeliverable,
   );
-  const manualFree = mode === "free_feeding" && futureDeliverable <= 0;
+  const manualFree = mode === "free_feeding" && futureDeliverable < source.singlePowderGrams;
   const manualTimed = mode === "timed_quantity" && (
     targetAlreadyHappened ||
     cumulativeActual >= adjusted.adjustedProgramTotal ||
@@ -926,7 +929,9 @@ export function previewDiarrheaAdjustment(
     deviceAdjustmentRequired: true,
     requiresHumanConfirmation: true,
     requiresManualDisposition: false,
-    reason: `中度腹泻按整栏减餐处理：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g，未来餐次计划 ${futureDeliverable}g；需独立人工确认后应用。`,
+    reason: mode === "free_feeding"
+      ? `中度腹泻按自由采食配奶额度 ${source.freeDispenseLimit ?? source.mealCount} → ${adjusted.setting.freeDispenseLimit} 生成待确认减量提案；窗口保持不变，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，未来可交付 ${futureDeliverable}g。`
+      : `中度腹泻按整栏减餐处理：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g，未来餐次计划 ${futureDeliverable}g；需独立人工确认后应用。`,
     evidence: {
       grades: [...input.grades],
       worstGrade,

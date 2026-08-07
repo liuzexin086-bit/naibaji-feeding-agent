@@ -150,6 +150,16 @@
 - `futureDeliverable` for free mode uses `hasActiveOrFutureBusinessDayWindow` and equals remaining deliverable only while a current business-day window remains; `freeReductionPriority` is no longer read for free mode.
 - Added business-day helper and regressions for active/future windows, completed cross-midnight windows, direct total mapping, quota-only moderate reduction, and no-window manual-only behavior.
 
+### EC-P1-2.1 / EC-P1-3.1 Closure — complete
+
+- Model assets are now generated from tracked root sources into `agent/.generated-models` before check/test/build; the import path is stable in both `src/model` and `dist/model`.
+- Added `prepare-model-assets.mjs`, `dist-model-smoke.mjs`, and `npm run smoke:dist`; Docker build copies generated assets into the agent image.
+- Persisted `controlStartDay` is now replay authority in `feeding-model.js`; `automaticStart` can no longer move an existing latch later.
+- Rewrote the committed-anchor state machine so a committed visible day is not silently pre-decremented; a committed 10 anchor leads to next future count 9, not 7.
+- Free moderate future deliverable is discretized to whole standard dispenses; less than one `singlePowderGrams` remaining fails closed to manual-only.
+- Free moderate proposal reason no longer emits `targetSlot=null`; `freeReductionPriority` is marked deprecated and is not read by the free decision path.
+- Decision Core rejects executable `free_feeding` requests without at least one valid window.
+
 Baseline:
 
 ```text

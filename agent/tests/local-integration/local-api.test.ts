@@ -146,7 +146,7 @@ describe("local execution API", () => {
     });
     expect(anchoredAdvance.status).toBe(200);
     const anchoredBody = await anchoredAdvance.json() as { today: { mealCount: number } };
-    expect(anchoredBody.today.mealCount).toBe(8);
+    expect(anchoredBody.today.mealCount).toBe(9);
   });
 
   it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {

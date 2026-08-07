@@ -139,7 +139,7 @@ export interface DiarrheaAdjustmentInput {
   cumulativePowderGrams: number | null;
   /** Frozen SOP timed-meal reductionPriority. Required for timed_quantity. */
   reductionPriority?: string[];
-  /** Frozen SOP free-feeding reductionPriority, keyed by window startLocal. Required for free_feeding. */
+  /** @deprecated Legacy snapshot compatibility only; not read by the free-feeding decision path. */
   freeReductionPriority?: string[];
 }
 

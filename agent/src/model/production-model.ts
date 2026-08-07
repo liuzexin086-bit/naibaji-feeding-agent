@@ -1,10 +1,11 @@
-// The protected CommonJS models are tracked at the repository root.
-// Static imports let Wrangler bundle the same source for Workers while Node
-// loads the same files from the Container image.
+// The protected CommonJS models are generated from tracked root sources into
+// agent/.generated-models before check/test/build. The relative path is stable
+// from both src/model and dist/model, so the compiled Agent runtime loads the
+// same artifact without relying on an absolute filesystem location.
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.
-import feedingModel from "../../../feeding-model.js";
+import feedingModel from "../../.generated-models/feeding-model.cjs";
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.
-import v5LiteModel from "../../../v5lite-model.js";
+import v5LiteModel from "../../.generated-models/v5lite-model.cjs";
 
 export interface ProductionPlanInput {
   startAge: number;
