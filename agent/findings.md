@@ -271,6 +271,13 @@ Real Device Control Gate: CLOSED
 - `DECISION_POLICY_VERSION` is now a single shared constant for snapshot policy version.
 - Added regression coverage for D1 unknown/zero/executed actual, active decision id before/after mode apply, and head-change snapshot stability.
 
+### EC-P1-5.2 Execution Evidence Seal — 2026-08-07
+
+- Review found batch snapshot records are replaced by same-day `/records`, so a later `actual=0` could erase an earlier positive execution fact.
+- Added `getBusinessDayExecutionState()` reading immutable `daily_observations`; state is monotonic `unknown → zero → executed`.
+- `/mode` and mode-change apply now call the same store method; duplicate API/store record-scan helpers were removed.
+- Regression proves `180 → 0` on the same day still blocks mode switch and amendment apply.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

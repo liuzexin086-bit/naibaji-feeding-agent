@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { normalizeIsoTimestamp, timestampOrderValue } from "../shared/iso-time.js";
+import { normalizeIsoTimestamp } from "../shared/iso-time.js";
 import type {
   DeviceSetting,
   FeedingDecision,
@@ -14,6 +14,7 @@ import type {
   AuditEvent,
   AuditInput,
   BatchListOptions,
+  BusinessDayExecutionState,
   CommitAdvanceInput,
   CommitModeSwitchInput,
   CommitRecordInput,
@@ -144,29 +145,6 @@ function jsonObject(value: unknown, field: string): Record<string, unknown> {
 function nullableJsonObject(value: unknown, field: string): Record<string, unknown> | null {
   if (value === null || value === undefined) return null;
   return jsonObject(value, field);
-}
-
-function cumulativeActualFromRecords(records: unknown, dayIndex: number): number | null {
-  if (!Array.isArray(records)) return null;
-  const valid = records
-    .filter((row): row is Record<string, unknown> =>
-      Boolean(row) && typeof row === "object" && !Array.isArray(row) &&
-      Number(row.dayIndex) === dayIndex &&
-      normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
-    .sort((left, right) => {
-      const leftAt = String(left.recordedAt ?? left.created_at ?? "");
-      const rightAt = String(right.recordedAt ?? right.created_at ?? "");
-      return timestampOrderValue(leftAt) - timestampOrderValue(rightAt);
-    });
-  for (let index = valid.length - 1; index >= 0; index -= 1) {
-    const value = valid[index]?.actualPowderGrams;
-    if (value !== undefined && value !== null && value !== "") {
-      const numeric = Number(value);
-      if (Number.isFinite(numeric) && numeric >= 0) return numeric;
-      return null;
-    }
-  }
-  return null;
 }
 
 function feedbackOriginKind(value: unknown, field: string): FeedbackOrigin["kind"] {
@@ -2195,17 +2173,18 @@ export class SqliteLocalStore implements LocalStore {
         }
         const targetMode = current.proposal.mode;
         const batchData = transactionBatch.data as unknown as Record<string, unknown>;
-        const cumulativeActual = cumulativeActualFromRecords(
-          batchData.records,
-          transactionBatch.currentDay,
+        const execution = this.getBusinessDayExecutionState(
+          userId,
+          batchId,
+          current.businessDate,
         );
-        if (cumulativeActual === null) {
+        if (execution.state === "unknown") {
           throw new LocalStoreError(
             "LOCAL_STORE_MODE_SWITCH_ACTUAL_UNKNOWN",
             "mode switch apply requires explicit cumulative actual powder",
           );
         }
-        if (cumulativeActual > 0) {
+        if (execution.state === "executed") {
           throw new LocalStoreError(
             "LOCAL_STORE_MODE_SWITCH_AFTER_EXECUTION_BLOCKED",
             "mode switch apply is blocked after execution",
@@ -2832,6 +2811,45 @@ export class SqliteLocalStore implements LocalStore {
       id: stringValue(row.id, "feeding_decisions.id"),
       decision: decisionFromRow(row),
     };
+  }
+
+  getBusinessDayExecutionState(
+    userId: string,
+    batchId: string,
+    businessDateValue: string,
+  ): { state: BusinessDayExecutionState; cumulativeActualGrams: number | null } {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT observed_at, data_json FROM daily_observations
+      WHERE user_id = ? AND batch_id = ? AND date_local = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      businessDate(businessDateValue, "businessDate"),
+    ) as Row[];
+    let state: BusinessDayExecutionState = "unknown";
+    let cumulativeActualGrams: number | null = null;
+    for (const row of rows) {
+      const data = jsonObject(row.data_json, "daily_observations.data_json");
+      const recordedAt = String(data.recordedAt ?? row.observed_at ?? "");
+      if (normalizeIsoTimestamp(recordedAt) === null) continue;
+      const raw = data.actualPowderGrams;
+      if (raw === undefined || raw === null || raw === "") continue;
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric) || numeric < 0) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_INVALID_INPUT",
+          "daily observation contains invalid actualPowderGrams",
+        );
+      }
+      cumulativeActualGrams = cumulativeActualGrams === null
+        ? numeric
+        : Math.max(cumulativeActualGrams, numeric);
+      if (numeric > 0) state = "executed";
+      else if (state !== "executed") state = "zero";
+    }
+    return { state, cumulativeActualGrams };
   }
 
   listSopTemplates(): LocalSopTemplate[] {

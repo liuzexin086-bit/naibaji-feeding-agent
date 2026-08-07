@@ -30,7 +30,7 @@ import {
   type FeedingDecision,
   type FeedingMode,
 } from "../shared/agent-v2-contract.js";
-import { normalizeIsoTimestamp, timestampOrderValue } from "../shared/iso-time.js";
+import { normalizeIsoTimestamp } from "../shared/iso-time.js";
 import type {
   DevicePlanSnapshot,
   DailyOperationItem,
@@ -562,25 +562,6 @@ function decisionFor(
     waterState: dayAge < Number(context.sop.config.waterClosedUntilDayAge) ? "closed" : "open",
     planWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
   };
-}
-
-function cumulativeActualForBusinessDay(records: JsonObject[], dayIndex: number): number | null {
-  const valid = records
-    .filter((row) =>
-      Number(row.dayIndex) === dayIndex &&
-      normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
-    .sort((left, right) => {
-      const leftAt = String(left.recordedAt ?? left.created_at ?? "");
-      const rightAt = String(right.recordedAt ?? right.created_at ?? "");
-      return timestampOrderValue(leftAt) - timestampOrderValue(rightAt);
-    });
-  for (let index = valid.length - 1; index >= 0; index -= 1) {
-    const value = valid[index]?.actualPowderGrams;
-    if (value !== undefined && value !== null && value !== "") {
-      return finite(value, "actualPowderGrams", 0);
-    }
-  }
-  return null;
 }
 
 function modeChangeProposal(
@@ -1364,14 +1345,15 @@ export async function handleLocalApi(
           batchId,
           businessDate,
         );
-        const cumulativeActual = cumulativeActualForBusinessDay(
-          recordsOf(batch),
-          batch.currentDay,
+        const execution = store.getBusinessDayExecutionState(
+          auth.user.id,
+          batchId,
+          businessDate,
         );
-        if (cumulativeActual === null) {
+        if (execution.state === "unknown") {
           throw new Error("NBJ_MODE_SWITCH_ACTUAL_UNKNOWN");
         }
-        if (cumulativeActual > 0) {
+        if (execution.state === "executed") {
           throw new Error("NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED");
         }
         const openAmendments = store.getDailyOperationAmendments(

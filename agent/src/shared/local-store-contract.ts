@@ -234,6 +234,7 @@ export interface DailyObservation {
 }
 
 export type FeedbackOriginKind = "diarrhea" | "creep_control" | "mode_change";
+export type BusinessDayExecutionState = "unknown" | "zero" | "executed";
 
 export interface FeedbackDeviceProposal {
   kind: FeedbackOriginKind;
@@ -566,6 +567,11 @@ export interface LocalStore {
     batchId: string,
     dateLocal?: string,
   ): { id: string; decision: FeedingDecision } | null;
+  getBusinessDayExecutionState(
+    userId: string,
+    batchId: string,
+    businessDate: string,
+  ): { state: BusinessDayExecutionState; cumulativeActualGrams: number | null };
   createSession(input: CreateSessionInput): AgentSession;
   listSessions(userId: string, batchId: string): AgentSession[];
   appendMessage(input: AppendMessageInput): AgentMessage;

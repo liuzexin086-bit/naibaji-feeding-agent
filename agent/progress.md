@@ -298,6 +298,14 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
 - Verified `npm run smoke:dist` and Docker agent build.
 
+### EC-P1-5.2 Execution Evidence Seal — complete
+
+- Added `getBusinessDayExecutionState()` over immutable `daily_observations`; execution state is monotonic and cannot be reset by a later zero record.
+- `/mode` and mode-change apply use the shared store method; removed duplicate API/store helpers.
+- Added `180 → 0` overwrite regressions for mode switch and amendment apply.
+- Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

@@ -685,6 +685,28 @@ describe("batch device plan snapshot and mode switching", () => {
     expect(executedSwitch.status).toBe(409);
     expect(await executedSwitch.json())
       .toEqual({ code: "NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED" });
+    const executedZeroOverwrite = await apiRequest(base, `/api/batches/${executedBatch.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 2,
+        idempotencyKey: "executed-zero-overwrite",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(executedZeroOverwrite.status).toBe(200);
+    const executedAfterZero = await apiRequest(base, `/api/batches/${executedBatch.batch.id}/mode`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        mode: "free_feeding",
+        expectedRevision: 3,
+        idempotencyKey: "switch-after-zero-overwrite",
+      }),
+    });
+    expect(executedAfterZero.status).toBe(409);
+    expect(await executedAfterZero.json())
+      .toEqual({ code: "NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED" });
 
     const allowedBatch = await createBatch(base, cookie);
     const allowedAdvance = await apiRequest(base, `/api/batches/${allowedBatch.batch.id}/advance`, {
@@ -807,6 +829,16 @@ describe("batch device plan snapshot and mode switching", () => {
       }),
     });
     expect(executed.status).toBe(200);
+    const zeroOverwrite = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 3,
+        idempotencyKey: "apply-blocked-zero-overwrite",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(zeroOverwrite.status).toBe(200);
     const applied = await apiRequest(
       base,
       `/api/batches/${created.batch.id}/amendments/${amendment.id}/apply`,
@@ -814,7 +846,7 @@ describe("batch device plan snapshot and mode switching", () => {
         method: "POST",
         headers: { cookie },
         body: JSON.stringify({
-          expectedRevision: 3,
+          expectedRevision: 4,
           expectedAmendmentSha256: amendment.amendmentSha256,
           idempotencyKey: "apply-blocked-apply",
         }),

@@ -208,6 +208,14 @@
 - Added `DECISION_POLICY_VERSION` shared constant and used it for `policyVersionAtCommit`.
 - Added regressions for D1 unknown/zero/executed actual, mode apply after state change, active decision id before/after mode apply, and head-count-independent plan-per-pig snapshot.
 
+### EC-P1-5.2 Execution Evidence Seal — complete
+
+- Added single store authority `getBusinessDayExecutionState()` backed by immutable `daily_observations`, not the replaceable batch record snapshot.
+- Execution state is monotonic: no explicit actual → `unknown`; all explicit actuals are zero → `zero`; any positive explicit actual → `executed`.
+- A later same-day `actualPowderGrams=0` cannot reset `executed` back to `zero`; `/mode` and mode-change apply both use the same store method.
+- Removed duplicate API/store record-scanning helpers so there is one execution-state implementation.
+- Added regressions for `180 → 0` overwrite in mode switch and amendment apply.
+
 Baseline:
 
 ```text
