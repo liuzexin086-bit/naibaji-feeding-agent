@@ -193,6 +193,13 @@
 - Confirmed/active daily plans route mode switches through a `mode_change` amendment; confirm leaves selected/active unchanged, apply atomically updates selectedMode, supersedes old active decision, creates exactly one active decision, advances revision, and writes audit/action history.
 - Pending/no-plan mode switches refresh the pending daily operation plan in the same transaction as the batch update.
 
+### EC-P1-6 — complete
+
+- Observation API now uses a strict allowlist; unknown fields and all plan fields return `400 NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN`.
+- Server writes authoritative snapshot fields at commit: `planPerPigAtCommit`, `planTotalAtCommit`, `feedTimesAtCommit`, `freeDispenseLimitAtCommit`, `modeAtCommit`, `activeDecisionIdAtCommit`, and `policyVersionAtCommit`.
+- Client-supplied `mealCount`, `mealTimes`, `singlePowderGrams`, `freeDispenseLimit`, `deviceMode`, `plannedTotalPowderGrams`, `exceptionActions`, `modelVersion`, `sopVersion`, and `waterState` are rejected rather than trusted.
+- Record public responses expose the server-authored commit snapshot for audit and Agent/local API parity.
+
 Baseline:
 
 ```text

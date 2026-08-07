@@ -141,12 +141,12 @@ describe("local execution API", () => {
       body: JSON.stringify({
         expectedRevision: 2,
         idempotencyKey: "advance-anchored",
-        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 900, mealCount: 10 },
+        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 900 },
       }),
     });
     expect(anchoredAdvance.status).toBe(200);
     const anchoredBody = await anchoredAdvance.json() as { today: { mealCount: number } };
-    expect(anchoredBody.today.mealCount).toBe(9);
+    expect(anchoredBody.today.mealCount).toBe(8);
   });
 
   it("exposes explicit runtime state in today and rejects invalid runtime enums", async () => {
@@ -226,6 +226,78 @@ describe("local execution API", () => {
     });
     expect(invalid.status).toBe(400);
     expect(await invalid.json()).toEqual({ code: "NBJ_DEVICE_STATUS_INVALID" });
+  });
+
+  it("rejects forged plan fields and writes server authoritative snapshot", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "观察边界", startAge: 7, endAge: 16, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string; revision: number } };
+    const forged = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "forged-plan-field",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          actualPowderGrams: 0,
+          mealCount: 10,
+        },
+      }),
+    });
+    expect(forged.status).toBe(400);
+    expect(await forged.json()).toEqual({ code: "NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN" });
+
+    const unknownField = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "unknown-observation-field",
+        observation: { effectiveHeads: 20, mystery: true },
+      }),
+    });
+    expect(unknownField.status).toBe(400);
+    expect(await unknownField.json()).toEqual({ code: "NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN" });
+
+    const allowed = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "server-snapshot",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(allowed.status).toBe(200);
+    const allowedBody = await allowed.json() as {
+      records: Array<{
+        planTotalAtCommit: number;
+        feedTimesAtCommit: number;
+        policyVersionAtCommit: string;
+      }>;
+    };
+    expect(allowedBody.records[0]).toMatchObject({
+      planTotalAtCommit: expect.any(Number),
+      feedTimesAtCommit: expect.any(Number),
+      policyVersionAtCommit: "execution-contract-v1",
+    });
   });
 
   it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {

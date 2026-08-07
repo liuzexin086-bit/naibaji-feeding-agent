@@ -279,6 +279,15 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 343 tests, p0 gate 94 tests, p1 gate 131 tests.
 - Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
 
+### EC-P1-6 — complete
+
+- Added `OBSERVATION_ALLOWLIST` in local API and reject all unknown/plan fields with `NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN`.
+- Server now writes canonical commit snapshot: plan per-pig/total, feed times, free dispense limit, mode, active decision ID, and policy version.
+- Record public response exposes server-authored snapshot fields for audit/parity.
+- Removed client-authored `mealCount` from the anchored local API regression and added forged/unknown-field tests.
+- Verified `npm run check`, `npm test` 36 files / 344 tests, p0 gate 94 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

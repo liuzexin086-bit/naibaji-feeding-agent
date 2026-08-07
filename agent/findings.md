@@ -256,6 +256,13 @@ Real Device Control Gate: CLOSED
 - Confirmed-plan mode switches create `mode_change` amendments; confirm is approval-only and apply atomically switches selected mode and active decision.
 - Pending-plan mode switches refresh the daily operation plan in the same transaction as the batch update.
 
+### EC-P1-6 — 2026-08-07
+
+- Observation API is now strict allowlist; any unknown field or forbidden plan field fails with `NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN`.
+- Server-owned snapshot fields are written at commit and exposed in record responses, so clients can never author meal counts, totals, mode, exception actions, or policy version.
+- Legacy local-api test that submitted `mealCount` was replaced with a real commit-snapshot regression.
+- `p1-safety-gate` now includes `local-api.test.ts` to cover forged-field and server-authority regressions.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

@@ -80,6 +80,22 @@ export const CREEP_VALUES = {
   excellent: 130,
 } as const;
 
+const OBSERVATION_ALLOWLIST = new Set([
+  "actualPowderGrams",
+  "effectiveHeads",
+  "headCount",
+  "creepGrade",
+  "diarrheaGrade",
+  "recordedAt",
+  "weight",
+  "death",
+  "cull",
+  "temperature",
+  "humidity",
+  "feedingResponse",
+  "deviceStatus",
+]);
+
 export const DEFAULT_LOCAL_SOP_VERSION = "2026.08.03-v6-first-day-sop";
 export const DEFAULT_DEVICE_PLAN_VERSION = "device-plan@2026-08-04-v1";
 
@@ -806,6 +822,15 @@ function recordPublic(
     freeDispenseLimit: Number(row.freeDispenseLimit ?? row.mealCount ?? 0),
     mealTimes: Array.isArray(row.mealTimes) ? row.mealTimes : [],
     plannedTotalPowderGrams: Number(row.plannedTotalPowderGrams ?? row.planTotalAtCommit ?? 0),
+    planPerPigAtCommit: Number(row.planPerPigAtCommit ?? 0),
+    planTotalAtCommit: Number(row.planTotalAtCommit ?? row.plannedTotalPowderGrams ?? 0),
+    feedTimesAtCommit: Number(row.feedTimesAtCommit ?? row.mealCount ?? 0),
+    freeDispenseLimitAtCommit: Number(row.freeDispenseLimitAtCommit ?? row.freeDispenseLimit ?? 0),
+    modeAtCommit: String(row.modeAtCommit ?? row.deviceMode ?? "timed_quantity"),
+    activeDecisionIdAtCommit: row.activeDecisionIdAtCommit == null
+      ? null
+      : String(row.activeDecisionIdAtCommit),
+    policyVersionAtCommit: String(row.policyVersionAtCommit ?? "legacy"),
     estimatedAverageWeightKg: Number(row.estimatedAverageWeightKg ?? modelWeight?.weightStart ?? 0) || null,
     estimatedEndWeightKg: Number(row.estimatedEndWeightKg ?? modelWeight?.weightEnd ?? 0) || null,
     actualPowderGrams: row.actualPowderGrams == null ? null : Number(row.actualPowderGrams),
@@ -869,6 +894,11 @@ function requestUsesHttps(request: IncomingMessage): boolean {
 
 function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
   const source = object(body.observation ?? {}, "observation");
+  for (const key of Object.keys(source)) {
+    if (!OBSERVATION_ALLOWLIST.has(key)) {
+      throw new Error("NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN");
+    }
+  }
   const config = configOf(batch);
   const heads = integer(source.effectiveHeads ?? source.headCount ?? config.effectiveHeads ?? config.headCount ?? 1, "effectiveHeads", 0, 100_000);
   const grade = String(source.creepGrade ?? "none");
@@ -917,18 +947,39 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
       : feedingResponseRaw === "refusing"
         ? "refusal"
         : feedingResponseRaw;
+  const setting = object(today.setting, "today_setting");
+  const planTotalAtCommit = Number(today.plannedTotalPowderGrams ?? setting.dailyPowderGrams ?? 0);
+  const feedTimesAtCommit = Number(today.mealCount ?? setting.mealCount ?? 0);
+  const freeDispenseLimitAtCommit = Number(
+    today.freeDispenseLimit ?? setting.freeDispenseLimit ?? today.mealCount ?? 0,
+  );
+  const allowed: JsonObject = {};
+  for (const key of OBSERVATION_ALLOWLIST) {
+    if (source[key] !== undefined) allowed[key] = source[key];
+  }
   const record = {
-    ...source,
+    ...allowed,
     dayIndex: Number(today.dayIndex),
     dayAge: Number(today.dayAge),
     effectiveHeads: heads,
     headCount: heads,
-    deviceMode: String(source.deviceMode ?? object(today.setting, "today_setting").mode ?? "timed_quantity"),
-    singlePowderGrams: Number(source.singlePowderGrams ?? today.singlePowderGrams ?? 0),
-    mealCount: Number(source.mealCount ?? today.mealCount ?? 0),
-    freeDispenseLimit: Number(source.freeDispenseLimit ?? today.freeDispenseLimit ?? today.mealCount ?? 0),
-    mealTimes: Array.isArray(source.mealTimes) ? source.mealTimes : today.mealTimes,
-    plannedTotalPowderGrams: Number(source.plannedTotalPowderGrams ?? today.plannedTotalPowderGrams ?? 0),
+    deviceMode: String(setting.mode ?? "timed_quantity"),
+    singlePowderGrams: Number(today.singlePowderGrams ?? setting.singlePowderGrams ?? 0),
+    mealCount: feedTimesAtCommit,
+    freeDispenseLimit: freeDispenseLimitAtCommit,
+    mealTimes: Array.isArray(today.mealTimes) ? today.mealTimes : [],
+    plannedTotalPowderGrams: planTotalAtCommit,
+    planPerPigAtCommit: heads > 0
+      ? Math.round((planTotalAtCommit / heads) * 100) / 100
+      : 0,
+    planTotalAtCommit,
+    feedTimesAtCommit,
+    freeDispenseLimitAtCommit,
+    modeAtCommit: String(setting.mode ?? "timed_quantity"),
+    activeDecisionIdAtCommit: today.activeDecisionId == null
+      ? null
+      : String(today.activeDecisionId),
+    policyVersionAtCommit: "execution-contract-v1",
     estimatedAverageWeightKg: Number(today.estimatedAverageWeightKg ?? 0),
     estimatedEndWeightKg: Number(today.estimatedEndWeightKg ?? 0),
     actualPowderGrams: source.actualPowderGrams == null ? null : finite(source.actualPowderGrams, "actualPowderGrams", 0),
@@ -937,8 +988,8 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     ...(diarrhea === undefined ? {} : { diarrheaGrade: diarrhea }),
     ...(deviceStatus === undefined ? {} : { deviceStatus }),
     ...(feedingResponse === undefined ? {} : { feedingResponse }),
-    waterState: String(source.waterState ?? today.waterState ?? "closed"),
-    exceptionActions: Array.isArray(source.exceptionActions) ? source.exceptionActions : today.exceptionActions,
+    waterState: String(today.waterState ?? "closed"),
+    exceptionActions: Array.isArray(today.exceptionActions) ? today.exceptionActions : [],
     modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: String(today.sopVersion ?? "local-sop-default-v1"),
     recordedAt,
