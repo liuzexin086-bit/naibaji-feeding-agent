@@ -521,7 +521,15 @@
           list.innerHTML += amendments.map(function (amendment) {
             var originLabel = amendment.originKind === 'diarrhea' ? '腹泻' : '教槽控奶';
             var severityLabel = amendment.severity ? (amendmentSeverityLabels[amendment.severity] || amendment.severity) : '人工处置';
-            return '<li class="operation-row amendment-row"><span class="operation-window">确认后修订</span><span class="operation-copy"><strong>' + escapeHtml(originLabel + severityLabel + ' · ' + (amendmentStatusLabels[amendment.status] || amendment.status)) + '</strong><span>' + escapeHtml('优先级 ' + (amendment.priority || 'routine') + '；原计划保持不可变；修订 SHA-256 ' + String(amendment.amendmentSha256 || '').slice(0, 12)) + '</span>' + (amendment.proposal ? '<span class="operation-safety">待独立确认的设备提案</span>' : '<span class="operation-safety">无自动设备提案，需人工处置</span>') + '</span></li>';
+            var kindLabel = amendment.originKind === 'diarrhea' && amendment.severity === 'mild' && !amendment.proposal
+              ? '轻度腹泻 · 个体干预'
+              : originLabel + severityLabel;
+            var safetyText = amendment.proposal
+              ? '待独立确认的整栏减餐提案；设备保持原模式'
+              : amendment.originKind === 'diarrhea' && amendment.severity === 'mild'
+                ? '整栏设备程序保持不变；需现场标记隔离并病猪控奶一次'
+                : '无自动设备提案，需人工处置';
+            return '<li class="operation-row amendment-row"><span class="operation-window">确认后修订</span><span class="operation-copy"><strong>' + escapeHtml(kindLabel + ' · ' + (amendmentStatusLabels[amendment.status] || amendment.status)) + '</strong><span>' + escapeHtml('优先级 ' + (amendment.priority || 'routine') + '；原计划保持不可变；修订 SHA-256 ' + String(amendment.amendmentSha256 || '').slice(0, 12)) + '</span><span class="operation-safety">' + escapeHtml(safetyText) + '</span></span></li>';
           }).join('');
         }
         if (plan.status === 'confirmed') {
@@ -623,7 +631,9 @@
           if (String(batchId) === String(state.currentBatchId)) await loadTodayOperations(batchId);
           restoreDraft();
           $('quickMessage').textContent = '当日记录已保存'; showToast('当日记录已保存');
-          if (savedDiarrheaGrade !== 'none') openAgent('已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻' + (savedActualPowderGrams == null ? '' : '，已下粉' + savedActualPowderGrams + 'g') + '，请给出具体设备操作。');
+          if (savedDiarrheaGrade === 'mild') openAgent('已录入轻度腹泻，请给出个体隔离与病猪控奶建议；不要修改整栏设备。');
+          else if (savedDiarrheaGrade === 'moderate') openAgent('已录入中度腹泻' + (savedActualPowderGrams == null ? '' : '，已下粉' + savedActualPowderGrams + 'g') + '，请给出整栏减一次采食的待确认方案。');
+          else if (savedDiarrheaGrade === 'severe') openAgent('已录入重度腹泻，请给出立即隔离、观察、环境检查和转兽医处置建议；不要生成药物或设备方案。');
         } catch (error) {
           if (error.code === 'NBJ_BATCH_STALE') showToast('批次已更新，请刷新后重试');
           else showToast(error.message || '保存失败');

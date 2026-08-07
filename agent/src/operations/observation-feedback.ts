@@ -230,16 +230,16 @@ function diarrheaProposal(
     ],
     manualDispositionRequired: result.manualDispositionRequired,
     proposalDigest: "",
-    resultKind: result.kind === "proposal"
-      ? "proposal"
-      : result.kind === "preview_only"
-        ? "preview_only"
+    resultKind: result.kind === "feeding_reduction_proposal"
+      ? "feeding_reduction_proposal"
+      : result.kind === "individual_intervention"
+        ? "individual_intervention"
         : "manual_only",
     adjustedProgramTotal: result.adjustedProgramTotal,
     remainingDeliverable: result.remainingDeliverable,
     ...(result.targetSlot ? { targetSlot: result.targetSlot } : {}),
     ...(result.targetAlreadyHappened ? { targetAlreadyHappened: true } : {}),
-    ...(result.cumulativeActual >= 0 ? { cumulativePowderGrams: result.cumulativeActual } : {}),
+    ...(result.cumulativeActual !== null ? { cumulativePowderGrams: result.cumulativeActual } : {}),
   };
   proposal.proposalDigest = digestFeedbackProposal(proposal);
   return proposal;
@@ -336,7 +336,7 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
     const preview = previewDiarrheaAdjustment({
       decision: input.decision,
       grades: [diarrheaGrade],
-      cumulativePowderGrams: cumulativePowderGrams ?? 0,
+      cumulativePowderGrams: cumulativePowderGrams,
       observedAt: String(sourceRecord.recordedAt ?? new Date().toISOString()),
       reductionPriority: input.reductionPriority,
       freeReductionPriority: input.freeReductionPriority,
@@ -347,20 +347,27 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       diarrheaGrade,
       preview,
     );
-    const originStatus = preview.kind === "proposal" ? "proposed" : "manual";
-    const resultLabel = preview.kind === "proposal"
-      ? "生成待确认设备提案"
-      : preview.kind === "preview_only"
-        ? "仅生成预览，不自动应用"
+    const originStatus = preview.kind === "feeding_reduction_proposal" ? "proposed" : "manual";
+    const resultLabel = preview.kind === "individual_intervention"
+      ? "生成个体处置建议；整栏设备保持不变"
+      : preview.kind === "feeding_reduction_proposal"
+        ? "生成待确认整栏减餐提案"
         : "转人工处置，不生成可执行设备方案";
-    const operationTitle = preview.kind === "proposal"
-      ? `腹泻处置确认（${gradeLabel}）`
-      : preview.kind === "preview_only"
-        ? `腹泻人工处置（${gradeLabel}）`
-        : `腹泻紧急人工处置（${gradeLabel}）`;
-    const operationNote = preview.kind === "proposal"
-      ? "按冻结 SOP 目标槽位减少一次配奶/自由采食窗口；未确认前设备保持不变。"
-      : "不生成可执行设备方案；需现场负责人人工处置并留痕。";
+    const operationCode = preview.kind === "individual_intervention"
+      ? "feedback_diarrhea_intervention"
+      : "feedback_diarrhea_confirm";
+    const operationTitle = preview.kind === "individual_intervention"
+      ? `腹泻个体干预（${gradeLabel}）`
+      : preview.kind === "feeding_reduction_proposal"
+        ? `腹泻整栏减餐确认（${gradeLabel}）`
+        : diarrheaGrade === "severe"
+          ? `腹泻紧急人工处置（${gradeLabel}）`
+          : `腹泻人工处置（${gradeLabel}）`;
+    const operationNote = preview.kind === "individual_intervention"
+      ? "标记并隔离腹泻仔猪，病猪控奶一次；其他仔猪继续执行原饲喂程序，整栏设备保持不变。"
+      : preview.kind === "feeding_reduction_proposal"
+        ? "按冻结 SOP 目标槽位整栏减少一次采食；未确认前设备保持不变。"
+        : "不生成可执行设备方案；需现场负责人/兽医人工处置并留痕。";
     const origin: FeedbackOrigin = {
       ...originBase,
       status: originStatus,
@@ -370,7 +377,7 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
     const operation = feedbackOperation(
       origin,
       proposal,
-      "feedback_diarrhea_confirm",
+      operationCode,
       operationTitle,
       operationNote,
       ["diarrheaGrade", "actualPowderGrams"],

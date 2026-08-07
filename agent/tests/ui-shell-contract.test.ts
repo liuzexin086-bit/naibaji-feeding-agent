@@ -136,7 +136,8 @@ describe("local frontend contract", () => {
     expect(html).toContain("$('agentStatus').textContent");
     expect(html).toContain("' · 第' + dayNumber() + '天 · 日龄' + age()");
     expect(html).toContain("observation: observationPayload()");
-    expect(html).toContain("已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻");
+    expect(html).toContain("openAgent('已录入轻度腹泻");
+    expect(html).toContain("不要修改整栏设备");
   });
 
   it("captures diarrhea before restoring the draft and keeps Agent usable without a batch", () => {
@@ -144,7 +145,7 @@ describe("local frontend contract", () => {
     const saveSource = html.slice(html.indexOf("async function saveData"), html.indexOf("async function login"));
     const captureAt = saveSource.indexOf("var savedDiarrheaGrade");
     const restoreAt = saveSource.indexOf("restoreDraft()");
-    const triggerAt = saveSource.indexOf("openAgent('已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻'");
+    const triggerAt = saveSource.indexOf("openAgent('已录入轻度腹泻");
     expect(captureAt).toBeGreaterThanOrEqual(0);
     expect(restoreAt).toBeGreaterThan(captureAt);
     expect(triggerAt).toBeGreaterThan(restoreAt);

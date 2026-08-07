@@ -203,7 +203,7 @@ describe("today operations API", () => {
       body: JSON.stringify({
         expectedRevision: 0,
         idempotencyKey: "record-diarrhea-1",
-        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 0 },
+        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "moderate", actualPowderGrams: 0 },
       }),
     });
     expect(saved.status).toBe(200);
@@ -298,7 +298,7 @@ describe("today operations API", () => {
     };
     expect(mildBody.feedback).toMatchObject({
       kind: "diarrhea",
-      operations: [{ code: "feedback_diarrhea_confirm" }],
+      operations: [{ code: "feedback_diarrhea_intervention" }],
     });
 
     const activePlan = await request(base, `/api/batches/${batchId}/today-operations`, {
@@ -307,7 +307,7 @@ describe("today operations API", () => {
     const activeBody = await activePlan.json() as {
       plan: { operations: Array<{ code: string }> };
     };
-    expect(activeBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(activeBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_intervention");
 
     const none = await request(base, `/api/batches/${batchId}/records`, {
       method: "POST",
@@ -331,7 +331,7 @@ describe("today operations API", () => {
       plan: { operations: Array<{ code: string }> };
     };
     expect(clearedBody.plan.operations.map((item) => item.code))
-      .not.toContain("feedback_diarrhea_confirm");
+      .not.toContain("feedback_diarrhea_intervention");
   });
 
   it("keeps pending diarrhea feedback after a same-day observation omits diarrheaGrade", async () => {
@@ -383,7 +383,7 @@ describe("today operations API", () => {
     const planBody = await planResponse.json() as {
       plan: { operations: Array<{ code: string }> };
     };
-    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_intervention");
   });
 
   it("normalizes recordedAt to UTC and rejects invalid timestamps", async () => {

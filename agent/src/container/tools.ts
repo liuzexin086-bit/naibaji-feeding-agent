@@ -784,7 +784,7 @@ export function createFeedingTools(
   const previewDiarrhea: FeedingTool<any, any> = {
     name: "preview_diarrhea_adjustment",
     label: "预览腹泻调整",
-    description: "按腹泻档位和冻结 SOP reductionPriority 生成未生效草案或人工处置要求；不自动应用设备方案。最近记录为无时返回已结束。",
+    description: "按腹泻档位生成个体干预、整栏减餐待确认提案或人工处置要求；mild 不修改设备，moderate 必须独立确认，severe 转人工/兽医。最近记录为无时返回已结束。",
     parameters: Type.Object({
       grades: Type.Optional(Type.Array(Type.Union([
         Type.Literal("none"),
@@ -867,15 +867,15 @@ export function createFeedingTools(
           ? params.cumulativePowderGrams
           : hasRecordActual
             ? recordActual
-            : 0;
-      const cumulativeSource: "observation" | "request" | "latest_record" | "assumed_zero" =
+            : null;
+      const cumulativeSource: "observation" | "request" | "latest_record" | "missing" =
         observationActual != null
           ? "observation"
           : params.cumulativePowderGrams != null
             ? "request"
             : hasRecordActual
               ? "latest_record"
-              : "assumed_zero";
+              : "missing";
       const originalDecision = computeFrozenBatchDecision(production.state.frozenContext).decision;
       const preview = previewDiarrheaAdjustment({
         decision: originalDecision,
@@ -895,6 +895,13 @@ export function createFeedingTools(
       return record(context, "preview_diarrhea_adjustment", {
         status: preview.kind,
         worstGrade,
+        mode: preview.decision?.setting.mode ?? originalDecision.setting.mode,
+        affectsWholePen: preview.affectsWholePen,
+        isolateAffectedPiglets: preview.isolateAffectedPiglets,
+        affectedPigletMilkControlCount: preview.affectedPigletMilkControlCount,
+        deviceAdjustmentRequired: preview.deviceAdjustmentRequired,
+        requiresHumanConfirmation: preview.requiresHumanConfirmation,
+        requiresManualDisposition: preview.requiresManualDisposition,
         decision: preview.decision,
         deviceOperation: preview.proposal
           ? {

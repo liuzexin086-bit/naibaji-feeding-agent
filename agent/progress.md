@@ -135,6 +135,15 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
+### NBJ-DIARRHEA-CLOSURE Revision — 2026-08-07
+
+- Replaced mild-as-proposal and moderate-as-preview with the revised three-tier contract.
+- Mild now emits `individual_intervention`; moderate emits `feeding_reduction_proposal`; severe remains `manual_only` with no device proposal.
+- Removed assumed-zero cumulative handling for moderate; missing cumulative actual powder fails closed.
+- Updated decision core, observation feedback, Agent tool, LangGraph deterministic responses, UI labels, and tests.
+- Added regression for moderate→severe supersede and updated mild/moderate/severe/unknown-cumulative coverage.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 311 tests and `p1-safety-gate` 8 files / 113 tests; build, root npm test, Python 12 tests and compileall pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

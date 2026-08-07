@@ -179,7 +179,7 @@ describe("post-confirmation amendments", () => {
       recordedAt: "2026-08-05T10:00:00+08:00",
       effectiveHeads: 20,
       creepGrade: "none",
-      diarrheaGrade: "mild",
+      diarrheaGrade: "moderate",
       actualPowderGrams: 0,
     };
     const saved = await request(base, `/api/batches/${batchId}/records`, {
@@ -662,5 +662,77 @@ describe("post-confirmation amendments", () => {
     const details = audit ? JSON.parse(audit.details_json) as Record<string, unknown> : null;
     expect(details).toMatchObject({ reason: "explicit_none" });
     database.close();
+  });
+
+  it("supersedes a pending moderate proposal when a severe emergency is recorded", async () => {
+    const { store, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "升级到重度", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { id: string; operationsSha256: string; businessDate: string };
+    };
+    await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-escalation-base",
+      }),
+    });
+    const batch = store.getBatch(userId, batchId)!;
+    const moderate = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: batch.revision,
+        idempotencyKey: "escalation-moderate",
+        observation: {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "moderate",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(moderate.status).toBe(200);
+    const afterModerate = store.getBatch(userId, batchId)!;
+    const severe = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: afterModerate.revision,
+        idempotencyKey: "escalation-severe",
+        observation: {
+          recordedAt: "2026-08-05T14:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "severe",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(severe.status).toBe(200);
+    const amendments = store.getDailyOperationAmendments(
+      userId,
+      batchId,
+      planBody.plan.businessDate,
+    );
+    expect(amendments).toHaveLength(2);
+    expect(amendments.find((amendment) => amendment.severity === "moderate")?.status)
+      .toBe("superseded");
+    expect(amendments.find((amendment) => amendment.severity === "severe")).toMatchObject({
+      status: "pending",
+      proposal: null,
+    });
   });
 });

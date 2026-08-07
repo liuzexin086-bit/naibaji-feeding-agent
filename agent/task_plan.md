@@ -69,6 +69,15 @@
 - Optimizer Production Gate: CLOSED
 - Real Device Control Gate: CLOSED
 
+## NBJ-DIARRHEA-CLOSURE Revision — 2026-08-07
+
+- Mild diarrhea is an individual intervention: isolate affected piglets, one piglet milk-control opportunity, no whole-pen device change and no `DeviceSetting` proposal.
+- Moderate diarrhea is a whole-pen feeding reduction: one frozen-priority meal/window removed, mode preserved, independent human confirmation required before apply.
+- Severe diarrhea is an emergency manual path: immediate isolation, clinical/environment checks, no device proposal, no automatic medication/diagnosis.
+- `DiarrheaAdjustmentKind` now uses `individual_intervention`, `feeding_reduction_proposal`, and `manual_only`; `preview_only` and mild-as-proposal are removed.
+- Unknown cumulative actual powder in moderate fails closed to `manual_only`; no assumed-zero device proposal.
+- LangGraph deterministic responses, Agent tools, UI labels, and regressions follow the revised mild/moderate/severe contract.
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

@@ -122,6 +122,14 @@ Real Device Control Gate: CLOSED
 - Optimizer Production Gate: CLOSED
 - Real Device Control Gate: CLOSED
 
+## NBJ-DIARRHEA-CLOSURE Revision — 2026-08-07
+
+- Mild no longer creates a device proposal or removes a meal/window; it returns `individual_intervention` with `affectsWholePen=false`, `isolateAffectedPiglets=true`, `affectedPigletMilkControlCount=1`, and `deviceAdjustmentRequired=false`.
+- Moderate returns `feeding_reduction_proposal` with `requiresHumanConfirmation=true`; it removes exactly one frozen-priority meal/window and preserves the feeding mode.
+- Severe returns `manual_only` with `proposal=null`, unchanged device program, isolation and emergency assessment language, and no automatic medication or diagnosis.
+- Moderate with missing cumulative actual powder returns `manual_only` instead of assuming zero and generating a proposal.
+- Existing newer-observation supersede semantics cover mild→moderate, moderate→severe, severe→moderate, and explicit none recovery.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

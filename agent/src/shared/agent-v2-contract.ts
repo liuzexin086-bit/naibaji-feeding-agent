@@ -127,7 +127,7 @@ export interface DiarrheaAdjustmentInput {
   observedAt: string;
   grades: DiarrheaGrade[];
   /** Actual powder already dispensed today; never an estimated or planned amount. */
-  cumulativePowderGrams: number;
+  cumulativePowderGrams: number | null;
   /** Frozen SOP timed-meal reductionPriority. Required for timed_quantity. */
   reductionPriority?: string[];
   /** Frozen SOP free-feeding reductionPriority, keyed by window startLocal. Required for free_feeding. */
@@ -136,8 +136,8 @@ export interface DiarrheaAdjustmentInput {
 
 export type DiarrheaAdjustmentKind =
   | "none"
-  | "proposal"
-  | "preview_only"
+  | "individual_intervention"
+  | "feeding_reduction_proposal"
   | "manual_only";
 
 export interface DiarrheaAdjustmentResult {
@@ -149,9 +149,15 @@ export interface DiarrheaAdjustmentResult {
   targetSlot: string | null;
   targetAlreadyHappened: boolean;
   adjustedProgramTotal: number;
-  cumulativeActual: number;
+  cumulativeActual: number | null;
   remainingDeliverable: number;
   futureDeliverable: number;
+  affectsWholePen: boolean;
+  isolateAffectedPiglets: boolean;
+  affectedPigletMilkControlCount: number;
+  deviceAdjustmentRequired: boolean;
+  requiresHumanConfirmation: boolean;
+  requiresManualDisposition: boolean;
   reason: string;
   evidence: Record<string, unknown>;
 }

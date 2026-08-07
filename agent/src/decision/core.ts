@@ -600,12 +600,14 @@ function diarrheaEvidenceDecision(
   const mode = setting.mode;
   const reason = kind === "manual_only"
     ? `腹泻${worstGrade}已转人工处置；不生成可执行设备方案。`
-    : kind === "preview_only"
-      ? `腹泻${worstGrade}仅生成预览；不自动应用设备方案，需人工处置。`
-      : `腹泻${worstGrade}按冻结 SOP 目标槽位生成待确认设备提案。`;
+    : kind === "individual_intervention"
+      ? `腹泻${worstGrade}按个体处置；隔离腹泻仔猪并对病猪控奶一次，整栏设备不变。`
+      : `腹泻${worstGrade}按冻结 SOP 目标槽位生成待确认整栏减餐提案。`;
   const actionText = kind === "manual_only"
     ? "现场检查并按兽医/场区 SOP 处置；不自动生成设备方案。"
-    : "按冻结 SOP 目标槽位减少一次配奶/自由采食窗口，需人工确认。";
+    : kind === "individual_intervention"
+      ? "标记并隔离腹泻仔猪，病猪控奶一次；其他仔猪继续执行原饲喂程序。"
+      : "按冻结 SOP 目标槽位整栏减少一次采食，需人工确认；不自动应用设备方案。";
   return {
     ...decision,
     revision: decision.revision + 1,
@@ -662,10 +664,15 @@ export function previewDiarrheaAdjustment(
   input: DiarrheaAdjustmentInput,
 ): DiarrheaAdjustmentResult {
   const worstGrade = worstDiarrheaGrade(input.grades);
-  const cumulativeActual = finiteNonNegative(
-    input.cumulativePowderGrams,
-    "INVALID_DIARRHEA_CUMULATIVE",
-  );
+  const cumulativeActual = input.cumulativePowderGrams === null
+    ? null
+    : finiteNonNegative(
+        input.cumulativePowderGrams,
+        "INVALID_DIARRHEA_CUMULATIVE",
+      );
+  const source = input.decision.setting;
+  const sourceMode = source.mode;
+  const originalDailyPowderGrams = source.dailyPowderGrams;
   if (worstGrade === "none") {
     return {
       kind: "none",
@@ -675,20 +682,124 @@ export function previewDiarrheaAdjustment(
       manualDispositionRequired: false,
       targetSlot: null,
       targetAlreadyHappened: false,
-      adjustedProgramTotal: input.decision.setting.dailyPowderGrams,
+      adjustedProgramTotal: originalDailyPowderGrams,
       cumulativeActual,
       remainingDeliverable: Math.max(
         0,
-        input.decision.setting.dailyPowderGrams - cumulativeActual,
+        originalDailyPowderGrams - (cumulativeActual ?? 0),
       ),
-      futureDeliverable: 0,
+      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      affectsWholePen: false,
+      isolateAffectedPiglets: false,
+      affectedPigletMilkControlCount: 0,
+      deviceAdjustmentRequired: false,
+      requiresHumanConfirmation: false,
+      requiresManualDisposition: false,
       reason: "最近腹泻档位为无，不生成腹泻调整。",
       evidence: { grades: [...input.grades], worstGrade: "none" },
     };
   }
 
-  const source = input.decision.setting;
-  const mode = source.mode;
+  if (worstGrade === "mild") {
+    return {
+      kind: "individual_intervention",
+      worstGrade,
+      decision: null,
+      proposal: null,
+      manualDispositionRequired: true,
+      targetSlot: null,
+      targetAlreadyHappened: false,
+      adjustedProgramTotal: originalDailyPowderGrams,
+      cumulativeActual,
+      remainingDeliverable: Math.max(
+        0,
+        originalDailyPowderGrams - (cumulativeActual ?? 0),
+      ),
+      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      affectsWholePen: false,
+      isolateAffectedPiglets: true,
+      affectedPigletMilkControlCount: 1,
+      deviceAdjustmentRequired: false,
+      requiresHumanConfirmation: false,
+      requiresManualDisposition: true,
+      reason: "轻度腹泻按个体处置：标记并隔离腹泻仔猪，病猪控奶一次；整栏设备程序保持不变。",
+      evidence: {
+        grades: [...input.grades],
+        worstGrade,
+        mode: sourceMode,
+        affectsWholePen: false,
+        isolateAffectedPiglets: true,
+        affectedPigletMilkControlCount: 1,
+        deviceAdjustmentRequired: false,
+      },
+    };
+  }
+
+  if (worstGrade === "severe") {
+    return {
+      kind: "manual_only",
+      worstGrade,
+      decision: null,
+      proposal: null,
+      manualDispositionRequired: true,
+      targetSlot: null,
+      targetAlreadyHappened: false,
+      adjustedProgramTotal: originalDailyPowderGrams,
+      cumulativeActual,
+      remainingDeliverable: Math.max(
+        0,
+        originalDailyPowderGrams - (cumulativeActual ?? 0),
+      ),
+      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      affectsWholePen: false,
+      isolateAffectedPiglets: true,
+      affectedPigletMilkControlCount: 0,
+      deviceAdjustmentRequired: false,
+      requiresHumanConfirmation: false,
+      requiresManualDisposition: true,
+      reason: "重度腹泻已转紧急人工处置：立即隔离明显腹泻仔猪，检查脱水/全身症状、环境和生物安全，并由现场负责人/兽医进行病因判断；不自动修改设备。",
+      evidence: {
+        grades: [...input.grades],
+        worstGrade,
+        mode: sourceMode,
+        deviceAdjustmentRequired: false,
+        isolateAffectedPiglets: true,
+        manualDispositionRequired: true,
+      },
+    };
+  }
+
+  if (cumulativeActual === null) {
+    return {
+      kind: "manual_only",
+      worstGrade,
+      decision: null,
+      proposal: null,
+      manualDispositionRequired: true,
+      targetSlot: null,
+      targetAlreadyHappened: false,
+      adjustedProgramTotal: originalDailyPowderGrams,
+      cumulativeActual: null,
+      remainingDeliverable: Math.max(0, originalDailyPowderGrams),
+      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      affectsWholePen: true,
+      isolateAffectedPiglets: false,
+      affectedPigletMilkControlCount: 0,
+      deviceAdjustmentRequired: false,
+      requiresHumanConfirmation: false,
+      requiresManualDisposition: true,
+      reason: "中度腹泻已记录，但当前累计实际下粉量未知；请补录后重新评估，不生成可执行减餐提案。",
+      evidence: {
+        grades: [...input.grades],
+        worstGrade,
+        mode: sourceMode,
+        cumulativePowderGrams: null,
+        cumulativeMissing: true,
+      },
+    };
+  }
+
+  const mode = sourceMode;
   const candidates = mode === "free_feeding"
     ? source.freeWindows.map((window) => window.startLocal)
     : source.timedMeals.map((meal) => meal.timeLocal);
@@ -704,67 +815,76 @@ export function previewDiarrheaAdjustment(
   );
   const futureDeliverable = futureDeliverableFor(adjusted.setting, input.observedAt);
 
-  let kind: Exclude<DiarrheaAdjustmentResult["kind"], "none">;
-  let manualDispositionRequired: boolean;
-  let decision: FeedingDecision | null;
-  let proposal: DeviceSetting | null;
   if (
-    worstGrade === "severe" ||
     targetAlreadyHappened ||
     cumulativeActual >= adjusted.adjustedProgramTotal ||
     futureDeliverable > remainingDeliverable
   ) {
-    kind = "manual_only";
-    manualDispositionRequired = true;
-    decision = null;
-    proposal = null;
-  } else if (worstGrade === "moderate") {
-    kind = "preview_only";
-    manualDispositionRequired = true;
-    decision = diarrheaEvidenceDecision(
-      input.decision,
-      adjusted.setting,
-      input,
+    return {
+      kind: "manual_only",
       worstGrade,
+      decision: null,
+      proposal: null,
+      manualDispositionRequired: true,
       targetSlot,
       targetAlreadyHappened,
-      adjusted.adjustedProgramTotal,
+      adjustedProgramTotal: adjusted.adjustedProgramTotal,
+      cumulativeActual,
       remainingDeliverable,
-      kind,
-    );
-    proposal = null;
-  } else {
-    kind = "proposal";
-    manualDispositionRequired = false;
-    decision = diarrheaEvidenceDecision(
-      input.decision,
-      adjusted.setting,
-      input,
-      worstGrade,
-      targetSlot,
-      targetAlreadyHappened,
-      adjusted.adjustedProgramTotal,
-      remainingDeliverable,
-      kind,
-    );
-    proposal = decision.setting;
+      futureDeliverable,
+      affectsWholePen: true,
+      isolateAffectedPiglets: false,
+      affectedPigletMilkControlCount: 0,
+      deviceAdjustmentRequired: false,
+      requiresHumanConfirmation: false,
+      requiresManualDisposition: true,
+      reason: `中度腹泻无法生成可执行减餐提案：目标槽位 ${targetSlot}${targetAlreadyHappened ? "已发生" : ""}、累计量或剩余可交付不满足安全条件；转人工处置。`,
+      evidence: {
+        grades: [...input.grades],
+        worstGrade,
+        mode,
+        targetSlot,
+        targetAlreadyHappened,
+        cumulativePowderGrams: cumulativeActual,
+        adjustedProgramTotal: adjusted.adjustedProgramTotal,
+        remainingDeliverable,
+        futureDeliverable,
+      },
+    };
   }
 
+  const decision = diarrheaEvidenceDecision(
+      input.decision,
+      adjusted.setting,
+      input,
+      worstGrade,
+      targetSlot,
+      targetAlreadyHappened,
+      adjusted.adjustedProgramTotal,
+      remainingDeliverable,
+      "feeding_reduction_proposal",
+    );
   const evidenceAdjustedTotal = adjusted.adjustedProgramTotal;
-  const evidenceRemaining = Math.max(0, evidenceAdjustedTotal - cumulativeActual);
+  const evidenceRemaining = remainingDeliverable;
   return {
-    kind,
+    kind: "feeding_reduction_proposal",
     worstGrade,
     decision,
-    proposal,
-    manualDispositionRequired,
+    proposal: decision.setting,
+    manualDispositionRequired: false,
     targetSlot,
     targetAlreadyHappened,
     adjustedProgramTotal: evidenceAdjustedTotal,
     cumulativeActual,
     remainingDeliverable: evidenceRemaining,
     futureDeliverable,
-    reason: `腹泻${worstGrade}：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g，未来餐次计划 ${futureDeliverable}g。`,
+    affectsWholePen: true,
+    isolateAffectedPiglets: false,
+    affectedPigletMilkControlCount: 0,
+    deviceAdjustmentRequired: true,
+    requiresHumanConfirmation: true,
+    requiresManualDisposition: false,
+    reason: `中度腹泻按整栏减餐处理：目标槽位 ${targetSlot}，调整后整日程序总量 ${evidenceAdjustedTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${evidenceRemaining}g，未来餐次计划 ${futureDeliverable}g；需独立人工确认后应用。`,
     evidence: {
       grades: [...input.grades],
       worstGrade,
@@ -775,6 +895,9 @@ export function previewDiarrheaAdjustment(
       adjustedProgramTotal: evidenceAdjustedTotal,
       remainingDeliverable: evidenceRemaining,
       futureDeliverable,
+      affectsWholePen: true,
+      deviceAdjustmentRequired: true,
+      requiresHumanConfirmation: true,
     },
   };
 }

@@ -249,7 +249,7 @@ export interface FeedbackDeviceProposal {
   manualDispositionRequired: boolean;
   proposalDigest: string;
   cumulativePowderGrams?: number;
-  resultKind?: "proposal" | "preview_only" | "manual_only";
+  resultKind?: "individual_intervention" | "feeding_reduction_proposal" | "manual_only";
   adjustedProgramTotal?: number;
   remainingDeliverable?: number;
   targetSlot?: string;
