@@ -144,6 +144,15 @@ Real Device Control Gate: CLOSED
 - Added regression for moderate→severe supersede and updated mild/moderate/severe/unknown-cumulative coverage.
 - Verified under exact Node 24.18.0: full Agent suite 34 files / 311 tests and `p1-safety-gate` 8 files / 113 tests; build, root npm test, Python 12 tests and compileall pass.
 
+### NBJ-DIARRHEA-CLOSURE-R1 — 2026-08-07
+
+- Moderate diarrhea is fully removed from routine `DailyOperationPlan.proposedSetting` and becomes an independent amendment, including before routine confirmation.
+- Routine confirmation cannot apply diarrhea proposals; amendment `confirm → apply` is the only device activation path.
+- Mild/severe are audited as manual intervention/emergency records and no longer create device amendments.
+- Added `diarrhea-response` and `diarrhea/manual-action` APIs, independent UI exception cards, and amendment action buttons.
+- Docker web image now builds from source without `agent/public`; `GIT_COMMIT` is baked into `/version`; verified UI SHA matches source after removing gitignored `public/`.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 312 tests and `p1-safety-gate` 8 files / 114 tests pass; targeted Docker reproducibility build passes.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

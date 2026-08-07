@@ -205,6 +205,31 @@ function feedbackOperation(
   };
 }
 
+function auditDiarrheaManualIntervention(
+  store: LocalStore,
+  userId: string,
+  batchId: string,
+  result: FeedbackEngineResult,
+): void {
+  const grade = result.feedbackOrigin.sourceObservation.diarrheaGrade;
+  const action = grade === "severe"
+    ? "diarrhea.emergency_recorded"
+    : "diarrhea.individual_intervention_recorded";
+  store.audit({
+    userId,
+    batchId,
+    action,
+    details: {
+      severity: grade ?? null,
+      isolationRecommended: true,
+      affectedPigletMilkControlCount: grade === "mild" ? 1 : 0,
+      deviceSettingChanged: false,
+      sourceObservationId: result.feedbackOrigin.sourceObservation.recordedAt,
+    },
+    idempotencyKey: `diarrhea-manual:${result.feedbackOrigin.id}`,
+  });
+}
+
 function diarrheaProposal(
   kind: FeedbackOriginKind,
   businessDate: string,
@@ -541,10 +566,33 @@ export function materializeObservationFeedbackPlan(input: {
       ),
     });
   }
-  const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
+  const isDiarrhea = result?.kind === "diarrhea";
+  const diarrheaDeviceAmendment = isDiarrhea === true && result?.proposedSetting !== null;
+  const diarrheaManual = isDiarrhea === true && result?.proposedSetting === null;
+
   if (existing?.status === "confirmed") {
     if (!result?.operations.length) {
       return { plan: existing, feedback: null };
+    }
+    if (diarrheaManual) {
+      input.store.supersedeDailyOperationAmendments({
+        userId: input.userId,
+        batchId: batch.batchId,
+        businessDate: baseInput.businessDate,
+        originKind: "diarrhea",
+        reason: "newer_observation",
+        sourceObservationId: String(
+          input.observation?.observationId ??
+          result.feedbackOrigin.sourceObservation.recordedAt,
+        ),
+      });
+      auditDiarrheaManualIntervention(
+        input.store,
+        input.userId,
+        batch.batchId,
+        result,
+      );
+      return { plan: existing, feedback: result };
     }
     const confirmation = input.store.getDailyOperationConfirmation(
       input.userId,
@@ -596,13 +644,77 @@ export function materializeObservationFeedbackPlan(input: {
       amendment: amendmentResult.amendment,
     };
   }
+  const planOperations = diarrheaDeviceAmendment || diarrheaManual
+    ? baseOperations
+    : mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
   const plan = input.store.ensureDailyOperationPlan({
     ...baseInput,
-    operations,
-    operationsSha256: digestDailyOperationItems(operations),
-    proposedSetting: result?.proposedSetting ?? null,
-    feedbackOrigin: result?.feedbackOrigin ?? null,
+    operations: planOperations,
+    operationsSha256: digestDailyOperationItems(planOperations),
+    proposedSetting: isDiarrhea ? null : (result?.proposedSetting ?? null),
+    feedbackOrigin: isDiarrhea ? null : (result?.feedbackOrigin ?? null),
   });
+  if (diarrheaDeviceAmendment) {
+    const severity = result.feedbackOrigin.sourceObservation.diarrheaGrade ?? null;
+    if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+      throw new Error("NBJ_AMENDMENT_SEVERITY_INVALID");
+    }
+    const priority = severity === "severe"
+      ? "critical"
+      : severity === "moderate"
+        ? "warning"
+        : "routine";
+    const amendmentResult = input.store.ensureDailyOperationAmendment({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      basePlanId: plan.id,
+      baseConfirmationId: null,
+      originId: result.feedbackOrigin.id,
+      originKind: result.kind,
+      severity,
+      priority,
+      operations: result.operations,
+      proposal: result.proposedSetting,
+      basedOnBatchRevision: batch.revision,
+      idempotencyKey: `daily-operation-amendment:${result.feedbackOrigin.id}`,
+    });
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: result.kind,
+      excludeAmendmentId: amendmentResult.amendment.id,
+      reason: "newer_observation",
+      sourceObservationId: String(input.observation?.observationId ?? ""),
+      replacementAmendmentId: amendmentResult.amendment.id,
+    });
+    return {
+      plan,
+      feedback: result,
+      amendment: amendmentResult.amendment,
+    };
+  }
+  if (diarrheaManual) {
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: "diarrhea",
+      reason: "newer_observation",
+      sourceObservationId: String(
+        input.observation?.observationId ??
+        result.feedbackOrigin.sourceObservation.recordedAt,
+      ),
+    });
+    auditDiarrheaManualIntervention(
+      input.store,
+      input.userId,
+      batch.batchId,
+      result,
+    );
+    return { plan, feedback: result };
+  }
   return {
     plan,
     feedback: result?.operations.length ? result : null,

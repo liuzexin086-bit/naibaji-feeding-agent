@@ -539,7 +539,7 @@ describe("SQLite local store", () => {
       idempotencyKey: "confirm-v9-actions-base",
     }).confirmation;
     const proposal = {
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: plan.businessDate,
       mode: "timed_quantity" as const,
       dayAge: 4,
@@ -966,7 +966,7 @@ describe("SQLite local store", () => {
     );
     seed.close();
     const proposal = {
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: "2026-08-04",
       mode: "timed_quantity" as const,
       dayAge: 4,
@@ -977,34 +977,33 @@ describe("SQLite local store", () => {
       freeWindows: [],
       precisionGrams: 1,
       source: "sop_indirect" as const,
-      rationale: ["腹泻调整"],
+      rationale: ["教槽控奶"],
       manualDispositionRequired: false,
       proposalDigest: "A".repeat(64),
       cumulativePowderGrams: 120,
     };
     const feedbackOrigin = {
       id: "origin-1",
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: "2026-08-04",
       status: "proposed" as const,
       sourceObservation: {
         recordedAt: "2026-08-04T09:00:00.000Z",
-        diarrheaGrade: "mild" as const,
-        actualPowderGrams: 120,
+        creepGrade: "high" as const,
       },
-      reason: "已录入轻度腹泻",
+      reason: "教槽持续采食，启动控奶",
       proposal,
       createdAt: "2026-08-04T09:00:00.000Z",
     };
     const operations = [{
       ...dailyOperations()[0],
-      code: "feedback_diarrhea_confirm",
-      title: "腹泻处置确认（轻度）",
+      code: "feedback_creep_control_confirm",
+      title: "教槽持续采食控奶启动确认",
       dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
       sopSection: "现场反馈.腹泻",
       feedbackRef: {
         originId: "origin-1",
-        kind: "diarrhea" as const,
+        kind: "creep_control" as const,
         proposalDigest: proposal.proposalDigest,
         requiresDeviceConfirmation: true,
       },
@@ -1030,7 +1029,7 @@ describe("SQLite local store", () => {
     expect(plan.feedbackOrigin).toEqual(feedbackOrigin);
     expect(plan.operations[0]?.feedbackRef).toMatchObject({
       originId: "origin-1",
-      kind: "diarrhea",
+      kind: "creep_control",
       requiresDeviceConfirmation: true,
     });
 

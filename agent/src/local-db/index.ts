@@ -1232,7 +1232,8 @@ export class SqliteLocalStore implements LocalStore {
     if (batch.status !== "active") {
       throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation confirmations require an active batch");
     }
-    const derivedDeviceSetting = storedPlan.proposedSetting
+    const derivedDeviceSetting = storedPlan.proposedSetting &&
+        storedPlan.proposedSetting.kind !== "diarrhea"
       ? proposalToDeviceSetting(storedPlan.proposedSetting)
       : null;
     const expectedDecisionId = input.decisionId ?? null;
@@ -1511,10 +1512,9 @@ export class SqliteLocalStore implements LocalStore {
     const batchId = requiredText(input.batchId, "batchId");
     const dateLocal = businessDate(input.businessDate, "businessDate");
     const basePlanId = requiredText(input.basePlanId, "basePlanId");
-    const baseConfirmationId = requiredText(
-      input.baseConfirmationId,
-      "baseConfirmationId",
-    );
+    const baseConfirmationId = input.baseConfirmationId === null
+      ? null
+      : requiredText(input.baseConfirmationId, "baseConfirmationId");
     const originId = requiredText(input.originId, "originId");
     const originKind = input.originKind;
     const severity = input.severity;
@@ -1612,20 +1612,33 @@ export class SqliteLocalStore implements LocalStore {
         SELECT * FROM daily_operation_plans
         WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
       `).get(basePlanId, userId, batchId, dateLocal) as Row | undefined;
-      if (!plan || String(plan.status) !== "confirmed") {
+      if (!plan) {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
-          "amendment requires a confirmed daily operation plan",
+          "amendment requires a daily operation plan",
         );
       }
-      const confirmation = this.#database.prepare(`
-        SELECT * FROM daily_operation_confirmations
-        WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
-      `).get(baseConfirmationId, userId, batchId, dateLocal) as Row | undefined;
-      if (!confirmation) {
+      if (baseConfirmationId) {
+        if (String(plan.status) !== "confirmed") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+            "amendment with a base confirmation requires a confirmed daily operation plan",
+          );
+        }
+        const confirmation = this.#database.prepare(`
+          SELECT * FROM daily_operation_confirmations
+          WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+        `).get(baseConfirmationId, userId, batchId, dateLocal) as Row | undefined;
+        if (!confirmation) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+            "base confirmation not found",
+          );
+        }
+      } else if (String(plan.status) !== "pending") {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
-          "base confirmation not found",
+          "amendment without a base confirmation requires a pending daily operation plan",
         );
       }
       this.#database.prepare(`
@@ -3218,7 +3231,7 @@ export class SqliteLocalStore implements LocalStore {
     }
     const id = requiredText(input.id ?? randomUUID(), "id");
     const now = new Date().toISOString();
-    this.#transaction(() => {
+    const runAudit = () => {
       this.#database.prepare(
         "INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)",
       ).run(userId, now);
@@ -3235,7 +3248,9 @@ export class SqliteLocalStore implements LocalStore {
         input.idempotencyKey ?? null,
         now,
       );
-    });
+    };
+    if (this.#transactionDepth > 0) runAudit();
+    else this.#transaction(runAudit);
     const row = this.#database.prepare(
       "SELECT * FROM audit_events WHERE user_id = ? AND id = ?",
     ).get(userId, id) as Row;

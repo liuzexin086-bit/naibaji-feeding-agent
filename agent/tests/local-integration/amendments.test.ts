@@ -360,8 +360,8 @@ describe("post-confirmation amendments", () => {
     database.close();
   });
 
-  it("keeps severe amendments proposal-less and rejects them without a device decision", async () => {
-    const { store, base, cookie, userId } = await startApi();
+  it("keeps severe out of device amendments and audits emergency disposition", async () => {
+    const { store, filename, base, cookie, userId } = await startApi();
     const created = await request(base, "/api/batches", {
       method: "POST",
       headers: { cookie },
@@ -406,56 +406,98 @@ describe("post-confirmation amendments", () => {
       headers: { cookie },
     });
     const todayBody = await today.json() as {
-      amendments: Array<{
-        id: string;
-        status: string;
-        severity: string;
-        proposal: unknown;
-        amendmentSha256: string;
-      }>;
+      amendments: Array<unknown>;
+      feedback: { kind: string; proposedSetting: unknown } | null;
     };
-    expect(todayBody.amendments[0]).toMatchObject({
-      status: "pending",
-      severity: "severe",
-      proposal: null,
+    expect(todayBody.amendments).toHaveLength(0);
+    expect(todayBody.feedback).toMatchObject({
+      kind: "diarrhea",
+      proposedSetting: null,
     });
-    const amendment = todayBody.amendments[0];
-    const manualApply = await request(
-      base,
-      `/api/batches/${batchId}/amendments/${amendment.id}/apply`,
-      {
-        method: "POST",
-        headers: { cookie },
-        body: JSON.stringify({
-          expectedRevision: store.getBatch(userId, batchId)?.revision ?? 0,
-          expectedAmendmentSha256: amendment.amendmentSha256,
-          idempotencyKey: "manual-apply-blocked",
-        }),
-      },
-    );
-    expect(manualApply.status).toBeGreaterThanOrEqual(400);
-    const manualApplyBody = await manualApply.json() as { code: string };
-    expect(manualApplyBody.code).toBe("NBJ_AMENDMENT_MANUAL_ONLY");
+    const responseDto = await request(base, `/api/batches/${batchId}/diarrhea-response`, {
+      headers: { cookie },
+    });
+    expect(responseDto.status).toBe(200);
+    expect((await responseDto.json() as { feedback: { kind: string } }).feedback.kind)
+      .toBe("diarrhea");
+    const manual = await request(base, `/api/batches/${batchId}/diarrhea/manual-action`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        action: "veterinary_referral",
+        idempotencyKey: "severe-vet-referral",
+      }),
+    });
+    expect(manual.status).toBe(200);
+    expect(store.getActiveDecision(userId, batchId)).toBeNull();
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const audit = database.prepare(`
+      SELECT action FROM audit_events
+      WHERE action = 'diarrhea.emergency_recorded'
+    `).all();
+    expect(audit.length).toBeGreaterThan(0);
+    database.close();
+  });
 
-    const rejected = await request(
-      base,
-      `/api/batches/${batchId}/amendments/${amendment.id}/reject`,
-      {
-        method: "POST",
-        headers: { cookie },
-        body: JSON.stringify({
-          expectedRevision: store.getBatch(userId, batchId)?.revision ?? 0,
-          expectedAmendmentSha256: amendment.amendmentSha256,
-          idempotencyKey: "reject-severe-amendment",
-        }),
-      },
-    );
-    expect(rejected.status).toBe(200);
-    const rejectedBody = await rejected.json() as {
-      amendment: { status: string; decisionId: string | null };
+  it("does not create a device amendment for mild and audits individual intervention", async () => {
+    const { store, filename, base, cookie, userId } = await startApi();
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "轻度个体处置", startAge: 3, endAge: 12, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string } };
+    const batchId = createdBody.batch.id;
+    const planResponse = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const planBody = await planResponse.json() as {
+      plan: { id: string; operationsSha256: string };
     };
-    expect(rejectedBody.amendment.status).toBe("rejected");
-    expect(rejectedBody.amendment.decisionId).toBeNull();
+    await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        planId: planBody.plan.id,
+        operationsSha256: planBody.plan.operationsSha256,
+        idempotencyKey: "confirm-mild-base",
+      }),
+    });
+    const saved = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: store.getBatch(userId, batchId)?.revision ?? 0,
+        idempotencyKey: "record-mild-intervention",
+        observation: {
+          recordedAt: "2026-08-05T10:00:00+08:00",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 120,
+        },
+      }),
+    });
+    expect(saved.status).toBe(200);
+    const today = await request(base, `/api/batches/${batchId}/today-operations`, {
+      headers: { cookie },
+    });
+    const todayBody = await today.json() as {
+      amendments: Array<unknown>;
+      feedback: { kind: string; proposedSetting: unknown } | null;
+    };
+    expect(todayBody.amendments).toHaveLength(0);
+    expect(todayBody.feedback).toMatchObject({
+      kind: "diarrhea",
+      proposedSetting: null,
+    });
+    const database = new DatabaseSync(filename, { readOnly: true });
+    const audit = database.prepare(`
+      SELECT action FROM audit_events
+      WHERE action = 'diarrhea.individual_intervention_recorded'
+    `).all();
+    expect(audit.length).toBeGreaterThan(0);
+    database.close();
   });
 
   it("does not create an amendment when the observation commit fails", async () => {
@@ -727,12 +769,9 @@ describe("post-confirmation amendments", () => {
       batchId,
       planBody.plan.businessDate,
     );
-    expect(amendments).toHaveLength(2);
+    expect(amendments).toHaveLength(1);
     expect(amendments.find((amendment) => amendment.severity === "moderate")?.status)
       .toBe("superseded");
-    expect(amendments.find((amendment) => amendment.severity === "severe")).toMatchObject({
-      status: "pending",
-      proposal: null,
-    });
+    expect(amendments.some((amendment) => amendment.severity === "severe")).toBe(false);
   });
 });

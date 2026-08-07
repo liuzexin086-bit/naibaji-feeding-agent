@@ -78,6 +78,14 @@
 - Unknown cumulative actual powder in moderate fails closed to `manual_only`; no assumed-zero device proposal.
 - LangGraph deterministic responses, Agent tools, UI labels, and regressions follow the revised mild/moderate/severe contract.
 
+## NBJ-DIARRHEA-CLOSURE-R1 — 2026-08-07
+
+- Moderate diarrhea is removed from `DailyOperationPlan.proposedSetting` and materialized as an independent amendment even before routine plan confirmation.
+- `today-operations/confirm` never applies diarrhea proposals; only amendment `confirm → apply` creates an active device decision.
+- Mild and severe no longer create device amendments; they are audited as individual intervention or emergency manual disposition.
+- Frontend renders independent diarrhea exception cards with mild/manual, moderate confirm/reject/apply, and severe manual actions.
+- Docker web image builds from source-controlled `agent/ui/` and root static files without requiring gitignored `agent/public`; `/version` reports the build commit.
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

@@ -994,6 +994,36 @@ export async function handleLocalApi(
         json(response, { session, messages: session.messages });
         return true;
       }
+      if (suffix === "diarrhea-response" && request.method === "GET") {
+        const materialized = materializeFeedbackPlan(store, auth.user.id, batch, {});
+        json(response, {
+          feedback: materialized.feedback,
+          amendments: store.getDailyOperationAmendments(
+            auth.user.id,
+            batchId,
+            materialized.plan.businessDate,
+          ),
+        });
+        return true;
+      }
+      if (suffix === "diarrhea/manual-action" && request.method === "POST") {
+        const body = await readJson(request);
+        const action = text(body.action, "diarrhea_manual_action", 80);
+        if (!["isolation_completed", "examination_recorded", "veterinary_referral"].includes(action)) {
+          throw new Error("NBJ_DIARRHEA_MANUAL_ACTION_INVALID");
+        }
+        store.audit({
+          userId: auth.user.id,
+          batchId,
+          action: `diarrhea.${action}`,
+          details: {
+            sourceObservationId: body.observationId ?? null,
+          },
+          idempotencyKey: text(body.idempotencyKey, "idempotency_key", 160),
+        });
+        json(response, { ok: true, action });
+        return true;
+      }
       if (suffix === "today-operations" && request.method === "GET") {
         const plan = ensureCurrentDailyOperationPlan(
           store,
@@ -1001,10 +1031,17 @@ export async function handleLocalApi(
           batch,
           url.searchParams.get("dateLocal"),
         );
+        const materialized = materializeFeedbackPlan(
+          store,
+          auth.user.id,
+          batch,
+          {},
+        );
         json(response, {
-          plan,
+          plan: materialized.plan ?? plan,
           confirmation: store.getDailyOperationConfirmation(auth.user.id, batchId, plan.businessDate),
           amendments: store.getDailyOperationAmendments(auth.user.id, batchId, plan.businessDate),
+          feedback: materialized.feedback,
         });
         return true;
       }

@@ -130,6 +130,15 @@ Real Device Control Gate: CLOSED
 - Moderate with missing cumulative actual powder returns `manual_only` instead of assuming zero and generating a proposal.
 - Existing newer-observation supersede semantics cover mild→moderate, moderate→severe, severe→moderate, and explicit none recovery.
 
+## NBJ-DIARRHEA-CLOSURE-R1 — 2026-08-07
+
+- Pending routine plans no longer store moderate diarrhea in `proposedSetting` or `feedbackOrigin`; the moderate proposal is materialized as an independent safety amendment.
+- `confirmDailyOperationPlan()` explicitly ignores diarrhea proposals, so routine confirmation can never apply moderate device changes.
+- Mild and severe are audited as `diarrhea.individual_intervention_recorded` / `diarrhea.emergency_recorded` and do not create `daily_operation_amendments`.
+- Added `GET /api/batches/:id/diarrhea-response` and `POST /api/batches/:id/diarrhea/manual-action`.
+- Frontend renders independent diarrhea cards and amendment confirm/reject/apply actions.
+- Docker web stage now builds directly from source and writes `/version`; verified build succeeds after removing gitignored `public/`, and image UI SHA matches source.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

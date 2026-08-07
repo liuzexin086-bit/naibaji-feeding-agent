@@ -1,4 +1,5 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   supabaseRest,
@@ -671,6 +672,17 @@ const server = createServer(async (request, response) => {
   if (url.pathname === "/health" || url.pathname === "/ping") {
     response.writeHead(200, { "content-type": "application/json" });
     response.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (url.pathname === "/version") {
+    let commit = "unknown";
+    try {
+      commit = readFileSync("/app/version", "utf8").trim() || "unknown";
+    } catch {
+      // Version file is produced by the Docker build; local dev can omit it.
+    }
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ commit }));
     return;
   }
   if (storage.backend === "local" && url.pathname.startsWith("/api/")) {

@@ -239,6 +239,11 @@ describe("local frontend contract", () => {
     expect(html).toContain("operation-feedback");
     expect(html).toContain("现场反馈 · ");
     expect(html).toContain("item.feedbackRef.kind === 'diarrhea' ? '腹泻' : '教槽控奶'");
+    expect(html).toContain("amendAction(");
+    expect(html).toContain("diarrheaManualAction(");
+    expect(html).toContain("已完成隔离与控奶");
+    expect(html).toContain("确认减餐");
+    expect(html).toContain("应用调整");
   });
 
   it("preserves Agent session switching, Markdown, waiting state, and dialog accessibility", () => {

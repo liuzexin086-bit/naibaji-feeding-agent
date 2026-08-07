@@ -974,8 +974,8 @@ export function createFeedingTools(
           : materialized.feedback?.reason ?? null,
         materialized: Boolean(materialized.amendment ?? materialized.feedback),
         amendments,
-        feedbackOrigin: materialized.plan.feedbackOrigin,
-        proposedSetting: materialized.plan.proposedSetting,
+        feedbackOrigin: materialized.feedback?.feedbackOrigin ?? materialized.plan.feedbackOrigin,
+        proposedSetting: materialized.feedback?.proposedSetting ?? materialized.plan.proposedSetting,
         dailyOperationPlan: materialized.plan,
         operations: materialized.plan.operations,
         feedback: materialized.feedback

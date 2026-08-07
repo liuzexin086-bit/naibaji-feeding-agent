@@ -360,7 +360,7 @@ export interface EnsureDailyOperationAmendmentInput {
   batchId: string;
   businessDate: string;
   basePlanId: string;
-  baseConfirmationId: string;
+  baseConfirmationId: string | null;
   originId: string;
   originKind: FeedbackOriginKind;
   severity: "mild" | "moderate" | "severe" | null;

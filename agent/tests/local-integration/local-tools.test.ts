@@ -277,6 +277,8 @@ describe("local deterministic tools", () => {
         data: {
           status: string;
           feedbackOrigin: { kind: string };
+          feedback: { kind: string; operations: Array<{ code: string }>; proposedSetting: unknown };
+          amendments: Array<{ id: string; severity: string; proposal: unknown }>;
           dailyOperationPlan: {
             businessDate: string;
             operations: Array<{ code: string }>;
@@ -284,18 +286,29 @@ describe("local deterministic tools", () => {
         };
         evidenceReceipt: { receiptId: string };
       };
-      expect(details.data.status).toBe("ok");
+      expect(details.data.status).toBe("amendment");
       expect(details.data.feedbackOrigin.kind).toBe("diarrhea");
       expect(details.data.dailyOperationPlan.operations.map((item) => item.code))
+        .not.toContain("feedback_diarrhea_confirm");
+      expect(details.data.feedback.operations.map((item) => item.code))
         .toContain("feedback_diarrhea_confirm");
+      expect(details.data.feedback.proposedSetting).not.toBeNull();
+      expect(details.data.amendments).toHaveLength(1);
       expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
       const stored = store.getDailyOperationPlan(
         "user-a",
         "batch-1",
         details.data.dailyOperationPlan.businessDate,
       );
-      expect(stored?.proposedSetting).not.toBeNull();
-      expect(stored?.feedbackOrigin?.kind).toBe("diarrhea");
+      expect(stored?.proposedSetting).toBeNull();
+      expect(stored?.feedbackOrigin).toBeNull();
+      const amendments = store.getDailyOperationAmendments(
+        "user-a",
+        "batch-1",
+        details.data.dailyOperationPlan.businessDate,
+      );
+      expect(amendments).toHaveLength(1);
+      expect(amendments[0]?.proposal).not.toBeNull();
     } finally {
       store.close();
     }

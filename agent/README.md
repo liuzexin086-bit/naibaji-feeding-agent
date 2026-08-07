@@ -70,12 +70,16 @@ $env:LANGSMITH_PROJECT = 'naibaji-feeding-agent-production'
 
 ```powershell
 npm run prepare:assets
+$env:GIT_COMMIT = (git rev-parse HEAD)
 docker compose -f docker/compose.local.yaml config --quiet
 docker compose -f docker/compose.local.yaml pull chroma embedding
 docker compose -f docker/compose.local.yaml up -d --build chroma embedding agent nginx
 docker compose -f docker/compose.local.yaml ps
 Invoke-RestMethod http://127.0.0.1:8788/health
 ```
+
+Web 镜像直接从源码 `agent/ui/` 与根目录静态文件构建，不依赖被 gitignore 的
+`agent/public/`；`/version` 返回构建时的 `GIT_COMMIT`。
 
 首次下载 embedding 模型可能需要数分钟；`agent` 只会在 Chroma 和 embedding
 健康后启动。静态首页和管理员页分别为 `http://127.0.0.1:8788/` 与
