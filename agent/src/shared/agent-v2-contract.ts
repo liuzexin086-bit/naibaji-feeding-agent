@@ -44,6 +44,8 @@ export interface DeviceSetting {
   dailyPowderGrams: number;
   singlePowderGrams: number;
   mealCount: number;
+  /** Canonical free-feeding dispense quota; mealCount is compatibility only. */
+  freeDispenseLimit?: number;
   /** Free-feeding display-only recommendation; it never changes a device program. */
   suggestedDailyPowderGrams?: number;
   suggestedDailyMealCount?: number;
@@ -53,6 +55,13 @@ export interface DeviceSetting {
   source: "sop_direct" | "sop_indirect" | "production_model";
   estimatedAverageWeightKg?: number;
   estimatedEndWeightKg?: number;
+}
+
+export interface FreeFeedingSetting {
+  windows: DeviceWindow[];
+  singlePowderGrams: number;
+  freeDispenseLimit: number;
+  dailyPowderGrams: number;
 }
 
 export interface DecisionEvidence {

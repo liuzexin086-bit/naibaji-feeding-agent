@@ -112,6 +112,12 @@ describe("BatchDecisionService frozen inputs", () => {
     expect(canonical.selectedMode).toBe("free_feeding");
     expect(canonical.effectiveMode).toBe("free_feeding");
     expect(canonical.decision.setting.mode).toBe("free_feeding");
+    expect(canonical.decision.setting.freeDispenseLimit)
+      .toBe(canonical.decision.setting.mealCount);
+    expect(canonical.decision.setting.dailyPowderGrams).toBe(
+      canonical.decision.setting.singlePowderGrams *
+        canonical.decision.setting.freeDispenseLimit!,
+    );
     expect(canonical.freeFeedingBlockers).toEqual([]);
     expect(canonical.decision.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
   });

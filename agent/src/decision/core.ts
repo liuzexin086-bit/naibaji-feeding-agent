@@ -1,6 +1,7 @@
 import { computeProductionPlan } from "../model/production-model.js";
 import {
   assertNonOverlappingBusinessDayWindows,
+  hasActiveOrFutureBusinessDayWindow,
   localMinute,
   remainingBusinessDayTimes,
 } from "./business-day.js";
@@ -34,7 +35,6 @@ const FIXED_TEACHING_TIMES = [
   "05:00",
   "08:00",
 ] as const;
-export const FREE_FEEDING_SUGGESTED_MEAL_COUNT = 12;
 
 function fail(code: string): never {
   throw new Error(`NBJ_DECISION_${code}`);
@@ -294,11 +294,8 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     positive(program.meals[0]?.powderGrams ?? 0, "MODEL_SINGLE_MEAL_UNAVAILABLE"),
     precision,
   );
-  const referenceMealCount = Math.floor(
-    selected.mealCount != null
-      ? positive(selected.mealCount, "INVALID_SOP_MEAL_COUNT")
-      : positive(program.mealCount, "INVALID_MODEL_MEAL_COUNT"),
-  );
+  const modelMealCount = Math.floor(positive(program.mealCount, "INVALID_MODEL_MEAL_COUNT"));
+  const freeDispenseLimit = modelMealCount;
   const sopSingle = selected.perMeal != null
     ? floorToPrecision(positive(selected.perMeal, "INVALID_SOP_MEAL_AMOUNT"), precision)
     : undefined;
@@ -318,19 +315,19 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       timedMeals = allocate(safeDailyTotal, times, precision);
     }
   }
-  const singlePowderGrams = timedMeals[0]?.powderGrams ?? resolvedSinglePowderGrams;
+  const singlePowderGrams = mode === "free_feeding"
+    ? selected.source === "sop_direct" && sopSingle == null
+      ? floorToPrecision(safeDailyTotal / freeDispenseLimit, precision)
+      : resolvedSinglePowderGrams
+    : timedMeals[0]?.powderGrams ?? resolvedSinglePowderGrams;
   const programTotal = floorToPrecision(
-    mode === "timed_quantity"
-      ? timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)
-      : singlePowderGrams * referenceMealCount,
+    mode === "free_feeding"
+      ? singlePowderGrams * freeDispenseLimit
+      : timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0),
     precision,
   );
   const suggestedFreeFeedingDailyPowderGrams = mode === "free_feeding"
-    ? floorToPrecision(
-      floorToPrecision(curveLimit / FREE_FEEDING_SUGGESTED_MEAL_COUNT, precision) *
-        FREE_FEEDING_SUGGESTED_MEAL_COUNT,
-      precision,
-    )
+    ? programTotal
     : undefined;
   const status = input.requestedStatus === "active" ? "active" : "draft";
   const creepGradeInput = input.creepFeedGradesLast3Days !== undefined
@@ -358,14 +355,15 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
     setting: {
       mode,
       dayAge: program.dayAge,
-      dailyPowderGrams: input.teachingProgram?.enabled || selected.source === "production_model"
+      dailyPowderGrams: mode === "free_feeding" || input.teachingProgram?.enabled || selected.source === "production_model"
         ? programTotal
         : safeDailyTotal,
       singlePowderGrams: floorToPrecision(singlePowderGrams, precision),
-      mealCount: mode === "timed_quantity" ? timedMeals.length : referenceMealCount,
+      mealCount: mode === "timed_quantity" ? timedMeals.length : freeDispenseLimit,
+      ...(mode === "free_feeding" ? { freeDispenseLimit } : {}),
       ...(suggestedFreeFeedingDailyPowderGrams !== undefined ? {
         suggestedDailyPowderGrams: suggestedFreeFeedingDailyPowderGrams,
-        suggestedDailyMealCount: FREE_FEEDING_SUGGESTED_MEAL_COUNT,
+        suggestedDailyMealCount: freeDispenseLimit,
       } : {}),
       timedMeals,
       freeWindows: mode === "free_feeding" ? [...(input.freeWindows ?? [])] : [],
@@ -422,12 +420,12 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
           value: {
             mode,
             singlePowderGrams,
-            referenceMealCount,
+            freeDispenseLimit: mode === "free_feeding" ? freeDispenseLimit : undefined,
             modelSinglePowder,
             timedMeals,
             freeWindows: mode === "free_feeding" ? input.freeWindows ?? [] : [],
           },
-          explanation: "自由采食最多八时段；模型单餐量直接来自 per-head-per-meal × 有效头数并按精度取整，程序总量再乘实际餐次。",
+          explanation: "自由采食最多八时段；freeDispenseLimit 是当天最多标准配奶次数，程序总量严格等于单次下粉 × 配额；不按窗口数量推断餐次。",
         },
         {
           name: "estimated_average_weight",
@@ -498,32 +496,29 @@ function diarrheaAdjustedSetting(
 ): { setting: DeviceSetting; adjustedProgramTotal: number } {
   const precision = source.precisionGrams;
   if (source.mode === "free_feeding") {
-    const freeWindows = source.freeWindows.filter(
-      (window) => window.startLocal !== targetSlot,
-    );
-    if (freeWindows.length === source.freeWindows.length) {
-      fail("DIARRHEA_REDUCTION_SLOT_REQUIRED");
+    const freeDispenseLimit = source.freeDispenseLimit ?? source.mealCount;
+    if (freeDispenseLimit <= 1) {
+      fail("DIARRHEA_FREE_DISPENSE_LIMIT_MIN");
     }
-    const adjustedProgramTotal = Math.max(
-      0,
-      floorToPrecision(source.dailyPowderGrams - source.singlePowderGrams, precision),
+    const adjustedLimit = freeDispenseLimit - 1;
+    const adjustedProgramTotal = floorToPrecision(
+      source.singlePowderGrams * adjustedLimit,
+      precision,
     );
     return {
       setting: {
         ...source,
         dailyPowderGrams: adjustedProgramTotal,
-        mealCount: Math.max(0, source.mealCount - 1),
-        freeWindows,
+        mealCount: adjustedLimit,
+        freeDispenseLimit: adjustedLimit,
+        freeWindows: [...source.freeWindows],
         ...(source.suggestedDailyPowderGrams !== undefined
           ? {
-              suggestedDailyPowderGrams: Math.max(
-                0,
-                floorToPrecision(source.suggestedDailyPowderGrams - source.singlePowderGrams, precision),
-              ),
+              suggestedDailyPowderGrams: adjustedProgramTotal,
             }
           : {}),
         ...(source.suggestedDailyMealCount !== undefined
-          ? { suggestedDailyMealCount: Math.max(0, source.suggestedDailyMealCount - 1) }
+          ? { suggestedDailyMealCount: adjustedLimit }
           : {}),
       },
       adjustedProgramTotal,
@@ -553,13 +548,13 @@ function diarrheaAdjustedSetting(
 function futureDeliverableFor(
   setting: DeviceSetting,
   observedAt: string,
+  remainingDeliverable: number,
 ): number {
   const observedLocal = observedLocalHourMinute(observedAt);
   if (setting.mode === "free_feeding") {
-    const futureWindows = setting.freeWindows.filter(
-      (window) => remainingBusinessDayTimes([window.startLocal], observedLocal).length > 0,
-    );
-    return futureWindows.length * setting.singlePowderGrams;
+    return hasActiveOrFutureBusinessDayWindow(setting.freeWindows, observedLocal)
+      ? remainingDeliverable
+      : 0;
   }
   return setting.timedMeals
     .filter((meal) => remainingBusinessDayTimes([meal.timeLocal], observedLocal).length > 0)
@@ -571,7 +566,7 @@ function diarrheaEvidenceDecision(
   setting: DeviceSetting,
   input: DiarrheaAdjustmentInput,
   worstGrade: Exclude<DiarrheaGrade, "none">,
-  targetSlot: string,
+  targetSlot: string | null,
   targetAlreadyHappened: boolean,
   adjustedProgramTotal: number,
   remainingDeliverable: number,
@@ -582,12 +577,16 @@ function diarrheaEvidenceDecision(
     ? `腹泻${worstGrade}已转人工处置；不生成可执行设备方案。`
     : kind === "individual_intervention"
       ? `腹泻${worstGrade}按个体处置；隔离腹泻仔猪并对病猪控奶一次，整栏设备不变。`
-      : `腹泻${worstGrade}按冻结 SOP 目标槽位生成待确认整栏减餐提案。`;
+      : mode === "free_feeding"
+        ? `腹泻${worstGrade}按自由采食配额减一生成待确认整栏减量提案；窗口保持不变。`
+        : `腹泻${worstGrade}按冻结 SOP 目标槽位生成待确认整栏减餐提案。`;
   const actionText = kind === "manual_only"
     ? "现场检查并按兽医/场区 SOP 处置；不自动生成设备方案。"
     : kind === "individual_intervention"
       ? "标记并隔离腹泻仔猪，病猪控奶一次；其他仔猪继续执行原饲喂程序。"
-      : "按冻结 SOP 目标槽位整栏减少一次采食，需人工确认；不自动应用设备方案。";
+      : mode === "free_feeding"
+        ? "自由采食最大配奶次数减一，需人工确认；不改变窗口和单次下粉，不自动应用。"
+        : "按冻结 SOP 目标槽位整栏减少一次采食，需人工确认；不自动应用设备方案。";
   return {
     ...decision,
     revision: decision.revision + 1,
@@ -622,8 +621,15 @@ function diarrheaEvidenceDecision(
         ...decision.evidence.steps,
         {
           name: "diarrhea_target_slot",
-          value: { mode, targetSlot, targetAlreadyHappened, prioritySource: "frozen_sop" },
-          explanation: "目标槽位必须来自冻结 SOP reductionPriority，不自行选择替代餐次。",
+          value: {
+            mode,
+            targetSlot,
+            targetAlreadyHappened,
+            prioritySource: mode === "free_feeding" ? "free_quota" : "frozen_sop",
+          },
+          explanation: mode === "free_feeding"
+            ? "自由采食中度腹泻只减少一次配奶配额，窗口不删除；不读取 freeReductionPriority。"
+            : "目标槽位必须来自冻结 SOP reductionPriority，不自行选择替代餐次。",
         },
         {
           name: "diarrhea_cumulative_facts",
@@ -668,7 +674,11 @@ export function previewDiarrheaAdjustment(
         0,
         originalDailyPowderGrams - (cumulativeActual ?? 0),
       ),
-      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      futureDeliverable: futureDeliverableFor(
+        source,
+        input.observedAt,
+        Math.max(0, originalDailyPowderGrams - (cumulativeActual ?? 0)),
+      ),
       affectsWholePen: false,
       isolateAffectedPiglets: false,
       affectedPigletMilkControlCount: 0,
@@ -695,7 +705,11 @@ export function previewDiarrheaAdjustment(
         0,
         originalDailyPowderGrams - (cumulativeActual ?? 0),
       ),
-      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      futureDeliverable: futureDeliverableFor(
+        source,
+        input.observedAt,
+        Math.max(0, originalDailyPowderGrams - (cumulativeActual ?? 0)),
+      ),
       affectsWholePen: false,
       isolateAffectedPiglets: true,
       affectedPigletMilkControlCount: 1,
@@ -730,7 +744,11 @@ export function previewDiarrheaAdjustment(
         0,
         originalDailyPowderGrams - (cumulativeActual ?? 0),
       ),
-      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      futureDeliverable: futureDeliverableFor(
+        source,
+        input.observedAt,
+        Math.max(0, originalDailyPowderGrams - (cumulativeActual ?? 0)),
+      ),
       affectsWholePen: false,
       isolateAffectedPiglets: true,
       affectedPigletMilkControlCount: 0,
@@ -761,7 +779,11 @@ export function previewDiarrheaAdjustment(
       adjustedProgramTotal: originalDailyPowderGrams,
       cumulativeActual: null,
       remainingDeliverable: Math.max(0, originalDailyPowderGrams),
-      futureDeliverable: futureDeliverableFor(source, input.observedAt),
+      futureDeliverable: futureDeliverableFor(
+        source,
+        input.observedAt,
+        Math.max(0, originalDailyPowderGrams),
+      ),
       affectsWholePen: true,
       isolateAffectedPiglets: false,
       affectedPigletMilkControlCount: 0,
@@ -780,26 +802,64 @@ export function previewDiarrheaAdjustment(
   }
 
   const mode = sourceMode;
-  const candidates = mode === "free_feeding"
-    ? source.freeWindows.map((window) => window.startLocal)
-    : source.timedMeals.map((meal) => meal.timeLocal);
-  const targetSlot = selectDiarrheaTarget(
-    candidates,
-    mode === "free_feeding" ? input.freeReductionPriority : input.reductionPriority,
-  );
-  const targetAlreadyHappened = diarrheaTargetAlreadyHappened(targetSlot, input.observedAt);
-  const adjusted = diarrheaAdjustedSetting(source, targetSlot);
+  let targetSlot: string | null = null;
+  let targetAlreadyHappened = false;
+  let adjusted: ReturnType<typeof diarrheaAdjustedSetting>;
+  if (mode === "free_feeding") {
+    const baseLimit = source.freeDispenseLimit ?? source.mealCount;
+    if (baseLimit <= 1) {
+      return {
+        kind: "manual_only",
+        worstGrade,
+        decision: null,
+        proposal: null,
+        manualDispositionRequired: true,
+        targetSlot: null,
+        targetAlreadyHappened: false,
+        adjustedProgramTotal: originalDailyPowderGrams,
+        cumulativeActual,
+        remainingDeliverable: Math.max(0, originalDailyPowderGrams - cumulativeActual),
+        futureDeliverable: 0,
+        affectsWholePen: true,
+        isolateAffectedPiglets: false,
+        affectedPigletMilkControlCount: 0,
+        deviceAdjustmentRequired: false,
+        requiresHumanConfirmation: false,
+        requiresManualDisposition: true,
+        reason: `中度腹泻无法生成可执行减餐提案：自由采食基础配额 ${baseLimit} 已达下限，继续减量会产生 0 次配奶；转人工处置。`,
+        evidence: {
+          grades: [...input.grades],
+          worstGrade,
+          mode,
+          code: "NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN",
+          baseFreeDispenseLimit: baseLimit,
+        },
+      };
+    }
+    adjusted = diarrheaAdjustedSetting(source, "");
+  } else {
+    const candidates = source.timedMeals.map((meal) => meal.timeLocal);
+    targetSlot = selectDiarrheaTarget(candidates, input.reductionPriority);
+    targetAlreadyHappened = diarrheaTargetAlreadyHappened(targetSlot, input.observedAt);
+    adjusted = diarrheaAdjustedSetting(source, targetSlot);
+  }
   const remainingDeliverable = Math.max(
     0,
     adjusted.adjustedProgramTotal - cumulativeActual,
   );
-  const futureDeliverable = futureDeliverableFor(adjusted.setting, input.observedAt);
-
-  if (
+  const futureDeliverable = futureDeliverableFor(
+    adjusted.setting,
+    input.observedAt,
+    remainingDeliverable,
+  );
+  const manualFree = mode === "free_feeding" && futureDeliverable <= 0;
+  const manualTimed = mode === "timed_quantity" && (
     targetAlreadyHappened ||
     cumulativeActual >= adjusted.adjustedProgramTotal ||
     futureDeliverable > remainingDeliverable
-  ) {
+  );
+
+  if (manualFree || manualTimed) {
     return {
       kind: "manual_only",
       worstGrade,
@@ -818,7 +878,9 @@ export function previewDiarrheaAdjustment(
       deviceAdjustmentRequired: false,
       requiresHumanConfirmation: false,
       requiresManualDisposition: true,
-      reason: `中度腹泻无法生成可执行减餐提案：目标槽位 ${targetSlot}${targetAlreadyHappened ? "已发生" : ""}、累计量或剩余可交付不满足安全条件；转人工处置。`,
+      reason: mode === "free_feeding"
+        ? `中度腹泻无法生成可执行减餐提案：调整后总量 ${adjusted.adjustedProgramTotal}g，累计实际 ${cumulativeActual}g，剩余可交付 ${remainingDeliverable}g，当前业务日已无可用自由采食窗口或可交付量；转人工处置。`
+        : `中度腹泻无法生成可执行减餐提案：目标槽位 ${targetSlot}${targetAlreadyHappened ? "已发生" : ""}、累计量或剩余可交付不满足安全条件；转人工处置。`,
       evidence: {
         grades: [...input.grades],
         worstGrade,

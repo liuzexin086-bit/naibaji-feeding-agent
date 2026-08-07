@@ -218,6 +218,15 @@ Real Device Control Gate: CLOSED
 - Verified `npm run p0-release-gate`: 6 files / 75 tests passed.
 - Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
 
+### EC-P1-3 — complete
+
+- Added `freeDispenseLimit` to `DeviceSetting` and a `FreeFeedingSetting` type; free mode enforces `daily = single × limit`.
+- Free direct totals now map through `single = floor(total / limit)` with `daily <= total`.
+- Moderate free diarrhea reduces quota only, keeps windows/single unchanged, and fails closed when base limit is 1.
+- Free future deliverable uses `hasActiveOrFutureBusinessDayWindow()` and remaining deliverable; no `windows.length × single`.
+- Exposed `freeDispenseLimit` through local API today/record public mappings.
+- Added business-day and core regressions; verified `npm run check`, `npm test` 35 files / 321 tests.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

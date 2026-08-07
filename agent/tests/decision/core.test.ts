@@ -200,11 +200,12 @@ describe("deterministic day decision", () => {
     }));
     expect(divided.setting).toMatchObject({
       mode: "free_feeding",
-      dailyPowderGrams: 99,
+      dailyPowderGrams: 240,
       singlePowderGrams: 24,
-      mealCount: 4,
-      suggestedDailyPowderGrams: 684,
-      suggestedDailyMealCount: 12,
+      mealCount: 10,
+      freeDispenseLimit: 10,
+      suggestedDailyPowderGrams: 240,
+      suggestedDailyMealCount: 10,
       timedMeals: [],
     });
 
@@ -213,9 +214,27 @@ describe("deterministic day decision", () => {
     expect(modelSingle.setting.dailyPowderGrams)
       .toBe(modelSingle.setting.singlePowderGrams * modelSingle.setting.mealCount);
     expect(modelSingle.setting).toMatchObject({
-      suggestedDailyPowderGrams: 696,
-      suggestedDailyMealCount: 12,
+      mealCount: 10,
+      freeDispenseLimit: 10,
+      suggestedDailyPowderGrams: 700,
+      suggestedDailyMealCount: 10,
     });
+  });
+
+  it("maps a free-feeding direct SOP total through single × dispense limit", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 7,
+      sop: { directTotalPowderGrams: 1234, mealCount: 10 },
+      freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+    }));
+    expect(decision.setting.source).toBe("sop_direct");
+    expect(decision.setting.freeDispenseLimit).toBe(10);
+    expect(decision.setting.dailyPowderGrams).toBe(
+      decision.setting.singlePowderGrams * decision.setting.mealCount,
+    );
+    expect(decision.setting.dailyPowderGrams).toBeLessThanOrEqual(1234);
+    expect(decision.setting.freeWindows).toEqual([{ startLocal: "09:00", endLocal: "17:00" }]);
   });
 });
 
@@ -421,7 +440,7 @@ describe("diarrhea adjustment preview", () => {
       .toBe(500);
   });
 
-  it("removes a frozen free-feeding window for moderate without inventing a default slot", () => {
+  it("keeps free-feeding windows for moderate and reduces only the dispense quota", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       freeWindows: [
@@ -435,13 +454,54 @@ describe("diarrhea adjustment preview", () => {
       observedAt: "2026-07-31T12:00:00+08:00",
       grades: ["moderate"],
       cumulativePowderGrams: 0,
-      freeReductionPriority: ["15:00"],
     });
     expect(preview.kind).toBe("feeding_reduction_proposal");
     expect(preview.decision?.setting.mode).toBe("free_feeding");
     expect(preview.decision?.setting.freeWindows.map((window) => window.startLocal))
-      .toEqual(["06:00", "09:00"]);
+      .toEqual(["06:00", "09:00", "15:00"]);
     expect(preview.decision?.setting.mealCount).toBe(decision.setting.mealCount - 1);
+    expect(preview.decision?.setting.freeDispenseLimit)
+      .toBe(decision.setting.freeDispenseLimit! - 1);
+    expect(preview.targetSlot).toBeNull();
+    expect(preview.decision?.setting.dailyPowderGrams)
+      .toBe(preview.decision!.setting.singlePowderGrams * preview.decision!.setting.mealCount);
+  });
+
+  it("fails closed for moderate free-feeding when the base dispense limit is already one", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+    }));
+    decision.setting.freeDispenseLimit = 1;
+    decision.setting.mealCount = 1;
+    decision.setting.dailyPowderGrams = decision.setting.singlePowderGrams;
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.evidence).toMatchObject({
+      code: "NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN",
+    });
+  });
+
+  it("returns manual-only for moderate free-feeding when the only window has passed", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "23:00", endLocal: "02:00" }],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T03:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.futureDeliverable).toBe(0);
   });
 
   it("returns deterministic cumulative facts without target ratio", () => {

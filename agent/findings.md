@@ -205,6 +205,15 @@ Real Device Control Gate: CLOSED
 - Dockerfile now copies root model sources into the build and agent image.
 - Regression covers both the existing committed-anchor case and the new “old committed 10 must not increase future count” case.
 
+### EC-P1-3 — 2026-08-07
+
+- `freeDispenseLimit` is now a first-class field; `dailyPowderGrams = singlePowderGrams × freeDispenseLimit` is enforced for free decisions.
+- Free-feeding direct totals are mapped as `single = floor(directTotal / limit)` then `daily = single × limit`, so `daily <= directTotal` holds.
+- Moderate free diarrhea reduces quota only; windows and single powder remain unchanged; `baseLimit <= 1` returns `manual_only` with `NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN`.
+- `freeReductionPriority` is no longer used by the free-feeding decision path; timed mode still uses frozen `reductionPriority`.
+- Future deliverable for free mode is no longer `windows.length × single`; it uses business-day window availability and remaining deliverable.
+- Added `hasActiveOrFutureBusinessDayWindow()` with cross-midnight tests and core regressions for direct totals, quota-only moderate, passed windows, and minimum quota.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

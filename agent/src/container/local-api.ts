@@ -501,6 +501,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     estimatedEndWeightKg: Number(setting.estimatedEndWeightKg ?? 0),
     singlePowderGrams: Number(setting.singlePowderGrams ?? 0),
     mealCount: Number(setting.mealCount ?? 0),
+    freeDispenseLimit: Number(setting.freeDispenseLimit ?? setting.mealCount ?? 0),
     suggestedDailyPowderGrams: Number(setting.suggestedDailyPowderGrams ?? 0),
     suggestedDailyMealCount: Number(setting.suggestedDailyMealCount ?? 0),
     mealTimes: Array.isArray(setting.timedMeals)
@@ -713,6 +714,7 @@ function recordPublic(
     deviceMode: String(row.deviceMode ?? "timed_quantity"),
     singlePowderGrams: Number(row.singlePowderGrams ?? 0),
     mealCount: Number(row.mealCount ?? 0),
+    freeDispenseLimit: Number(row.freeDispenseLimit ?? row.mealCount ?? 0),
     mealTimes: Array.isArray(row.mealTimes) ? row.mealTimes : [],
     plannedTotalPowderGrams: Number(row.plannedTotalPowderGrams ?? row.planTotalAtCommit ?? 0),
     estimatedAverageWeightKg: Number(row.estimatedAverageWeightKg ?? modelWeight?.weightStart ?? 0) || null,
@@ -805,6 +807,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     deviceMode: String(source.deviceMode ?? object(today.setting, "today_setting").mode ?? "timed_quantity"),
     singlePowderGrams: Number(source.singlePowderGrams ?? today.singlePowderGrams ?? 0),
     mealCount: Number(source.mealCount ?? today.mealCount ?? 0),
+    freeDispenseLimit: Number(source.freeDispenseLimit ?? today.freeDispenseLimit ?? today.mealCount ?? 0),
     mealTimes: Array.isArray(source.mealTimes) ? source.mealTimes : today.mealTimes,
     plannedTotalPowderGrams: Number(source.plannedTotalPowderGrams ?? today.plannedTotalPowderGrams ?? 0),
     estimatedAverageWeightKg: Number(today.estimatedAverageWeightKg ?? 0),

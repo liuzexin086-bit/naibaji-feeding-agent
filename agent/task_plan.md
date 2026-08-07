@@ -142,6 +142,14 @@
 - Dockerfile copies root model sources into the build and agent image, keeping the runtime path aligned with the tracked source.
 - Added model parity regression proving a committed `feedTimesAtCommit=10` cannot raise a future count from 9 back to 10.
 
+### EC-P1-3 — complete
+
+- Added `FreeFeedingSetting` and `DeviceSetting.freeDispenseLimit`; `mealCount` is compatibility only.
+- Free decisions now satisfy `dailyPowderGrams = singlePowderGrams × freeDispenseLimit`; direct SOP totals are down-rounded through `single × limit`.
+- Moderate diarrhea in free mode reduces `freeDispenseLimit` by one and preserves all windows and single powder; base limit 1 fails closed with `NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN`.
+- `futureDeliverable` for free mode uses `hasActiveOrFutureBusinessDayWindow` and equals remaining deliverable only while a current business-day window remains; `freeReductionPriority` is no longer read for free mode.
+- Added business-day helper and regressions for active/future windows, completed cross-midnight windows, direct total mapping, quota-only moderate reduction, and no-window manual-only behavior.
+
 Baseline:
 
 ```text
