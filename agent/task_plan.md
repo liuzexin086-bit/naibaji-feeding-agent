@@ -86,6 +86,14 @@
 - Frontend renders independent diarrhea exception cards with mild/manual, moderate confirm/reject/apply, and severe manual actions.
 - Docker web image builds from source-controlled `agent/ui/` and root static files without requiring gitignored `agent/public`; `/version` reports the build commit.
 
+## NBJ-DIARRHEA-CLOSURE-R2 — 2026-08-07
+
+- Confirmed amendments support `confirmed → cancelled` with a dedicated cancel endpoint and idempotent action record.
+- Frontend confirmed card uses `取消调整` instead of an invalid `拒绝调整`; apply success reloads the canonical batch/today so top device settings refresh immediately.
+- System prompt now states the revised mild/moderate/severe diarrhea contract instead of asking for concrete whole-pen device operations.
+- Manual diarrhea actions use a stable `localStorage`-backed idempotency key per batch/observation/action.
+- Removed unused `DIARRHEA_RATIO` residual values.
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

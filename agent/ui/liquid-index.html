@@ -468,7 +468,7 @@
           if (amendment && amendment.status === 'pending') {
             buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'confirm\')">确认减餐</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'reject\')">拒绝</button>';
           } else if (amendment && amendment.status === 'confirmed') {
-            buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'apply\')">应用调整</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'reject\')">拒绝调整</button>';
+            buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'apply\')">应用调整</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'cancel\')">取消调整</button>';
           } else if (amendment && amendment.status === 'applied') {
             buttons = '<span>已应用</span>';
           }
@@ -619,8 +619,9 @@
               idempotencyKey: action + '-' + amendmentId
             }
           });
-          await loadTodayOperations(batchId);
-          showToast(action === 'confirm' ? '减餐方案已独立确认' : action === 'apply' ? '减餐方案已应用' : '修订已拒绝');
+          if (action === 'apply') await loadBatch(batchId);
+          else await loadTodayOperations(batchId);
+          showToast(action === 'confirm' ? '减餐方案已独立确认' : action === 'apply' ? '减餐方案已应用' : action === 'cancel' ? '减餐方案已取消' : '修订已拒绝');
         } catch (error) {
           showToast(error.message || '修订操作失败');
         } finally {
@@ -629,12 +630,18 @@
       }
       async function diarrheaManualAction(batchId, action) {
         if (!state.batch || state.operationsBusy) return;
+        var origin = state.diarrheaFeedback && state.diarrheaFeedback.feedbackOrigin || {};
+        var observationId = origin.sourceObservation && origin.sourceObservation.recordedAt || 'none';
+        var stableKey = 'nbj-diarrhea-manual:' + batchId + ':' + observationId + ':' + action;
+        if (localStorage.getItem(stableKey)) { showToast('现场处置已记录'); return; }
+        var idempotencyKey = uuid();
         state.operationsBusy = true; render();
         try {
           await api('/api/batches/' + encodeURIComponent(batchId) + '/diarrhea/manual-action', {
             method: 'POST',
-            body: { action: action, idempotencyKey: uuid() }
+            body: { action: action, idempotencyKey: idempotencyKey }
           });
+          localStorage.setItem(stableKey, idempotencyKey);
           showToast('现场处置已记录');
         } catch (error) {
           showToast(error.message || '记录失败');

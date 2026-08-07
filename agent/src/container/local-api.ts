@@ -1075,11 +1075,11 @@ export async function handleLocalApi(
         throw new Error("NBJ_METHOD_NOT_ALLOWED");
       }
       const amendmentDecisionMatch = suffix.match(
-        /^amendments\/([^/]+)\/(confirm|reject|apply)$/,
+        /^amendments\/([^/]+)\/(confirm|reject|apply|cancel)$/,
       );
       if (amendmentDecisionMatch && request.method === "POST") {
         const amendmentId = decodeURIComponent(amendmentDecisionMatch[1]);
-        const action = amendmentDecisionMatch[2] as "confirm" | "reject" | "apply";
+        const action = amendmentDecisionMatch[2] as "confirm" | "reject" | "apply" | "cancel";
         const body = await readJson(request);
         const amendment = store.getDailyOperationAmendment(
           auth.user.id,

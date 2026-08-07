@@ -139,6 +139,14 @@ Real Device Control Gate: CLOSED
 - Frontend renders independent diarrhea cards and amendment confirm/reject/apply actions.
 - Docker web stage now builds directly from source and writes `/version`; verified build succeeds after removing gitignored `public/`, and image UI SHA matches source.
 
+## NBJ-DIARRHEA-CLOSURE-R2 — 2026-08-07
+
+- Schema advances to migration version 11 and `daily_operation_amendment_actions` accepts `cancel`; confirmed amendments can transition to `cancelled` without an active decision.
+- UI confirmed card now exposes `取消调整` instead of an unsupported `拒绝调整`; apply success reloads `state.today` through `loadBatch()` so top device totals/timeline refresh immediately.
+- Gateway system prompt now enforces mild individual intervention, moderate independent confirmation, and severe manual/emergency disposition.
+- Manual-action idempotency keys are stable per batch/observation/action and stored in `localStorage` for replay.
+- `DIARRHEA_RATIO` was removed because ratios no longer represent the diarrhea contract.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

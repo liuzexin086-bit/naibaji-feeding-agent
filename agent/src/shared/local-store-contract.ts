@@ -375,7 +375,7 @@ export interface DecideDailyOperationAmendmentInput {
   userId: string;
   batchId: string;
   amendmentId: string;
-  action: "confirm" | "reject" | "apply";
+  action: "confirm" | "reject" | "apply" | "cancel";
   decidedBy: string;
   expectedRevision: number;
   expectedAmendmentSha256: string;

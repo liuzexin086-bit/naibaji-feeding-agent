@@ -246,7 +246,7 @@ describe("SQLite local store", () => {
     const legacy = new DatabaseSync(filename);
     legacy.exec(`
       DROP TABLE daily_operation_amendments;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-06T00:00:00.000Z');
     `);
     legacy.close();
@@ -261,14 +261,14 @@ describe("SQLite local store", () => {
     expect(counts("daily_operation_plans")).toBe(1);
     expect(counts("daily_operation_confirmations")).toBe(1);
     expect(counts("audit_events")).toBe(1);
-    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 10").get())
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 11").get())
       .toEqual({ count: 1 });
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
   });
 
-  it("rebuilds v8 amendment tables and restores their indexes during migration to 10", () => {
+  it("rebuilds v8 amendment tables and restores their indexes during migration to 11", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -474,7 +474,7 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
     legacy.close();
@@ -500,13 +500,13 @@ describe("SQLite local store", () => {
       .map((row) => String(row.name));
     expect(indexes).toContain("daily_operation_amendments_batch_date_idx");
     expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
-      .toBe(10);
+      .toBe(11);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
   });
 
-  it("preserves v9 amendment action history and replay after migration to v10", () => {
+  it("preserves v9 amendment action history and replay after migration to v11", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -641,7 +641,7 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
     legacy.close();
@@ -698,6 +698,11 @@ describe("SQLite local store", () => {
     const actionIndexes = database.prepare("PRAGMA index_list('daily_operation_amendment_actions')").all()
       .map((row) => String(row.name));
     expect(actionIndexes).toContain("daily_operation_amendment_actions_amendment_idx");
+    const actionTableSql = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+    `).get() as { sql: string };
+    expect(actionTableSql.sql).toContain("'cancel'");
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
@@ -1120,7 +1125,7 @@ describe("SQLite local store", () => {
     ]));
     expect(amendmentTables).toHaveLength(1);
     expect(actionTables).toHaveLength(1);
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(10);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(11);
     database.close();
     upgraded.close();
   });

@@ -153,6 +153,15 @@ Real Device Control Gate: CLOSED
 - Docker web image now builds from source without `agent/public`; `GIT_COMMIT` is baked into `/version`; verified UI SHA matches source after removing gitignored `public/`.
 - Verified under exact Node 24.18.0: full Agent suite 34 files / 312 tests and `p1-safety-gate` 8 files / 114 tests pass; targeted Docker reproducibility build passes.
 
+### NBJ-DIARRHEA-CLOSURE-R2 — 2026-08-07
+
+- Added migration version 11 and confirmed→cancelled amendment transition with a dedicated cancel endpoint and action idempotency.
+- Removed invalid confirmed `拒绝调整` UI; apply now reloads batch/today so top device settings refresh immediately.
+- Updated gateway system prompt to the revised three-tier diarrhea contract.
+- Manual diarrhea actions use stable localStorage-backed idempotency keys.
+- Removed `DIARRHEA_RATIO`.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 313 tests and `p1-safety-gate` 8 files / 115 tests pass; build, root npm test, Python 12 tests and compileall pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

@@ -244,6 +244,9 @@ describe("local frontend contract", () => {
     expect(html).toContain("已完成隔离与控奶");
     expect(html).toContain("确认减餐");
     expect(html).toContain("应用调整");
+    expect(html).toContain("取消调整");
+    expect(html).not.toContain("拒绝调整");
+    expect(html).toContain("if (action === 'apply') await loadBatch(batchId);");
   });
 
   it("preserves Agent session switching, Markdown, waiting state, and dialog accessibility", () => {

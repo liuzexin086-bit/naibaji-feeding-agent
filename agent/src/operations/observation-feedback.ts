@@ -36,11 +36,6 @@ type JsonObject = Record<string, unknown>;
 
 const CREEP_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
 const DIARRHEA_ORDER: DiarrheaGrade[] = ["none", "mild", "moderate", "severe"];
-const DIARRHEA_RATIO: Record<Exclude<DiarrheaGrade, "none">, number> = {
-  mild: 0.9,
-  moderate: 0.75,
-  severe: 0.5,
-};
 
 export function sustainedCreepGrade(records: JsonObject[]): CreepGrade {
   const recent = validObservationRecords(records).slice(-3).map((row) => {
