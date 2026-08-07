@@ -434,6 +434,24 @@ describe("today operations API", () => {
     expect(await invalid.json()).toEqual({ code: "NBJ_RECORDED_AT_INVALID" });
     expect(store.listObservations(userId, batchId)).toHaveLength(1);
 
+    const impossible = await request(base, `/api/batches/${batchId}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "timestamp-api-impossible",
+        observation: {
+          recordedAt: "2026-02-31T10:00:00Z",
+          effectiveHeads: 20,
+          creepGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(impossible.status).toBe(400);
+    expect(await impossible.json()).toEqual({ code: "NBJ_RECORDED_AT_INVALID" });
+    expect(store.listObservations(userId, batchId)).toHaveLength(1);
+
     const empty = await request(base, `/api/batches/${batchId}/records`, {
       method: "POST",
       headers: { cookie },

@@ -101,6 +101,13 @@ Real Device Control Gate: CLOSED
 - Diarrhea/feedback, LangGraph summary, and local tool paths now sort observations by parsed epoch rather than timestamp string, so `10:00+08:00` before `03:00Z` is ordered correctly.
 - `agent_messages.created_at` is made monotonic per store instance and latest-N message retrieval keeps stable chronological ordering under rapid writes.
 
+## NBJ-SAFETY-P1-R3.1 — 2026-08-07
+
+- The ISO timestamp parser now validates real calendar dates before conversion, so impossible dates such as `2026-02-31`, `2026-04-31`, and non-leap `2026-02-29` are rejected instead of being silently rolled forward by `Date.parse`.
+- Explicit hour, minute, second, and UTC offset ranges are validated; invalid time and offset values fail closed.
+- `timestampOrderValue()` now uses the same strict parser and returns `Number.MIN_SAFE_INTEGER` for invalid legacy timestamps, so legacy bad data can never sort as the newest observation.
+- Added parser, feedback-sorting, and API regressions for impossible calendar dates, invalid ranges, explicit empty `recordedAt`, and omitted `recordedAt`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

@@ -108,6 +108,14 @@ Real Device Control Gate: CLOSED
 - Made `agent_messages.created_at` monotonic per store and restored stable latest-N message ordering for rapid writes.
 - Verified under exact Node 24.18.0: Agent full suite 33 files / 300 tests, `p1-safety-gate` 8 files / 105 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
 
+### NBJ-SAFETY-P1-R3.1 — 2026-08-07
+
+- Replaced `Date.parse`-only ISO validation with strict calendar validation: real year/month/day, hour/minute/second ranges, and UTC offset ranges.
+- Impossible dates (`2026-02-31`, `2026-04-31`, non-leap `2026-02-29`) are rejected at API/store boundaries instead of being silently rolled forward.
+- Invalid legacy timestamps now sort as oldest (`Number.MIN_SAFE_INTEGER`) and cannot become the newest diarrhea observation.
+- Added `tests/iso-time.test.ts`, feedback invalid-legacy regression, and API impossible-calendar-date regression.
+- Verified under exact Node 24.18.0: Agent full suite 34 files / 304 tests, `p1-safety-gate` 8 files / 106 tests, `tsc` check/build pass; root `npm test` pass; Python 12 tests and `compileall` pass.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

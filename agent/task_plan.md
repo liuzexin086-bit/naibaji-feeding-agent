@@ -49,6 +49,12 @@
 - R3-3 `recordedAt`/`observedAt` UTC normalization and epoch-based observation sorting: complete
 - Message list uses monotonic `created_at` plus chronological ordering so latest-N retrieval is stable under rapid writes.
 
+## NBJ-SAFETY-P1-R3.1 Execution State
+
+- R3.1-1 Strict calendar-valid ISO parser with real day/month/year, hour/minute/second and offset ranges: complete
+- R3.1-2 Invalid legacy timestamps sort as oldest, never newest: complete
+- R3.1-3 Parser, feedback sorting, and API impossible-calendar-date regressions: complete
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal

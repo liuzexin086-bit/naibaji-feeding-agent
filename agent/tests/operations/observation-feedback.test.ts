@@ -166,6 +166,25 @@ describe("observation feedback engine", () => {
     expect(result).toBeNull();
   });
 
+  it("does not let invalid legacy timestamps become the newest diarrhea status", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [
+        {
+          recordedAt: "2026-08-05T10:00:00Z",
+          diarrheaGrade: "mild",
+          actualPowderGrams: 0,
+        },
+        {
+          recordedAt: "invalid-legacy-time",
+          diarrheaGrade: "none",
+          actualPowderGrams: 180,
+        },
+      ],
+    }));
+    expect(result).not.toBeNull();
+    expect(result?.kind).toBe("diarrhea");
+  });
+
   it("drops previously materialized diarrhea feedback when the latest grade is none", () => {
     const base = [{
       code: "daily_patrol",
