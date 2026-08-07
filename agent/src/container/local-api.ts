@@ -6,6 +6,7 @@ import {
   evaluateFreeFeedingEligibility,
   loadFrozenBatchDecisionContext,
 } from "../decision/batch-decision-service.js";
+import { resolveRuntimeState } from "../decision/runtime-state.js";
 import {
   defaultFreeFeedingSlots,
   enabledFreeFeedingWindows,
@@ -515,6 +516,7 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
         endLocal: String(window.endLocal ?? ""),
       }))
       : [],
+    runtimeState: resolveRuntimeState(recordsOf(batch)),
     exceptionActions,
     modelVersion: String((decision.evidence as JsonObject | undefined)?.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: canonical.sopRef.version,
@@ -800,6 +802,36 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     if (!normalized) throw new Error("NBJ_RECORDED_AT_INVALID");
     recordedAt = normalized;
   }
+  const deviceStatusRaw = source.deviceStatus == null ? undefined : String(source.deviceStatus);
+  if (
+    deviceStatusRaw !== undefined &&
+    !["normal", "blocked", "probe_contaminated", "ok", "offline"].includes(deviceStatusRaw)
+  ) {
+    throw new Error("NBJ_DEVICE_STATUS_INVALID");
+  }
+  const deviceStatus = deviceStatusRaw === undefined
+    ? undefined
+    : deviceStatusRaw === "ok"
+      ? "normal"
+      : deviceStatusRaw === "offline"
+        ? "blocked"
+        : deviceStatusRaw;
+  const feedingResponseRaw = source.feedingResponse == null
+    ? undefined
+    : String(source.feedingResponse);
+  if (
+    feedingResponseRaw !== undefined &&
+    !["normal", "refusal", "active", "mixed", "refusing"].includes(feedingResponseRaw)
+  ) {
+    throw new Error("NBJ_FEEDING_RESPONSE_INVALID");
+  }
+  const feedingResponse = feedingResponseRaw === undefined
+    ? undefined
+    : ["active", "mixed"].includes(feedingResponseRaw)
+      ? "normal"
+      : feedingResponseRaw === "refusing"
+        ? "refusal"
+        : feedingResponseRaw;
   const record = {
     ...source,
     dayIndex: Number(today.dayIndex),
@@ -818,6 +850,8 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     creepGrade: grade,
     creepValue: CREEP_VALUES[grade as keyof typeof CREEP_VALUES],
     ...(diarrhea === undefined ? {} : { diarrheaGrade: diarrhea }),
+    ...(deviceStatus === undefined ? {} : { deviceStatus }),
+    ...(feedingResponse === undefined ? {} : { feedingResponse }),
     waterState: String(source.waterState ?? today.waterState ?? "closed"),
     exceptionActions: Array.isArray(source.exceptionActions) ? source.exceptionActions : today.exceptionActions,
     modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),

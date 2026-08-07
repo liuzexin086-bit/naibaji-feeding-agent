@@ -240,6 +240,14 @@ Real Device Control Gate: CLOSED
 - Unknown `exceptionBlockers` values invalidate free eligibility as schema validation only; they never switch mode.
 - Raw SOP `perMeal × mealCount > directTotal` fails closed before precision rounding, per the reviewer-preferred policy B.
 
+### EC-P1-4 — 2026-08-07
+
+- Runtime state is now a separate layer (`RuntimeExecutionState`) resolved from observation history, not part of `FeedingDecision`.
+- Device and feeding domain latches are independent; omitted observations keep the previous latch, and explicit normal clears only its own domain.
+- Aggregation precedence is `blocked > manual_hold > normal`; reasons and source observation IDs are returned with the state.
+- Observation API now validates canonical runtime enums and maps legacy values (`ok/offline/active/mixed/refusing`) without treating omitted as normal.
+- Local API `today.runtimeState` exposes state, reasons, source IDs, device latch, and feeding latch; invalid runtime enums return `NBJ_DEVICE_STATUS_INVALID` or `NBJ_FEEDING_RESPONSE_INVALID`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

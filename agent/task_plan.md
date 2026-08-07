@@ -176,6 +176,14 @@
 - `exceptionBlockers` is schema-validated against the legacy known enum only; unknown values make free eligibility invalid but never force timed mode.
 - Raw SOP conflict policy is fixed: `perMeal × mealCount > directTotal` fails closed before precision can hide the contradiction.
 
+### EC-P1-4 — complete
+
+- Added independent `RuntimeExecutionState` and `resolveRuntimeState()` outside `FeedingDecision`.
+- Runtime uses two domain latches: device (`normal/blocked/probe_contaminated`) and feeding (`normal/refusal`), aggregated with precedence `blocked > manual_hold > normal`.
+- Omitted runtime fields never clear a domain latch; explicit `normal` clears only its own domain; invalid timestamps are quarantined.
+- Observation API validates and normalizes `deviceStatus` and `feedingResponse`; legacy `ok/offline/active/mixed/refusing` are mapped to canonical values.
+- Local API today response now includes `runtimeState` with state, reasons, source observation IDs, and both domain latches.
+
 Baseline:
 
 ```text

@@ -4,6 +4,18 @@ export type FeedingMode = "timed_quantity" | "free_feeding";
 export type CreepGrade = "none" | "low" | "medium" | "high" | "excellent";
 export type DiarrheaGrade = "none" | "mild" | "moderate" | "severe";
 
+export type RuntimeStateStatus = "normal" | "manual_hold" | "blocked";
+export type DeviceRuntimeLatch = "normal" | "blocked" | "probe_contaminated";
+export type FeedingRuntimeLatch = "normal" | "refusal";
+
+export interface RuntimeExecutionState {
+  state: RuntimeStateStatus;
+  reasons: string[];
+  sourceObservationIds: string[];
+  deviceLatch: DeviceRuntimeLatch;
+  feedingLatch: FeedingRuntimeLatch;
+}
+
 /** Fixed internal values for the five operator-facing creep grades. */
 export const CREEP_GRADE_VALUES: Readonly<Record<CreepGrade, number>> = {
   none: 0,

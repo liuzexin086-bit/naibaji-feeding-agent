@@ -15,8 +15,8 @@
     "pretest": "npm run prepare:models",
     "prepare:models": "node scripts/prepare-model-assets.mjs",
     "smoke:dist": "npm run build && node scripts/dist-model-smoke.mjs",
-    "p0-release-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/batch-decision-service.test.ts tests/langgraph-runtime.test.ts tests/local-integration/local-tools.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts",
-    "p1-safety-gate": "npm run check && vitest run tests/decision/core.test.ts tests/operations/observation-feedback.test.ts tests/local-db/local-store.test.ts tests/local-integration/amendments.test.ts tests/local-integration/local-tools.test.ts tests/langgraph-runtime.test.ts tests/local-integration/agent-local-parity.test.ts tests/local-integration/today-operations.test.ts",
+    "p0-release-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/batch-decision-service.test.ts tests/decision/runtime-state.test.ts tests/langgraph-runtime.test.ts tests/local-integration/local-tools.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts",
+    "p1-safety-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/runtime-state.test.ts tests/operations/observation-feedback.test.ts tests/local-db/local-store.test.ts tests/local-integration/amendments.test.ts tests/local-integration/local-tools.test.ts tests/langgraph-runtime.test.ts tests/local-integration/agent-local-parity.test.ts tests/local-integration/today-operations.test.ts",
     "test:watch": "vitest",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "start:container": "node dist/container/server.js"

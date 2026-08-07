@@ -149,6 +149,85 @@ describe("local execution API", () => {
     expect(anchoredBody.today.mealCount).toBe(9);
   });
 
+  it("exposes explicit runtime state in today and rejects invalid runtime enums", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "运行状态", startAge: 7, endAge: 16, headCount: 20 }),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as {
+      batch: { id: string; revision: number };
+      today: { runtimeState: { state: string } };
+    };
+    expect(createdBody.today.runtimeState.state).toBe("normal");
+
+    const blocked = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "runtime-blocked",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          deviceStatus: "blocked",
+          feedingResponse: "refusal",
+        },
+      }),
+    });
+    expect(blocked.status).toBe(200);
+    const blockedBody = await blocked.json() as {
+      batch: { revision: number };
+      today: { runtimeState: { state: string; reasons: string[] } };
+    };
+    expect(blockedBody.today.runtimeState.state).toBe("blocked");
+    expect(blockedBody.today.runtimeState.reasons).toEqual(
+      expect.arrayContaining(["device_blocked", "feeding_refusal"]),
+    );
+
+    const cleared = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: blockedBody.batch.revision,
+        idempotencyKey: "runtime-cleared",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          deviceStatus: "normal",
+          feedingResponse: "normal",
+        },
+      }),
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = await cleared.json() as {
+      batch: { revision: number };
+      today: { runtimeState: { state: string } };
+    };
+    expect(clearedBody.today.runtimeState.state).toBe("normal");
+
+    const invalid = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: clearedBody.batch.revision,
+        idempotencyKey: "runtime-invalid",
+        observation: { deviceStatus: "bogus" },
+      }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ code: "NBJ_DEVICE_STATUS_INVALID" });
+  });
+
   it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {
     const { base } = await startApi();
     const login = await request(base, "/api/auth/login", {

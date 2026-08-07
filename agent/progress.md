@@ -259,6 +259,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 35 files / 333 tests, p0 gate 87 tests, p1 gate 124 tests.
 - Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
 
+### EC-P1-4 — complete
+
+- Added `RuntimeExecutionState` types and `agent/src/decision/runtime-state.ts`; runtime is independent from `FeedingDecision`.
+- Added domain latch resolution with omitted-keeps, explicit-normal-clears-own-domain, invalid timestamp quarantine, and `blocked > manual_hold > normal` aggregation.
+- Added Observation API runtime enum validation/normalization for `deviceStatus` and `feedingResponse`.
+- Exposed `today.runtimeState` in the local API and added unit + API integration regressions.
+- Updated p0/p1 gates to include `tests/decision/runtime-state.test.ts`.
+- Verified `npm run check`, `npm test` 36 files / 339 tests, p0 gate 92 tests, p1 gate 129 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
