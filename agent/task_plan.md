@@ -184,6 +184,15 @@
 - Observation API validates and normalizes `deviceStatus` and `feedingResponse`; legacy `ok/offline/active/mixed/refusing` are mapped to canonical values.
 - Local API today response now includes `runtimeState` with state, reasons, source observation IDs, and both domain latches.
 
+### EC-P1-5 — complete
+
+- Schema advances to V12: `origin_kind` accepts `mode_change`, and `feeding_decisions_one_active_idx` enforces one active decision per user/batch/business day.
+- Migration preflight rejects duplicate active decisions before creating the unique index; V11→V12 rebuild preserves amendment/action history and verifies counts and payload hashes.
+- `/mode` now fails closed when cumulative actual is unknown (`NBJ_MODE_SWITCH_ACTUAL_UNKNOWN`) or already executed (`NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED`).
+- Open pending/confirmed safety amendments block a new mode switch with `NBJ_MODE_SWITCH_AMENDMENT_PENDING`.
+- Confirmed/active daily plans route mode switches through a `mode_change` amendment; confirm leaves selected/active unchanged, apply atomically updates selectedMode, supersedes old active decision, creates exactly one active decision, advances revision, and writes audit/action history.
+- Pending/no-plan mode switches refresh the pending daily operation plan in the same transaction as the batch update.
+
 Baseline:
 
 ```text

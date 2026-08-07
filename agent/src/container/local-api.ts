@@ -17,6 +17,7 @@ import {
   digestDailyOperationItems,
 } from "../operations/daily-operation-plan.js";
 import {
+  digestFeedbackProposal,
   materializeObservationFeedbackPlan,
   sustainedCreepGrade,
   type FeedbackEngineResult,
@@ -25,11 +26,15 @@ import { computeProductionPlan, modelStandardWeight } from "../model/production-
 import { LocalStoreError, type SqliteLocalStore } from "../local-db/index.js";
 import { createLangChainModel } from "../agent/langgraph/models.js";
 import type { FeedingMode } from "../shared/agent-v2-contract.js";
-import { normalizeIsoTimestamp } from "../shared/iso-time.js";
+import { normalizeIsoTimestamp, timestampOrderValue } from "../shared/iso-time.js";
 import type {
   DevicePlanSnapshot,
+  DailyOperationItem,
   DailyOperationPlan,
+  DailyOperationAmendment,
   EnsureDailyOperationPlanInput,
+  FeedbackDeviceProposal,
+  FeedbackOriginKind,
   FreeFeedingTemplateSnapshot,
   LocalBatch,
   LocalSopTemplate,
@@ -174,6 +179,9 @@ function errorCode(error: unknown): string {
       LOCAL_STORE_IDEMPOTENCY_CONFLICT: "NBJ_IDEMPOTENCY_CONFLICT",
       LOCAL_STORE_INVALID_INPUT: "NBJ_LOCAL_API_INVALID_INPUT",
       LOCAL_STORE_INVALID_TIMESTAMP: "NBJ_RECORDED_AT_INVALID",
+      LOCAL_STORE_MODE_SWITCH_AFTER_EXECUTION_BLOCKED: "NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED",
+      LOCAL_STORE_MODE_SWITCH_ACTUAL_UNKNOWN: "NBJ_MODE_SWITCH_ACTUAL_UNKNOWN",
+      LOCAL_STORE_MODE_SWITCH_AMENDMENT_PENDING: "NBJ_MODE_SWITCH_AMENDMENT_PENDING",
     };
     return codes[error.code] ?? `NBJ_${error.code.replace(/^LOCAL_STORE_/, "")}`;
   }
@@ -191,6 +199,9 @@ function sendError(response: ServerResponse, error: unknown): void {
       : code === "NBJ_BATCH_STALE" || code === "NBJ_IDEMPOTENCY_CONFLICT" ||
           code === "NBJ_BATCH_MODE_FIRST_DAY_LOCKED" || code === "NBJ_BATCH_TERMINAL" ||
           code === "NBJ_FREE_FEEDING_NOT_ELIGIBLE" ||
+          code === "NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED" ||
+          code === "NBJ_MODE_SWITCH_ACTUAL_UNKNOWN" ||
+          code === "NBJ_MODE_SWITCH_AMENDMENT_PENDING" ||
           code === "NBJ_SOP_MIGRATION_TODAY_CONFIRMED" ||
           code === "NBJ_USER_EXISTS" || code === "NBJ_LAST_ADMIN"
         ? 409
@@ -523,6 +534,80 @@ function decisionFor(batch: LocalBatch, dayIndex = batch.currentDay, revision = 
     waterState: dayAge < Number(context.sop.config.waterClosedUntilDayAge) ? "closed" : "open",
     planWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
   };
+}
+
+function cumulativeActualForBusinessDay(records: JsonObject[]): number | null {
+  const valid = records
+    .filter((row) => normalizeIsoTimestamp(row.recordedAt ?? row.created_at) !== null)
+    .sort((left, right) => {
+      const leftAt = String(left.recordedAt ?? left.created_at ?? "");
+      const rightAt = String(right.recordedAt ?? right.created_at ?? "");
+      return timestampOrderValue(leftAt) - timestampOrderValue(rightAt);
+    });
+  for (let index = valid.length - 1; index >= 0; index -= 1) {
+    const value = valid[index]?.actualPowderGrams;
+    if (value !== undefined && value !== null && value !== "") {
+      return finite(value, "actualPowderGrams", 0);
+    }
+  }
+  return null;
+}
+
+function modeChangeProposal(
+  businessDate: string,
+  decision: JsonObject,
+  fromMode: FeedingMode,
+  toMode: FeedingMode,
+): FeedbackDeviceProposal {
+  const setting = object(decision.setting, "mode_change_setting");
+  const proposal: FeedbackDeviceProposal = {
+    kind: "mode_change",
+    businessDate,
+    mode: toMode,
+    dayAge: finite(setting.dayAge, "mode_change_day_age"),
+    dailyPowderGrams: finite(setting.dailyPowderGrams, "mode_change_daily"),
+    singlePowderGrams: finite(setting.singlePowderGrams, "mode_change_single"),
+    mealCount: finite(setting.mealCount, "mode_change_meal_count"),
+    timedMeals: Array.isArray(setting.timedMeals)
+      ? (setting.timedMeals as JsonObject[]).map((meal) => ({
+          timeLocal: String(meal.timeLocal ?? ""),
+          powderGrams: finite(meal.powderGrams, "mode_change_meal_powder"),
+        }))
+      : [],
+    freeWindows: Array.isArray(setting.freeWindows)
+      ? (setting.freeWindows as JsonObject[]).map((window) => ({
+          startLocal: String(window.startLocal ?? ""),
+          endLocal: String(window.endLocal ?? ""),
+        }))
+      : [],
+    precisionGrams: finite(setting.precisionGrams, "mode_change_precision"),
+    source: String(setting.source ?? "production_model") as FeedbackDeviceProposal["source"],
+    rationale: [
+      `操作员请求将模式从 ${fromMode} 切换为 ${toMode}。`,
+      "确认前不改变 selectedMode，也不创建新的 active decision；apply 时一次性切换。",
+    ],
+    manualDispositionRequired: false,
+    proposalDigest: "",
+  };
+  proposal.proposalDigest = digestFeedbackProposal(proposal);
+  return proposal;
+}
+
+function modeChangeOperations(proposal: FeedbackDeviceProposal): DailyOperationItem[] {
+  return [{
+    code: "mode_change_confirm",
+    title: "模式切换确认",
+    dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
+    sopSection: "执行合同.模式切换",
+    requiredObservationFields: [],
+    safetyNotes: ["确认不改变设备方案；apply 后才切换 selectedMode 与 active decision。"],
+    feedbackRef: {
+      originId: `mode-change:${proposal.businessDate}:${proposal.mode}`,
+      kind: "mode_change",
+      proposalDigest: proposal.proposalDigest,
+      requiresDeviceConfirmation: true,
+    },
+  }];
 }
 
 function confirmedDecisionFor(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject | null {
@@ -1197,6 +1282,31 @@ export async function handleLocalApi(
           }
         }
         const fromMode = context.selectedMode;
+        const businessDate = addDays(
+          String(config.planStartDate ?? batch.createdAt.slice(0, 10)),
+          batch.currentDay,
+        );
+        const plan = store.getDailyOperationPlan(auth.user.id, batchId, businessDate);
+        const confirmation = store.getDailyOperationConfirmation(
+          auth.user.id,
+          batchId,
+          businessDate,
+        );
+        const cumulativeActual = cumulativeActualForBusinessDay(recordsOf(batch));
+        if (cumulativeActual === null) {
+          throw new Error("NBJ_MODE_SWITCH_ACTUAL_UNKNOWN");
+        }
+        if (cumulativeActual > 0) {
+          throw new Error("NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED");
+        }
+        const openAmendments = store.getDailyOperationAmendments(
+          auth.user.id,
+          batchId,
+          businessDate,
+        ).filter((amendment) => amendment.status === "pending" || amendment.status === "confirmed");
+        if (openAmendments.length > 0) {
+          throw new Error("NBJ_MODE_SWITCH_AMENDMENT_PENDING");
+        }
         const nextData: JsonObject = {
           ...batch.data,
           config: { ...config, selectedMode: mode },
@@ -1206,11 +1316,46 @@ export async function handleLocalApi(
           revision: batch.revision + 1,
           data: nextData,
         } as LocalBatch;
+        const nextToday = decisionForToday(store, auth.user.id, nextBatch);
+        if (confirmation || plan?.status === "confirmed") {
+          if (!plan) throw new Error("NBJ_DAILY_OPERATION_PLAN_NOT_FOUND");
+          const proposal = modeChangeProposal(businessDate, nextToday, fromMode, mode);
+          const originId = `mode-change:${auth.user.id}:${batchId}:${businessDate}:${fromMode}:${mode}`;
+          const operations = modeChangeOperations(proposal);
+          const ensured = store.ensureDailyOperationAmendment({
+            userId: auth.user.id,
+            batchId,
+            businessDate,
+            basePlanId: plan.id,
+            baseConfirmationId: confirmation?.id ?? null,
+            originId,
+            originKind: "mode_change",
+            severity: null,
+            priority: "warning",
+            operations,
+            proposal,
+            basedOnBatchRevision: expectedRevision,
+            idempotencyKey: `mode-change-create:${originId}`,
+          });
+          json(response, {
+            amendment: ensured.amendment,
+            replayed: ensured.replayed,
+            amendments: store.getDailyOperationAmendments(
+              auth.user.id,
+              batchId,
+              businessDate,
+            ),
+          });
+          return true;
+        }
         const result = {
           batch: batchPublic(nextBatch),
-          today: decisionForToday(store, auth.user.id, nextBatch),
+          today: nextToday,
           records: allRecords(nextBatch),
         };
+        const planInput = plan?.status === "pending" || !plan
+          ? dailyOperationPlanInputFor(auth.user.id, nextBatch)
+          : undefined;
         const committed = store.commitModeSwitch({
           userId: auth.user.id,
           batchId,
@@ -1222,6 +1367,7 @@ export async function handleLocalApi(
           devicePlanSha256: devicePlan.sha256,
           nextData,
           result,
+          ...(planInput ? { planInput } : {}),
         });
         json(response, committed.result);
         return true;

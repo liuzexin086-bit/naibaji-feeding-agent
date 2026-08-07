@@ -184,6 +184,8 @@ export interface CommitModeSwitchInput {
   devicePlanSha256: string;
   nextData: Record<string, unknown>;
   result: Record<string, unknown>;
+  /** Optional pending daily-operation plan refresh applied in the same transaction. */
+  planInput?: EnsureDailyOperationPlanInput;
 }
 
 /**
@@ -231,7 +233,7 @@ export interface DailyObservation {
   createdAt: string;
 }
 
-export type FeedbackOriginKind = "diarrhea" | "creep_control";
+export type FeedbackOriginKind = "diarrhea" | "creep_control" | "mode_change";
 
 export interface FeedbackDeviceProposal {
   kind: FeedbackOriginKind;

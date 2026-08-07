@@ -100,7 +100,7 @@ describe("Agent and local API frozen-decision parity", () => {
       body: JSON.stringify({
         expectedRevision: 0,
         idempotencyKey: "p0-parity-advance",
-        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none" },
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
       }),
     });
     expect(advanced.status).toBe(200);

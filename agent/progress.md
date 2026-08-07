@@ -269,6 +269,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 339 tests, p0 gate 92 tests, p1 gate 129 tests.
 - Verified `npm run smoke:dist` and Docker agent build.
 
+### EC-P1-5 — complete
+
+- Schema V12 implemented: `mode_change` origin kind, one-active-decision unique index, duplicate-active preflight, and exact V11→V12 history-preserving migration.
+- Mode switch API now rejects unknown/executed cumulative actual and open pending/confirmed amendments.
+- Confirmed-plan mode switch creates a `mode_change` amendment; confirm does not change selected mode, apply updates selectedMode + supersedes old active + creates one new active decision atomically.
+- Pending-plan mode switch refreshes the daily plan in the same transaction via `CommitModeSwitchInput.planInput`.
+- Added mode amendment API regression, unknown/executed actual regressions, V11→V12 migration fixture, and duplicate-active migration failure test.
+- Verified `npm run check`, `npm test` 36 files / 343 tests, p0 gate 94 tests, p1 gate 131 tests.
+- Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

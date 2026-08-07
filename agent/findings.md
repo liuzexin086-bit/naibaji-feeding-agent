@@ -248,6 +248,14 @@ Real Device Control Gate: CLOSED
 - Observation API now validates canonical runtime enums and maps legacy values (`ok/offline/active/mixed/refusing`) without treating omitted as normal.
 - Local API `today.runtimeState` exposes state, reasons, source IDs, device latch, and feeding latch; invalid runtime enums return `NBJ_DEVICE_STATUS_INVALID` or `NBJ_FEEDING_RESPONSE_INVALID`.
 
+### EC-P1-5 — 2026-08-07
+
+- Local schema is now V12 with `mode_change` amendment origin and a unique partial index for one active decision per day.
+- V12 preflight fails closed on duplicate active decisions before any schema rebuild; exact V11→V12 fixture preserves amendment and action history, replay, decision IDs, FKs, and integrity.
+- Mode switch now uses `cumulativeActualPowderGramsForBusinessDay`: unknown or executed actual blocks the request; open safety amendments block the request.
+- Confirmed-plan mode switches create `mode_change` amendments; confirm is approval-only and apply atomically switches selected mode and active decision.
+- Pending-plan mode switches refresh the daily operation plan in the same transaction as the batch update.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
