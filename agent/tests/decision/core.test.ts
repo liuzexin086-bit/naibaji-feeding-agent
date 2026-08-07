@@ -267,6 +267,24 @@ describe("deterministic day decision", () => {
       freeWindows: FREE_WINDOW,
     }))).toThrow("NBJ_DECISION_SOP_QUANTITY_CONFLICT");
   });
+
+  it("rejects raw SOP per-meal conflicts before precision can hide them", () => {
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 3,
+      sop: { directTotalPowderGrams: 99, powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
+    }))).toThrow("NBJ_DECISION_SOP_QUANTITY_CONFLICT");
+  });
+
+  it("requires SOP mealCount to be a positive safe integer", () => {
+    expect(() => computeDayDecision(baseInput({
+      sop: { powderGramsPerMeal: 25, mealCount: 4.5 },
+    }))).toThrow("NBJ_DECISION_INVALID_SOP_MEAL_COUNT");
+    expect(() => computeDayDecision(baseInput({
+      sop: { powderGramsPerMeal: 25, mealCount: 0.5 },
+    }))).toThrow("NBJ_DECISION_INVALID_SOP_MEAL_COUNT");
+  });
 });
 
 describe("diarrhea adjustment preview", () => {

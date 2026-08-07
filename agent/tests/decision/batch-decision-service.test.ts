@@ -146,6 +146,28 @@ describe("BatchDecisionService frozen inputs", () => {
     expect(evaluateFreeFeedingEligibility(invalidStage).eligible).toBe(false);
   });
 
+  it("does not add an operator-selection blocker for false or missing and validates blocker enum", () => {
+    const explicitFalse = loadFrozenBatchDecisionContext(source());
+    explicitFalse.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+      requiresOperatorSelection: false,
+    };
+    expect(evaluateFreeFeedingEligibility(explicitFalse).eligible).toBe(true);
+
+    const missingOperator = loadFrozenBatchDecisionContext(source());
+    missingOperator.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+    };
+    expect(evaluateFreeFeedingEligibility(missingOperator).eligible).toBe(true);
+
+    const unknownBlocker = loadFrozenBatchDecisionContext(source());
+    unknownBlocker.devicePlan.templates.free_feeding.exceptionBlockers = ["something_random"];
+    expect(evaluateFreeFeedingEligibility(unknownBlocker)).toEqual({
+      eligible: false,
+      reasons: ["exception_blockers_invalid"],
+    });
+  });
+
   it("fails closed for a missing or tampered frozen SOP snapshot", () => {
     const missing = source();
     delete (missing.config as Record<string, unknown>).sopTemplate;

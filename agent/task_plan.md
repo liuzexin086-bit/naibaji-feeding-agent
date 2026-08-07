@@ -168,6 +168,14 @@
 - Free SOP conflicts such as `perMeal × mealCount > directTotal` fail closed with `NBJ_DECISION_SOP_QUANTITY_CONFLICT`.
 - `feeding-model.js` now rejects non-monotonic committed control history after control start with `NBJ_CONTROL_HISTORY_NON_MONOTONIC`; valid committed history remains authoritative and future counts stay non-increasing.
 
+### EC-P1-3.3 Final Seal — complete
+
+- `SOP mealCount` must now be a positive safe integer; `4.5` and `0.5` fail closed with `NBJ_DECISION_INVALID_SOP_MEAL_COUNT`.
+- `feeding-model.js` performs final INV-007 validation over the complete visible feedTimes: no upward moves, and adjacent days may drop by at most one.
+- `requiresOperatorSelection=false` and missing values no longer add an eligibility blocker; the explicit `/mode` request is itself the operator action.
+- `exceptionBlockers` is schema-validated against the legacy known enum only; unknown values make free eligibility invalid but never force timed mode.
+- Raw SOP conflict policy is fixed: `perMeal × mealCount > directTotal` fails closed before precision can hide the contradiction.
+
 Baseline:
 
 ```text

@@ -249,6 +249,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 35 files / 328 tests, p0 gate 83 tests, p1 gate 122 tests.
 - Verified `npm run smoke:dist`, Docker agent build, dist server `/health=200`, and container model smoke.
 
+### EC-P1-3.3 Final Seal — complete
+
+- `resolveSopTarget()` now rejects fractional or non-positive `mealCount` with `NBJ_DECISION_INVALID_SOP_MEAL_COUNT`.
+- Added final visible-sequence INV-007 validation: no upward feedTimes and no adjacent drop greater than one; tests cover `10→8`, `8→10`, `10→9→8`, and generated `9→committed 10`.
+- Eligibility no longer treats `requiresOperatorSelection=false` or missing as a blocker; explicit `/mode` is the operator action.
+- `exceptionBlockers` schema validation restores the legacy known enum; unknown values return eligibility invalid while selectedMode remains unchanged.
+- Raw SOP conflict policy B is frozen: `perMeal × mealCount > directTotal` fails before precision rounding.
+- Verified `npm run check`, `npm test` 35 files / 333 tests, p0 gate 87 tests, p1 gate 124 tests.
+- Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

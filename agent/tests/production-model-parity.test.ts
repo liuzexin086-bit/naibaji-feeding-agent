@@ -19,7 +19,7 @@ describe("protected production model parity", () => {
   });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "2172F0C730A8FB232AE1507C3369483BF35447539092EEBBEAD1DC3168E14F9C",
+      "35A0DD40E66D4C1FC4DC4EF6FB20CF44C28F70AA284EB5DADFE6F05F0E760C6D",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -210,8 +210,8 @@ describe("protected production model parity", () => {
     expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 9]);
   });
 
-  it("never lets an old committed higher feedTimes anchor increase future control counts", () => {
-    const output = computeProductionPlan({
+  it("rejects a generated 9 followed by a committed 10 as non-monotonic", () => {
+    expect(() => computeProductionPlan({
       startAge: 3,
       endAge: 9,
       startWeight: 10,
@@ -220,7 +220,6 @@ describe("protected production model parity", () => {
       records: [
         { dayAge: 3, creepGrade: "high", headCount: 20 },
         { dayAge: 4, creepGrade: "high", headCount: 20 },
-        { dayAge: 5, creepGrade: "high", headCount: 20 },
         {
           dayAge: 6,
           creepGrade: "high",
@@ -230,16 +229,37 @@ describe("protected production model parity", () => {
           feedTimesAtCommit: 10,
         },
       ],
-    });
-    expect(output.controlStartDay).toBe(2);
-    expect(output.control.feedTimes.slice(0, 3)).toEqual([10, 10, 10]);
-    expect(output.control.feedTimes[3]).toBe(10);
-    const future = output.control.feedTimes.slice(4);
-    expect(future[0]).toBe(9);
-    expect(Math.max(...future)).toBeLessThanOrEqual(9);
-    future.slice(1).forEach((count, index) => {
-      expect(count).toBeLessThanOrEqual(future[index]!);
-    });
+    })).toThrow("NBJ_CONTROL_HISTORY_NON_MONOTONIC");
+  });
+
+  it("rejects committed 10 -> 8 as an invalid control step", () => {
+    expect(() => computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+      ],
+    })).toThrow("NBJ_CONTROL_HISTORY_STEP_INVALID");
   });
 
   it("fails closed when committed control history is non-monotonic", () => {

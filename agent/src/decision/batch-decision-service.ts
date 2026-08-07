@@ -19,6 +19,14 @@ type JsonObject = Record<string, unknown>;
 
 const FIRST_DAY_MEAL_TIMES = ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"];
 const GRADE_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
+const LEGACY_FREE_FEEDING_EXCEPTION_BLOCKERS = new Set([
+  "milk_control",
+  "diarrhea",
+  "refusal",
+  "blockage",
+  "probe_contamination",
+  "curve_cap",
+]);
 
 export interface BatchDecisionSource {
   batchId: string;
@@ -340,12 +348,13 @@ export function evaluateFreeFeedingEligibility(
   const operator = stage.requiresOperatorSelection;
   if (operator !== undefined && typeof operator !== "boolean") {
     reasons.push("stage_operator_selection_invalid");
-  } else if (operator !== true) {
-    reasons.push("operator_selection_required");
   }
   if (
     !Array.isArray(free.exceptionBlockers) ||
-    free.exceptionBlockers.some((blocker) => typeof blocker !== "string")
+    free.exceptionBlockers.some((blocker) =>
+      typeof blocker !== "string" ||
+      !LEGACY_FREE_FEEDING_EXCEPTION_BLOCKERS.has(blocker)
+    )
   ) {
     reasons.push("exception_blockers_invalid");
   }

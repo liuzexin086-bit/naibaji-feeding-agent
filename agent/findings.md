@@ -232,6 +232,14 @@ Real Device Control Gate: CLOSED
 - Free SOP settings enforce `daily <= safeSOP target`; direct/indirect conflicts fail closed.
 - Committed control history that jumps upward after control start now raises `NBJ_CONTROL_HISTORY_NON_MONOTONIC`; valid `10→9→8` history remains accepted and future counts stay non-increasing.
 
+### EC-P1-3.3 Final Seal — 2026-08-07
+
+- `SOP mealCount` is now validated as a positive safe integer in `resolveSopTarget()`, shared by timed and free paths.
+- The protected model validates the final visible `feedTimes` sequence: no increase and no adjacent drop greater than one.
+- `requiresOperatorSelection=false/missing` is treated as compatible; `/mode` itself is the explicit operator action.
+- Unknown `exceptionBlockers` values invalidate free eligibility as schema validation only; they never switch mode.
+- Raw SOP `perMeal × mealCount > directTotal` fails closed before precision rounding, per the reviewer-preferred policy B.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

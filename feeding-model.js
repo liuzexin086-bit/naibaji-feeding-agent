@@ -355,6 +355,20 @@ function computeControlPlan(plan, records, controlStartDay) {
     perFeed[i] = Math.round(finalPerPig / currentCount * 100) / 100
   }
 
+  // Final INV-007 validation over the complete visible plan. This catches
+  // committed-to-committed jumps, generated-then-committed re-increases, and
+  // any single-day drop larger than one meal.
+  for (let i = resolvedControlStartDay + 1; i < feedTimes.length; i++) {
+    const previous = feedTimes[i - 1]
+    const current = feedTimes[i]
+    if (current > previous) {
+      throw new Error('NBJ_CONTROL_HISTORY_NON_MONOTONIC')
+    }
+    if (previous - current > 1) {
+      throw new Error('NBJ_CONTROL_HISTORY_STEP_INVALID')
+    }
+  }
+
   // 构建控奶后的完整 days（含体重 cascade，含教槽营养）
   const ctrlDays = []
   let ctrlW = plan.startWeight

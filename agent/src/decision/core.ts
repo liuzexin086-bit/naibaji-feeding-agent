@@ -50,6 +50,12 @@ function positive(value: number, code: string): number {
   return value;
 }
 
+function positiveInteger(value: number, code: string): number {
+  const numeric = positive(value, code);
+  if (!Number.isSafeInteger(numeric)) fail(code);
+  return numeric;
+}
+
 function floorToPrecision(value: number, precision: number): number {
   const units = Math.floor((value + Number.EPSILON) / precision);
   return Number((units * precision).toFixed(10));
@@ -136,18 +142,21 @@ function resolveSopTarget(input: DayDecisionInput, modelTotal: number): {
   const sop = input.sop;
   if (sop?.directTotalPowderGrams != null) {
     positive(sop.directTotalPowderGrams, "INVALID_SOP_DIRECT_TOTAL");
+    const mealCount = sop.mealCount == null
+      ? undefined
+      : positiveInteger(sop.mealCount, "INVALID_SOP_MEAL_COUNT");
     return {
       target: sop.directTotalPowderGrams,
       source: "sop_direct",
       explanation: "采用最高优先级的 SOP 直接程序/日总粉量。",
       perMeal: sop.powderGramsPerMeal,
-      mealCount: sop.mealCount,
+      mealCount,
     };
   }
 
   if (sop) {
     const mealCount = sop.mealCount;
-    if (mealCount != null) positive(mealCount, "INVALID_SOP_MEAL_COUNT");
+    if (mealCount != null) positiveInteger(mealCount, "INVALID_SOP_MEAL_COUNT");
     let perMeal: number | undefined;
     if (sop.powderGramsPerMeal != null) {
       perMeal = positive(sop.powderGramsPerMeal, "INVALID_SOP_MEAL_AMOUNT");
@@ -301,6 +310,15 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
   const freeDispenseLimit = mode === "free_feeding"
     ? Math.max(1, Math.min(modelMealCount, selected.mealCount ?? modelMealCount))
     : modelMealCount;
+  if (
+    mode === "free_feeding" &&
+    selected.source === "sop_direct" &&
+    selected.perMeal != null &&
+    selected.mealCount != null &&
+    selected.perMeal * selected.mealCount > selected.target
+  ) {
+    fail("SOP_QUANTITY_CONFLICT");
+  }
   const sopSingle = selected.perMeal != null
     ? floorToPrecision(positive(selected.perMeal, "INVALID_SOP_MEAL_AMOUNT"), precision)
     : undefined;
