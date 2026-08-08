@@ -12,6 +12,7 @@ import {
 } from "../../src/decision/batch-decision-service.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
+import { DECISION_POLICY_VERSION } from "../../src/shared/agent-v2-contract.js";
 import type { DevicePlanSnapshot } from "../../src/shared/local-store-contract.js";
 
 const cleanups: Array<() => void> = [];
@@ -854,6 +855,207 @@ describe("batch device plan snapshot and mode switching", () => {
     );
     expect(applied.status).toBe(400);
     expect(await applied.json()).toEqual({ code: "NBJ_AMENDMENT_STALE" });
+  });
+
+  it("returns layered today state and legacy reconciliation without mutating selected mode", async () => {
+    const { base, cookie, filename, store, userId } = await startApi();
+    const created = await createBatch(base, cookie);
+    const advance = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "layered-advance",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(advance.status).toBe(200);
+    const dayActual = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "layered-day-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(dayActual.status).toBe(200);
+    const batch = store.getBatch(userId, created.batch.id)!;
+    const data = batch.data as { config: Record<string, unknown>; records?: unknown[] };
+    const canonical = computeFrozenBatchDecision(loadFrozenBatchDecisionContext({
+      batchId: batch.batchId,
+      revision: batch.revision,
+      currentDayIndex: batch.currentDay,
+      config: data.config,
+      records: Array.isArray(data.records) ? data.records : [],
+    }));
+    const legacyDecision = {
+      ...canonical.decision,
+      setting: {
+        ...canonical.decision.setting,
+        mode: "free_feeding" as const,
+        freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+      },
+      evidence: {
+        ...canonical.decision.evidence,
+        inputs: {
+          ...canonical.decision.evidence.inputs,
+          decisionPolicyVersion: undefined,
+        },
+      },
+    };
+    const database = new DatabaseSync(filename);
+    database.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)
+    `).run(
+      userId,
+      "legacy-active-layered",
+      created.batch.id,
+      legacyDecision.revision,
+      legacyDecision.dateLocal,
+      legacyDecision.evidence.sopVersion,
+      legacyDecision.evidence.modelVersion,
+      legacyDecision.evidence.calculationDate,
+      JSON.stringify(legacyDecision.setting),
+      JSON.stringify(legacyDecision.evidence),
+      JSON.stringify(legacyDecision),
+      "2026-08-08T00:00:00Z",
+      "2026-08-08T00:00:00Z",
+    );
+    database.close();
+
+    const todayResponse = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    expect(todayResponse.status).toBe(200);
+    const todayBody = await todayResponse.json() as {
+      today: {
+        modeState: { selectedMode: string; plannedMode: string };
+        controlState: { status: string; policyVersion: string };
+        plannedDecision: { setting: { mode: string } };
+        activeDecision: { setting: { mode: string } };
+        runtimeState: { state: string };
+        approvalState: string;
+        reconciliation: { required: boolean; reason?: string };
+      };
+    };
+    expect(todayBody.today.modeState).toEqual({
+      selectedMode: "timed_quantity",
+      plannedMode: "timed_quantity",
+    });
+    expect(todayBody.today.controlState.policyVersion).toBe("creep-control-v2");
+    expect(todayBody.today.plannedDecision.setting.mode).toBe("timed_quantity");
+    expect(todayBody.today.activeDecision.setting.mode).toBe("free_feeding");
+    expect(todayBody.today.runtimeState.state).toBe("normal");
+    expect(todayBody.today.approvalState).toBe("ready");
+    expect(todayBody.today.reconciliation).toEqual({
+      required: true,
+      reason: "legacy_mode_mismatch",
+    });
+
+    const executed = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 2,
+        idempotencyKey: "layered-executed",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 180 },
+      }),
+    });
+    expect(executed.status).toBe(200);
+    const blockedToday = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    const blockedBody = await blockedToday.json() as {
+      today: { reconciliation: { required: boolean; blocked: boolean; reason: string } };
+    };
+    expect(blockedBody.today.reconciliation).toEqual({
+      required: true,
+      blocked: true,
+      reason: "execution_already_started",
+    });
+  });
+
+  it("fails closed when a new-policy active decision mismatches selected mode", async () => {
+    const { base, cookie, filename, store, userId } = await startApi();
+    const created = await createBatch(base, cookie);
+    const advance = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "policy-mismatch-advance",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(advance.status).toBe(200);
+    const dayActual = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "policy-mismatch-day-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(dayActual.status).toBe(200);
+    const batch = store.getBatch(userId, created.batch.id)!;
+    const data = batch.data as { config: Record<string, unknown>; records?: unknown[] };
+    const canonical = computeFrozenBatchDecision(loadFrozenBatchDecisionContext({
+      batchId: batch.batchId,
+      revision: batch.revision,
+      currentDayIndex: batch.currentDay,
+      config: data.config,
+      records: Array.isArray(data.records) ? data.records : [],
+    }));
+    const mismatchDecision = {
+      ...canonical.decision,
+      setting: {
+        ...canonical.decision.setting,
+        mode: "free_feeding" as const,
+        freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+      },
+      evidence: {
+        ...canonical.decision.evidence,
+        inputs: {
+          ...canonical.decision.evidence.inputs,
+          decisionPolicyVersion: DECISION_POLICY_VERSION,
+        },
+      },
+    };
+    const database = new DatabaseSync(filename);
+    database.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)
+    `).run(
+      userId,
+      "new-policy-mismatch",
+      created.batch.id,
+      mismatchDecision.revision,
+      mismatchDecision.dateLocal,
+      mismatchDecision.evidence.sopVersion,
+      mismatchDecision.evidence.modelVersion,
+      mismatchDecision.evidence.calculationDate,
+      JSON.stringify(mismatchDecision.setting),
+      JSON.stringify(mismatchDecision.evidence),
+      JSON.stringify(mismatchDecision),
+      "2026-08-08T00:00:00Z",
+      "2026-08-08T00:00:00Z",
+    );
+    database.close();
+
+    const response = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ code: "NBJ_ACTIVE_DECISION_MODE_INVARIANT" });
   });
 
   it("fails closed on a stale or tampered frozen SOP receipt and returns no numeric payload", async () => {

@@ -10,6 +10,7 @@ import {
   type LocalStore,
 } from "../../src/local-db/index.js";
 import { digestFrozenSopSnapshot } from "../../src/decision/batch-decision-service.js";
+import { DECISION_POLICY_VERSION } from "../../src/shared/agent-v2-contract.js";
 import { loadFrozenBatchDecisionContext } from "../../src/decision/batch-decision-service.js";
 import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
 
@@ -1236,7 +1237,16 @@ describe("SQLite local store", () => {
 
     const expected = decision("batch-1", 7);
     store.saveDecision({ userId: "user-a", decision: expected, idempotencyKey: "decision-7" });
-    expect(store.getActiveDecision("user-a", "batch-1", "2026-07-31")).toEqual(expected);
+    expect(store.getActiveDecision("user-a", "batch-1", "2026-07-31")).toEqual({
+      ...expected,
+      evidence: {
+        ...expected.evidence,
+        inputs: {
+          ...expected.evidence.inputs,
+          decisionPolicyVersion: DECISION_POLICY_VERSION,
+        },
+      },
+    });
     expect(store.getActiveDecision("user-b", "batch-1", "2026-07-31")).toBeNull();
     store.close();
   });

@@ -518,15 +518,60 @@ function decisionFor(
   const context = frozenContextOf(batch);
   const canonical = computeFrozenBatchDecision(context, dayIndex, revision);
   const decision = (confirmedDecision?.decision ?? canonical.decision) as unknown as JsonObject;
+  const plannedDecision = canonical.decision as unknown as JsonObject;
+  const activeDecision = confirmedDecision?.decision
+    ? confirmedDecision.decision as unknown as JsonObject
+    : null;
   const activeDecisionId = confirmedDecision?.id ?? null;
   const setting = object(decision.setting, "decision_setting");
+  const plannedSetting = object(plannedDecision.setting, "planned_decision_setting");
+  const activeSetting = activeDecision
+    ? object(activeDecision.setting, "active_decision_setting")
+    : null;
   const exceptionActions = Array.isArray(decision.exceptionActions)
     ? decision.exceptionActions
     : [];
   const dayAge = context.modelInput.startAge + dayIndex;
+  const controlStartDay = Number(context.modelInput.controlStartDay ?? -1);
+  const controlActive = controlStartDay >= 0 && dayIndex >= controlStartDay;
+  const controlTriggerGrade = controlActive
+    ? sustainedCreepGrade(recordsOf(batch)) || null
+    : null;
+  const reconciliation: JsonObject = (() => {
+    if (!activeSetting) return { required: false };
+    if (String(activeSetting.mode) === canonical.selectedMode) return { required: false };
+    const evidence = object(activeDecision!.evidence, "active_decision.evidence");
+    const inputs = object(evidence.inputs ?? {}, "active_decision.evidence.inputs");
+    const policyVersion = inputs.decisionPolicyVersion == null
+      ? null
+      : String(inputs.decisionPolicyVersion);
+    if (policyVersion === DECISION_POLICY_VERSION) {
+      throw new Error("NBJ_ACTIVE_DECISION_MODE_INVARIANT");
+    }
+    return { required: true, reason: "legacy_mode_mismatch" };
+  })();
+  const approvalState = exceptionActions.some((action) =>
+    action && typeof action === "object" && (action as JsonObject).type === "curve_cap")
+    ? "manual_confirmation_required"
+    : "ready";
   return {
     ...decision,
     activeDecisionId,
+    modeState: {
+      selectedMode: canonical.selectedMode,
+      plannedMode: String(plannedSetting.mode ?? canonical.selectedMode),
+    },
+    controlState: {
+      status: controlActive ? "active" : "inactive",
+      startDay: controlStartDay >= 0 ? controlStartDay : null,
+      triggerGrade: controlTriggerGrade,
+      policyVersion: "creep-control-v2",
+    },
+    plannedDecision,
+    activeDecision,
+    runtimeState: resolveRuntimeState(recordsOf(batch)),
+    approvalState,
+    reconciliation,
     selectedMode: canonical.selectedMode,
     effectiveMode: setting.mode === "timed_quantity" || setting.mode === "free_feeding"
       ? setting.mode
@@ -555,7 +600,6 @@ function decisionFor(
         endLocal: String(window.endLocal ?? ""),
       }))
       : [],
-    runtimeState: resolveRuntimeState(recordsOf(batch)),
     exceptionActions,
     modelVersion: String((decision.evidence as JsonObject | undefined)?.modelVersion ?? "feeding-model+V5-Lite"),
     sopVersion: canonical.sopRef.version,
@@ -633,7 +677,32 @@ function confirmedDecisionFor(
 }
 
 function decisionForToday(store: SqliteLocalStore, userId: string, batch: LocalBatch): JsonObject {
-  return decisionFor(batch, batch.currentDay, batch.revision, confirmedDecisionFor(store, userId, batch) ?? undefined);
+  const today = decisionFor(batch, batch.currentDay, batch.revision, confirmedDecisionFor(store, userId, batch) ?? undefined);
+  const businessDate = String(today.dateLocal ?? today.businessDate ?? "");
+  const amendments = businessDate
+    ? store.getDailyOperationAmendments(userId, batch.batchId, businessDate)
+    : [];
+  const approvalState = amendments.some(
+    (amendment) => amendment.status === "pending" || amendment.status === "confirmed",
+  )
+    ? "manual_confirmation_required"
+    : today.approvalState;
+  const reconciliation = today.reconciliation as JsonObject | undefined;
+  if (reconciliation?.required && businessDate) {
+    const execution = store.getBusinessDayExecutionState(userId, batch.batchId, businessDate);
+    if (execution.state === "executed") {
+      return {
+        ...today,
+        approvalState,
+        reconciliation: {
+          ...reconciliation,
+          blocked: true,
+          reason: "execution_already_started",
+        },
+      };
+    }
+  }
+  return { ...today, approvalState };
 }
 
 function dailyOperationPlanInputFor(userId: string, batch: LocalBatch): EnsureDailyOperationPlanInput {
@@ -1373,7 +1442,7 @@ export async function handleLocalApi(
           revision: batch.revision + 1,
           data: nextData,
         } as LocalBatch;
-        const nextToday = decisionForToday(store, auth.user.id, nextBatch);
+        const nextToday = decisionFor(nextBatch);
         if (confirmation || plan?.status === "confirmed") {
           if (!plan) throw new Error("NBJ_DAILY_OPERATION_PLAN_NOT_FOUND");
           const proposal = modeChangeProposal(businessDate, nextToday, fromMode, mode);
@@ -1407,7 +1476,7 @@ export async function handleLocalApi(
         }
         const result = {
           batch: batchPublic(nextBatch),
-          today: nextToday,
+          today: decisionForToday(store, auth.user.id, nextBatch),
           records: allRecords(nextBatch),
         };
         const planInput = plan?.status === "pending" || !plan

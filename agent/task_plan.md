@@ -216,6 +216,15 @@
 - Removed duplicate API/store record-scanning helpers so there is one execution-state implementation.
 - Added regressions for `180 → 0` overwrite in mode switch and amendment apply.
 
+### EC-P1-7 — complete
+
+- Today API now returns canonical layered state: `modeState`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`, `approvalState`, and `reconciliation`.
+- New active decisions are tagged with `decisionPolicyVersion: execution-contract-v1` in evidence inputs.
+- Legacy active mode mismatch returns `reconciliation.required=true, reason=legacy_mode_mismatch` without mutating history; if the business day has executed, reconciliation is blocked with `execution_already_started`.
+- New-policy active mode mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- `approvalState` becomes `manual_confirmation_required` when curve cap or pending/confirmed amendments exist.
+- Deprecated flat `effectiveMode`/`setting` fields remain for compatibility but are no longer the layered authority.
+
 Baseline:
 
 ```text

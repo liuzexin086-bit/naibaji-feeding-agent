@@ -278,6 +278,14 @@ Real Device Control Gate: CLOSED
 - `/mode` and mode-change apply now call the same store method; duplicate API/store record-scan helpers were removed.
 - Regression proves `180 → 0` on the same day still blocks mode switch and amendment apply.
 
+### EC-P1-7 — 2026-08-08
+
+- Today API now exposes the five-layer contract plus `approvalState` and `reconciliation`; old flat fields remain compatibility-only.
+- New active decisions carry `decisionPolicyVersion` in evidence inputs so legacy and current decisions can be distinguished.
+- Legacy active mode mismatch becomes a reconciliation signal; new-policy mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- Reconciliation is blocked when execution evidence exists for the business day.
+- Tests cover layered state, legacy reconciliation, executed reconciliation block, and new-policy invariant failure.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

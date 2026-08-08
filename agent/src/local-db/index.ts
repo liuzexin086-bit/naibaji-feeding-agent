@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { normalizeIsoTimestamp } from "../shared/iso-time.js";
+import { DECISION_POLICY_VERSION } from "../shared/agent-v2-contract.js";
 import type {
   DeviceSetting,
   FeedingDecision,
@@ -3861,6 +3862,16 @@ export class SqliteLocalStore implements LocalStore {
     decision: FeedingDecision;
     now: string;
   }): string {
+    const decisionWithPolicy: FeedingDecision = {
+      ...input.decision,
+      evidence: {
+        ...input.decision.evidence,
+        inputs: {
+          ...input.decision.evidence.inputs,
+          decisionPolicyVersion: DECISION_POLICY_VERSION,
+        },
+      },
+    };
     const revision = nonNegativeInteger(input.decision.revision, "decision.revision");
     const existing = this.#database.prepare(`
       SELECT id FROM feeding_decisions
@@ -3881,13 +3892,13 @@ export class SqliteLocalStore implements LocalStore {
           updated_at = ?
         WHERE id = ?
       `).run(
-        requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
-        requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
-        requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
-        JSON.stringify(input.decision.setting),
-        JSON.stringify(input.decision.evidence),
-        serializeDecision(input.decision),
-        input.decision.status,
+        requiredText(decisionWithPolicy.evidence.sopVersion, "decision.evidence.sopVersion"),
+        requiredText(decisionWithPolicy.evidence.modelVersion, "decision.evidence.modelVersion"),
+        requiredText(decisionWithPolicy.evidence.calculationDate, "decision.evidence.calculationDate"),
+        JSON.stringify(decisionWithPolicy.setting),
+        JSON.stringify(decisionWithPolicy.evidence),
+        serializeDecision(decisionWithPolicy),
+        decisionWithPolicy.status,
         input.now,
         stringValue(existing.id, "feeding_decisions.id"),
       );
@@ -3913,13 +3924,13 @@ export class SqliteLocalStore implements LocalStore {
       null,
       revision,
       requiredText(input.dateLocal, "dateLocal"),
-      requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
-      requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
-      requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
-      JSON.stringify(input.decision.setting),
-      JSON.stringify(input.decision.evidence),
-      serializeDecision(input.decision),
-      input.decision.status,
+      requiredText(decisionWithPolicy.evidence.sopVersion, "decision.evidence.sopVersion"),
+      requiredText(decisionWithPolicy.evidence.modelVersion, "decision.evidence.modelVersion"),
+      requiredText(decisionWithPolicy.evidence.calculationDate, "decision.evidence.calculationDate"),
+      JSON.stringify(decisionWithPolicy.setting),
+      JSON.stringify(decisionWithPolicy.evidence),
+      serializeDecision(decisionWithPolicy),
+      decisionWithPolicy.status,
       null,
       input.now,
       input.now,

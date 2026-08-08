@@ -306,6 +306,16 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
 - Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
 
+### EC-P1-7 — complete
+
+- Added layered Today API: `modeState`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`, `approvalState`, `reconciliation`.
+- New active decisions are tagged with `DECISION_POLICY_VERSION` in evidence inputs.
+- Legacy mode mismatch surfaces as reconciliation; new-policy mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- Reconciliation is blocked when current-day execution evidence exists.
+- `approvalState` reflects curve cap and pending/confirmed amendments.
+- Verified `npm run check`, `npm test` 36 files / 347 tests, p0 gate 97 tests, p1 gate 154 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
