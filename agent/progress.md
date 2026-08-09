@@ -316,6 +316,15 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 347 tests, p0 gate 97 tests, p1 gate 154 tests.
 - Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
 
+### EC-P1-7.1 — complete
+
+- Added `classifyDecisionPolicyVersion()`; unsupported/future policy versions fail closed before mode matching.
+- Approval state now reads `plannedDecision` curve-cap and open amendments; active decision exceptions are not approval authority.
+- Observation snapshot and mode-change proposal read canonical `activeDecision ?? plannedDecision`, not flat `today.setting`.
+- Added future-policy same-mode API regression and planned approval authority unit regression.
+- Verified `npm run check`, `npm test` 36 files / 349 tests, p0 gate 98 tests, p1 gate 156 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

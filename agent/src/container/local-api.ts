@@ -509,6 +509,22 @@ function batchPublic(batch: LocalBatch): JsonObject {
   };
 }
 
+export function classifyDecisionPolicyVersion(value: unknown): "legacy" | "current" | "unsupported" {
+  if (value === undefined || value === null || value === "") return "legacy";
+  if (value === DECISION_POLICY_VERSION) return "current";
+  return "unsupported";
+}
+
+export function plannedApprovalState(plannedDecision: JsonObject): "ready" | "manual_confirmation_required" {
+  const plannedExceptionActions = Array.isArray(plannedDecision.exceptionActions)
+    ? plannedDecision.exceptionActions
+    : [];
+  return plannedExceptionActions.some((action) =>
+    action && typeof action === "object" && (action as JsonObject).type === "curve_cap")
+    ? "manual_confirmation_required"
+    : "ready";
+}
+
 function decisionFor(
   batch: LocalBatch,
   dayIndex = batch.currentDay,
@@ -539,21 +555,22 @@ function decisionFor(
     : null;
   const reconciliation: JsonObject = (() => {
     if (!activeSetting) return { required: false };
-    if (String(activeSetting.mode) === canonical.selectedMode) return { required: false };
     const evidence = object(activeDecision!.evidence, "active_decision.evidence");
     const inputs = object(evidence.inputs ?? {}, "active_decision.evidence.inputs");
     const policyVersion = inputs.decisionPolicyVersion == null
       ? null
       : String(inputs.decisionPolicyVersion);
-    if (policyVersion === DECISION_POLICY_VERSION) {
+    const policyClass = classifyDecisionPolicyVersion(policyVersion);
+    if (policyClass === "unsupported") {
+      throw new Error("NBJ_DECISION_POLICY_UNSUPPORTED");
+    }
+    if (String(activeSetting.mode) === canonical.selectedMode) return { required: false };
+    if (policyClass === "current") {
       throw new Error("NBJ_ACTIVE_DECISION_MODE_INVARIANT");
     }
     return { required: true, reason: "legacy_mode_mismatch" };
   })();
-  const approvalState = exceptionActions.some((action) =>
-    action && typeof action === "object" && (action as JsonObject).type === "curve_cap")
-    ? "manual_confirmation_required"
-    : "ready";
+  const approvalState = plannedApprovalState(plannedDecision);
   return {
     ...decision,
     activeDecisionId,
@@ -682,11 +699,14 @@ function decisionForToday(store: SqliteLocalStore, userId: string, batch: LocalB
   const amendments = businessDate
     ? store.getDailyOperationAmendments(userId, batch.batchId, businessDate)
     : [];
+  const plannedForApproval = today.plannedDecision
+    ? object(today.plannedDecision, "today.plannedDecision")
+    : today;
   const approvalState = amendments.some(
     (amendment) => amendment.status === "pending" || amendment.status === "confirmed",
   )
     ? "manual_confirmation_required"
-    : today.approvalState;
+    : plannedApprovalState(plannedForApproval);
   const reconciliation = today.reconciliation as JsonObject | undefined;
   if (reconciliation?.required && businessDate) {
     const execution = store.getBusinessDayExecutionState(userId, batch.batchId, businessDate);
@@ -1015,11 +1035,22 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
       : feedingResponseRaw === "refusing"
         ? "refusal"
         : feedingResponseRaw;
-  const setting = object(today.setting, "today_setting");
-  const planTotalAtCommit = Number(today.plannedTotalPowderGrams ?? setting.dailyPowderGrams ?? 0);
-  const feedTimesAtCommit = Number(today.mealCount ?? setting.mealCount ?? 0);
+  const plannedDecision = today.plannedDecision
+    ? object(today.plannedDecision, "planned_decision")
+    : today;
+  const activeDecision = today.activeDecision
+    ? object(today.activeDecision, "active_decision")
+    : null;
+  const commitDecision = activeDecision ?? plannedDecision;
+  const setting = object(commitDecision.setting, "commit_authority.setting");
+  const commitEvidence = object(
+    commitDecision.evidence ?? {},
+    "commit_authority.evidence",
+  );
+  const planTotalAtCommit = Number(setting.dailyPowderGrams ?? 0);
+  const feedTimesAtCommit = Number(setting.mealCount ?? 0);
   const freeDispenseLimitAtCommit = Number(
-    today.freeDispenseLimit ?? setting.freeDispenseLimit ?? today.mealCount ?? 0,
+    setting.freeDispenseLimit ?? setting.mealCount ?? 0,
   );
   const plannedHeadsAtCommit = Number(
     today.effectiveHeads ?? config.effectiveHeads ?? config.headCount ?? 1,
@@ -1035,10 +1066,12 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     effectiveHeads: heads,
     headCount: heads,
     deviceMode: String(setting.mode ?? "timed_quantity"),
-    singlePowderGrams: Number(today.singlePowderGrams ?? setting.singlePowderGrams ?? 0),
+    singlePowderGrams: Number(setting.singlePowderGrams ?? 0),
     mealCount: feedTimesAtCommit,
     freeDispenseLimit: freeDispenseLimitAtCommit,
-    mealTimes: Array.isArray(today.mealTimes) ? today.mealTimes : [],
+    mealTimes: Array.isArray(setting.timedMeals)
+      ? (setting.timedMeals as JsonObject[]).map((meal) => String(meal.timeLocal))
+      : [],
     plannedTotalPowderGrams: planTotalAtCommit,
     planPerPigAtCommit: plannedHeadsAtCommit > 0
       ? Math.round((planTotalAtCommit / plannedHeadsAtCommit) * 100) / 100
@@ -1060,9 +1093,11 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     ...(deviceStatus === undefined ? {} : { deviceStatus }),
     ...(feedingResponse === undefined ? {} : { feedingResponse }),
     waterState: String(today.waterState ?? "closed"),
-    exceptionActions: Array.isArray(today.exceptionActions) ? today.exceptionActions : [],
-    modelVersion: String(today.modelVersion ?? "feeding-model+V5-Lite"),
-    sopVersion: String(today.sopVersion ?? "local-sop-default-v1"),
+    exceptionActions: Array.isArray(commitDecision.exceptionActions)
+      ? commitDecision.exceptionActions
+      : [],
+    modelVersion: String(commitEvidence.modelVersion ?? "feeding-model+V5-Lite"),
+    sopVersion: String(commitEvidence.sopVersion ?? "local-sop-default-v1"),
     recordedAt,
   };
   return record;
@@ -1445,7 +1480,12 @@ export async function handleLocalApi(
         const nextToday = decisionFor(nextBatch);
         if (confirmation || plan?.status === "confirmed") {
           if (!plan) throw new Error("NBJ_DAILY_OPERATION_PLAN_NOT_FOUND");
-          const proposal = modeChangeProposal(businessDate, nextToday, fromMode, mode);
+          const proposal = modeChangeProposal(
+            businessDate,
+            object(nextToday.plannedDecision, "next_today.plannedDecision"),
+            fromMode,
+            mode,
+          );
           const originId = `mode-change:${auth.user.id}:${batchId}:${businessDate}:${fromMode}:${mode}`;
           const operations = modeChangeOperations(proposal);
           const ensured = store.ensureDailyOperationAmendment({

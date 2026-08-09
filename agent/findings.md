@@ -286,6 +286,14 @@ Real Device Control Gate: CLOSED
 - Reconciliation is blocked when execution evidence exists for the business day.
 - Tests cover layered state, legacy reconciliation, executed reconciliation block, and new-policy invariant failure.
 
+### EC-P1-7.1 — 2026-08-09
+
+- Review found unknown/future `decisionPolicyVersion` was treated as legacy and curve-cap approval read active/flat decision.
+- Added explicit policy registry classification before mode matching; unsupported values always fail closed.
+- Approval state now derives from `plannedDecision` curve-cap plus open amendments; active decision curve-cap history is not authority.
+- Observation commit and mode-change proposal now consume canonical `activeDecision ?? plannedDecision` instead of `today.setting`.
+- Added future-policy same-mode API regression and planned approval unit regression.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

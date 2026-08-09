@@ -225,6 +225,15 @@
 - `approvalState` becomes `manual_confirmation_required` when curve cap or pending/confirmed amendments exist.
 - Deprecated flat `effectiveMode`/`setting` fields remain for compatibility but are no longer the layered authority.
 
+### EC-P1-7.1 Today Authority Seal — complete
+
+- Added explicit `classifyDecisionPolicyVersion()`: missing/null → legacy, `execution-contract-v1` → current, any other non-empty value → `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Policy classification now runs before mode matching; future/corrupt policy versions fail closed even when modes match.
+- `approvalState` reads only `plannedDecision.exceptionActions`; active decision curve-cap history cannot lower a planned manual-confirmation state, and amendments are ORed into approval.
+- Observation commit snapshots now read from `activeDecision ?? plannedDecision` canonical setting, not `today.setting` flat compatibility fields.
+- Mode-change proposal construction reads `plannedDecision` explicitly.
+- Added policy registry unit/API regressions and planned approval authority unit regressions.
+
 Baseline:
 
 ```text

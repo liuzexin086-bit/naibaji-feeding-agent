@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AIMessage } from "@langchain/core/messages";
-import { handleLocalApi, type LocalApiDeps } from "../../src/container/local-api.js";
+import {
+  classifyDecisionPolicyVersion,
+  handleLocalApi,
+  plannedApprovalState,
+  type LocalApiDeps,
+} from "../../src/container/local-api.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
 
@@ -47,6 +52,17 @@ function cookieOf(response: Response): string {
 }
 
 describe("local execution API", () => {
+  it("classifies policy versions and reads planned approval authority", () => {
+    expect(classifyDecisionPolicyVersion(undefined)).toBe("legacy");
+    expect(classifyDecisionPolicyVersion(null)).toBe("legacy");
+    expect(classifyDecisionPolicyVersion("execution-contract-v1")).toBe("current");
+    expect(classifyDecisionPolicyVersion("future-x")).toBe("unsupported");
+    expect(plannedApprovalState({ exceptionActions: [] })).toBe("ready");
+    expect(plannedApprovalState({
+      exceptionActions: [{ type: "curve_cap" }],
+    })).toBe("manual_confirmation_required");
+  });
+
   it("authenticates locally, creates batches and advances atomically", async () => {
     const { base } = await startApi();
     const login = await request(base, "/api/auth/login", {
