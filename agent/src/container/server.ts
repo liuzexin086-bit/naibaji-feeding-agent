@@ -676,13 +676,20 @@ const server = createServer(async (request, response) => {
   }
   if (url.pathname === "/version") {
     let commit = "unknown";
+    let provenance: Record<string, unknown> | null = null;
     try {
-      commit = readFileSync("/app/version", "utf8").trim() || "unknown";
+      const raw = readFileSync("/app/agent-provenance.json", "utf8");
+      provenance = JSON.parse(raw) as Record<string, unknown>;
+      commit = String(provenance.commit ?? "unknown");
     } catch {
-      // Version file is produced by the Docker build; local dev can omit it.
+      try {
+        commit = readFileSync("/app/version", "utf8").trim() || "unknown";
+      } catch {
+        // Version files are produced by the Docker build; local dev can omit them.
+      }
     }
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ commit }));
+    response.end(JSON.stringify(provenance ?? { commit }));
     return;
   }
   if (storage.backend === "local" && url.pathname.startsWith("/api/")) {

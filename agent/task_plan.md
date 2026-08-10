@@ -259,6 +259,15 @@
 - Root cause for the old UI screenshot is a stale Web artifact; current Web image is built from tracked `agent/ui/liquid-index.html`, and the running HTTP response contains the new UI markers and none of the old markers.
 - `p1-safety-gate` now includes `tests/local-integration/free-window-propagation.test.ts`.
 
+### EC-P1-9 Clean Model Build Provenance — complete
+
+- Added root `.dockerignore` so Docker context never relies on local node_modules, public/container-model copies, generated model folders, databases, or release artifacts.
+- Added `agent/scripts/write-provenance.mjs` to compute source and real artifact SHA-256 for feeding model, V5-Lite, UI, schema version, and decision policy version.
+- Agent `/version` now returns `commit`, `schemaVersion`, `decisionPolicyVersion`, `feedingModelSourceSha256`, `feedingModelArtifactSha256`, `v5LiteModelSourceSha256`, `v5LiteModelArtifactSha256`, and `uiSha256`.
+- Web `/version` now returns JSON with `commit`, model source/artifact SHA, and `uiSha256`; Nginx serves `/version.json` and the Dockerfile copies provenance from the same build stage.
+- Added `agent/scripts/clean-source-gate.mjs` using `git archive HEAD` into a temp directory and rejecting ignored artifacts before accepting the clean build.
+- Added `tests/provenance-contract.test.ts` and wired it into `p1-safety-gate`.
+
 Baseline:
 
 ```text

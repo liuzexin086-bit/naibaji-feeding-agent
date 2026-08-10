@@ -352,6 +352,14 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 37 files / 359 tests, p0 gate 99 tests, p1 gate 185 tests, `smoke:dist`, root `npm test`.
 - Verified running Web HTTP body includes `今日执行状态`/`execModeValue` and excludes `今日设备设定`/`建议单日下粉总量`/`今日执行：`.
 
+### EC-P1-9 — complete
+
+- Added root `.dockerignore` and two provenance scripts: `write-provenance.mjs` and `clean-source-gate.mjs`.
+- Agent and Web `/version` now return JSON provenance from the same Docker build stage, including model source/artifact SHA and `uiSha256`.
+- Added `tests/provenance-contract.test.ts` and wired it into `p1-safety-gate`.
+- Verified `npm run check`, `npm test` 38 files / 361 tests, p0 gate 99 tests, p1 gate 187 tests, `smoke:dist`, root `npm test`.
+- Pre-commit Docker Agent/Web build and `/version` JSON smoke passed; final commit rebuild and clean-source gate will be rerun after commit.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

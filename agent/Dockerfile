@@ -9,8 +9,10 @@ RUN npm ci
 COPY agent/tsconfig.json ./
 COPY agent/src ./src
 COPY agent/scripts ./scripts
-COPY feeding-model.js v5lite-model.js ./
+COPY agent/ui ./ui
+COPY feeding-model.js v5lite-model.js feeding-model.min.js ./
 RUN npm run build
+RUN node scripts/write-provenance.mjs "$GIT_COMMIT"
 RUN npm prune --omit=dev
 
 FROM node:24.18.0-slim AS agent
@@ -27,6 +29,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/version ./version
 COPY --from=build /app/.generated-models ./.generated-models
+COPY --from=build /app/agent-provenance.json ./agent-provenance.json
 COPY --chmod=755 agent/docker/agent-entrypoint.sh /usr/local/bin/agent-entrypoint
 EXPOSE 8080
 USER node
@@ -47,6 +50,7 @@ RUN mkdir -p /usr/share/nginx/html \
     && cp -r /tmp/naibaji-assets/ui /usr/share/nginx/html/ui \
     && cp /tmp/naibaji-assets/ui/liquid-index.html /usr/share/nginx/html/index.html \
     && echo "$GIT_COMMIT" > /usr/share/nginx/html/version
+COPY --from=build /app/web-provenance.json /usr/share/nginx/html/version.json
 RUN rm -f /etc/nginx/conf.d/default.conf
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

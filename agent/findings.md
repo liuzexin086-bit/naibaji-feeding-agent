@@ -320,6 +320,15 @@ Real Device Control Gate: CLOSED
 - The one-window screenshot is explained by the default SOP having only slot 1 enabled and old batch freeze semantics; it is not a propagation bug.
 - The old UI screenshot is explained by a stale Web artifact. The rebuilt Web image is generated from tracked `agent/ui/liquid-index.html`, and the running HTTP body contains `id="deviceHeading">今日执行状态` and `id="execModeValue"` while excluding `今日设备设定`, `建议单日下粉总量`, and `今日执行：`.
 
+### EC-P1-9 — 2026-08-10
+
+- Implemented clean build provenance without changing device authority or V5-Lite shadow-only semantics.
+- Root `.dockerignore` now blocks local/generated/runtime artifacts from Docker context.
+- `write-provenance.mjs` computes source SHA and generated artifact SHA from the actual files used by Agent/Web builds; Agent and Web `/version` return those values as JSON.
+- `clean-source-gate.mjs` extracts `git archive HEAD` to a temp directory and fails if ignored artifacts (`node_modules`, `agent/public`, `agent/container-models`, generated model folders, etc.) are present.
+- Provenance tests compare computed SHAs against repository source and generated CJS artifacts, and assert Docker/Nginx wiring.
+- Pre-commit Docker Agent/Web builds passed; Agent `/version` returned schema 12 and execution-contract-v1, Web `/version` returned JSON with UI/model SHAs.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
