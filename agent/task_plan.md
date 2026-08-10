@@ -273,6 +273,10 @@
 - Clean `git archive HEAD` verification on Windows exposed CRLF-sensitive hash and Compose tests.
 - Model parity source hashes now normalize CRLF to LF; deployment contract reads normalize CRLF before matching service blocks.
 
+### EC-P1-9.2 Archive Line Ending Normalization — complete
+
+- Added root `.gitattributes` forcing LF for shell scripts, source/config files, templates, and text assets so `git archive HEAD` clean builds do not produce CRLF entrypoints or line-ending drift.
+
 Baseline:
 
 ```text

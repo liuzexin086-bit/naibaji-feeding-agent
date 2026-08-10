@@ -366,6 +366,11 @@ Real Device Control Gate: CLOSED
 - Model parity source hashing now normalizes CRLF to LF; deployment contract reads normalize CRLF.
 - Local full suite passes 38 files / 361 tests after the fix.
 
+### EC-P1-9.2 — complete
+
+- Added `.gitattributes` to force LF for shell scripts, source/config files, templates, and text assets.
+- Verified a staged-tree `git archive` produces LF `agent/docker/agent-entrypoint.sh`, closing the clean-archive entrypoint failure.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

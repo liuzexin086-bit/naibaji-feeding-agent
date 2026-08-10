@@ -335,6 +335,11 @@ Real Device Control Gate: CLOSED
 - `production-model-parity.test.ts` now hashes model source after normalizing CRLF to LF.
 - `deployment-contract.test.ts` now normalizes CRLF before extracting Compose service blocks, so clean archive and working tree run the same test.
 
+### EC-P1-9.2 — 2026-08-10
+
+- Clean archive Docker image could not start its entrypoint because Windows `git archive` extraction wrote `agent-entrypoint.sh` with CRLF, making the shebang invalid.
+- Added root `.gitattributes` with explicit LF normalization for shell scripts and all tracked text/build files; verified a staged-tree archive now contains LF entrypoint bytes.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
