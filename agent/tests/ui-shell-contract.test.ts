@@ -40,7 +40,7 @@ describe("local frontend contract", () => {
   });
 
   it("starts with device settings and observation data, without prediction UI", () => {
-    expect(html).toContain('id="deviceHeading">今日设备设定');
+    expect(html).toContain('id="deviceHeading">今日执行状态');
     expect(html).toContain('id="quickForm"');
     expect(html).toContain('id="exceptionPanel"');
     expect(html).not.toContain("riskScore");
@@ -56,38 +56,87 @@ describe("local frontend contract", () => {
     expect(html).toContain("当日记录已保存");
   });
 
-  it("hides the single amount and shows a 12-meal suggestion for free-feeding", () => {
+  it("shows four layered execution blocks and canonical free-feeding plan fields", () => {
     expect(html).toContain('id="singlePowderStat"');
+    expect(html).toContain('id="feedCountLabel"');
+    expect(html).toContain('id="feedCount"');
     expect(html).toContain('id="dailyPowderLabel"');
-    expect(html).toContain("function deviceMode(today)");
-    expect(html).toContain("value(source, 'effectiveMode', 'effective_mode'");
-    expect(html).toContain("$('singlePowderStat').hidden = freeFeeding");
-    expect(html).toContain("建议单日下粉总量（");
-    expect(html).toContain("suggestedDailyPowderGrams");
+    expect(html).toContain('id="deviceSourceValue"');
+    expect(html).toContain('id="execModeValue"');
+    expect(html).toContain('id="execControlValue"');
+    expect(html).toContain('id="execPlanValue"');
+    expect(html).toContain('id="execRuntimeValue"');
+    expect(html).toContain("function todayPlanMode(today)");
+    expect(html).toContain("function planSetting(today)");
+    expect(html).toContain("function renderExecutionState()");
+    expect(html).toContain("$('singlePowderStat').hidden = false");
+    expect(html).toContain("今日最大配奶次数");
+    expect(html).toContain("程序总量 = 单次 × 今日最大配奶次数");
     expect(html).toContain('<div class="program-time-label" id="programTimeLabel">配奶时间点</div>');
-    expect(html).toContain("自由采食时间段");
+    expect(html).toContain("自由采食窗口");
     expect(html).toContain("function deviceSchedule(today)");
     expect(html).toContain('<strong>定时定量</strong><span>保留既有时间点、排除时段、精度和减餐优先级</span>');
     expect(html).toContain('<strong>自由采食</strong><span>采用批次冻结 SOP 的窗口、阶段条件与异常阻断</span>');
     expect(html).not.toContain("现有定时定量模板");
     expect(html).not.toContain("SOP 自由采食模板");
-    expect(html).not.toContain('<span class="label">今日餐次</span>');
-    expect(html).not.toContain('<span class="label">下一次</span>');
-    expect(html).not.toContain("设备按设定执行");
-    expect(html).not.toContain("自动下奶");
+    expect(html).not.toContain("建议单日下粉总量（");
+    expect(html).not.toContain("suggestedDailyPowderGrams");
+    expect(html).not.toContain("suggestedDailyMealCount");
+    expect(html).not.toContain("今日执行：");
+    expect(html).not.toContain('id="effectiveModeLabel"');
     expect(html).toContain("只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。");
   });
 
-  it("recognizes free-feeding from the effective mode returned by the current-batch API", () => {
-    const source = html.match(/function deviceMode\(today\) \{[^\n]+\}/)?.[0];
+  it("reads today plan mode from activeDecision ?? plannedDecision", () => {
+    const source = html.match(/function todayPlanMode\(today\) \{[^\n]+\}/)?.[0];
     expect(source).toBeTruthy();
     const value = (object: Record<string, unknown> | undefined, camel: string, snake: string, fallback: unknown) => {
       const result = object?.[camel] ?? object?.[snake];
       return result == null ? fallback : result;
     };
-    const deviceMode = new Function("value", `${source}\nreturn deviceMode;`)(value) as (today: Record<string, unknown>) => string;
-    expect(deviceMode({ effectiveMode: "free_feeding" })).toBe("free_feeding");
-    expect(deviceMode({ setting: { mode: "free_feeding" } })).toBe("free_feeding");
+    const todayPlanMode = new Function("value", `${source}\nreturn todayPlanMode;`)(value) as (today: Record<string, unknown>) => string;
+    expect(todayPlanMode({
+      activeDecision: { setting: { mode: "free_feeding" } },
+      plannedDecision: { setting: { mode: "timed_quantity" } },
+    })).toBe("free_feeding");
+    expect(todayPlanMode({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "free_feeding" } },
+    })).toBe("free_feeding");
+    expect(todayPlanMode({
+      activeDecision: { setting: { mode: "timed_quantity" } },
+      plannedDecision: { setting: { mode: "free_feeding" } },
+    })).toBe("timed_quantity");
+    expect(todayPlanMode({ effectiveMode: "free_feeding" })).toBe("");
+  });
+
+  it("renders free-feeding windows instead of timed meal points", () => {
+    const planSource = html.match(/function planSetting\(today\) \{[^\n]+\}/)?.[0];
+    const modeSource = html.match(/function todayPlanMode\(today\) \{[^\n]+\}/)?.[0];
+    const scheduleSource = html.match(/function deviceSchedule\(today\) \{[^\n]+\}/)?.[0];
+    expect(planSource).toBeTruthy();
+    expect(modeSource).toBeTruthy();
+    expect(scheduleSource).toBeTruthy();
+    const value = (object: Record<string, unknown> | undefined, camel: string, snake: string, fallback: unknown) => {
+      const result = object?.[camel] ?? object?.[snake];
+      return result == null ? fallback : result;
+    };
+    const first = (...args: unknown[]) => args.find((item) => item !== undefined && item !== null) ?? null;
+    const planSetting = new Function("value", `${planSource}\nreturn planSetting;`)(value) as (today: Record<string, unknown>) => Record<string, unknown>;
+    const todayPlanMode = new Function("value", `${modeSource}\nreturn todayPlanMode;`)(value) as (today: Record<string, unknown>) => string;
+    const deviceSchedule = new Function("value", "first", "planSetting", "todayPlanMode", `${scheduleSource}\nreturn deviceSchedule;`)(value, first, planSetting, todayPlanMode) as (today: Record<string, unknown>) => { label: string; entries: string[] };
+    const schedule = deviceSchedule({
+      activeDecision: null,
+      plannedDecision: {
+        setting: {
+          mode: "free_feeding",
+          freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+          timedMeals: [{ timeLocal: "10:00" }],
+        },
+      },
+    });
+    expect(schedule.label).toBe("自由采食窗口");
+    expect(schedule.entries).toEqual(["09:00–17:00"]);
   });
 
   it("keeps the complete daily table and mobile-only horizontal scrolling", () => {

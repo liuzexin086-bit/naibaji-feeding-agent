@@ -334,6 +334,15 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 351 tests, p0 gate 99 tests, p1 gate 158 tests.
 - Verified `npm run smoke:dist`, Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
 
+### EC-P1-8 — complete
+
+- Replaced the flat “今日执行” effective badge with four execution blocks: mode, creep control, today plan, and runtime state.
+- UI now reads canonical `activeDecision ?? plannedDecision`; free-feeding displays single powder, `freeDispenseLimit`, daily total, and windows, without timed meal points.
+- Removed the old “建议单日下粉总量” free-feeding presentation and `今日执行：定时定量` text.
+- Added UI contract regressions for active-over-planned authority, planned-only fallback, and free-window rendering.
+- `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
+- Verified `npm run check`, `npm test` 36 files / 352 tests, p0 gate 99 tests, p1 gate 179 tests, `smoke:dist`, and root `npm test`.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

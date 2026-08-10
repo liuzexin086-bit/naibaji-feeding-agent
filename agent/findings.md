@@ -302,6 +302,15 @@ Real Device Control Gate: CLOSED
 - `computeDayDecision()` now stamps `decisionPolicyVersion: execution-contract-v1` in planned evidence inputs; `policyVersionAtCommit` is read from the selected `activeDecision ?? plannedDecision`, so legacy active commits audit as `null`.
 - Added regressions for empty policy same-mode API rejection, missing-layered-authority write rejection, and planned/current-active/legacy-active commit policy snapshots.
 
+### EC-P1-8 — 2026-08-10
+
+- P1-8 is UI-only: `agent/ui/liquid-index.html` and its UI contract tests changed; no backend, decision, schema, or migration code changed.
+- The old `effectiveModeLabel` and `今日执行：定时定量` presentation were removed; mode switching UI still shows selected mode and today plan mode separately.
+- The top device card now renders four execution blocks: selected mode, creep control, today plan, and runtime state.
+- Device numbers are read from canonical `activeDecision ?? plannedDecision`, not from compatibility `today.setting`; free mode displays single powder, max dispense count, daily total, and windows, never timed meal points.
+- UI contract tests prove active decision wins over planned decision, planned-only fallback works, and free-feeding schedules render windows instead of timed meals.
+- `p1-safety-gate` now includes the UI shell contract test so future UI regressions are part of the safety gate.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

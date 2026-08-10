@@ -241,6 +241,16 @@
 - Planned decisions now carry `decisionPolicyVersion: execution-contract-v1` in evidence inputs; `policyVersionAtCommit` follows `activeDecision ?? plannedDecision`, so planned/current-active commits record `v1` and legacy-active commits record `null`.
 - Added empty-policy API regression, missing-`plannedDecision` write regression, and policy-version commit snapshot regressions for planned, current-active, and legacy-active authorities.
 
+### EC-P1-8 UI Execution State — complete
+
+- Replaced the single “今日执行” effective badge with four read-only execution blocks: 模式、教槽控奶、今日计划、运行状态.
+- Device summary now reads canonical `activeDecision ?? plannedDecision` through `todayPlanMode()` / `planSetting()`; flat `effectiveMode` / `today.setting` are no longer UI authority.
+- Free-feeding UI shows single powder, `freeDispenseLimit`, daily total, and `自由采食窗口`; it no longer hides single amount or renders timed meal points.
+- Runtime state maps `blocked / manual_hold / normal` and reasons to Chinese UI; control state shows start day and trigger grade.
+- Removed `今日执行：定时定量` and the old `建议单日下粉总量` free-feeding presentation.
+- Added UI contract regressions for layered authority and free-window rendering.
+- `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
+
 Baseline:
 
 ```text
