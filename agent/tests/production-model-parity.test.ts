@@ -7,7 +7,8 @@ import { computeProductionPlan, modelStandardWeight } from "../src/model/product
 const projectRoot = resolve(import.meta.dirname, "../..");
 
 function sha256(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex").toUpperCase();
+  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+  return createHash("sha256").update(source, "utf8").digest("hex").toUpperCase();
 }
 
 describe("protected production model parity", () => {

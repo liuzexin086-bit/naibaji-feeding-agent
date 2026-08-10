@@ -268,6 +268,11 @@
 - Added `agent/scripts/clean-source-gate.mjs` using `git archive HEAD` into a temp directory and rejecting ignored artifacts before accepting the clean build.
 - Added `tests/provenance-contract.test.ts` and wired it into `p1-safety-gate`.
 
+### EC-P1-9.1 Clean Source Line Ending Fix — complete
+
+- Clean `git archive HEAD` verification on Windows exposed CRLF-sensitive hash and Compose tests.
+- Model parity source hashes now normalize CRLF to LF; deployment contract reads normalize CRLF before matching service blocks.
+
 Baseline:
 
 ```text

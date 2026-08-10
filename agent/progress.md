@@ -360,6 +360,12 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 38 files / 361 tests, p0 gate 99 tests, p1 gate 187 tests, `smoke:dist`, root `npm test`.
 - Pre-commit Docker Agent/Web build and `/version` JSON smoke passed; final commit rebuild and clean-source gate will be rerun after commit.
 
+### EC-P1-9.1 — complete
+
+- Clean `git archive HEAD` verification on Windows showed CRLF-sensitive model-hash and Compose-contract tests.
+- Model parity source hashing now normalizes CRLF to LF; deployment contract reads normalize CRLF.
+- Local full suite passes 38 files / 361 tests after the fix.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

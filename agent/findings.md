@@ -329,6 +329,12 @@ Real Device Control Gate: CLOSED
 - Provenance tests compare computed SHAs against repository source and generated CJS artifacts, and assert Docker/Nginx wiring.
 - Pre-commit Docker Agent/Web builds passed; Agent `/version` returned schema 12 and execution-contract-v1, Web `/version` returned JSON with UI/model SHAs.
 
+### EC-P1-9.1 — 2026-08-10
+
+- Clean archive `npm test` on Windows failed two tests because `git archive` extraction produced CRLF text files.
+- `production-model-parity.test.ts` now hashes model source after normalizing CRLF to LF.
+- `deployment-contract.test.ts` now normalizes CRLF before extracting Compose service blocks, so clean archive and working tree run the same test.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
