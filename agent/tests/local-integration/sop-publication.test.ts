@@ -33,6 +33,27 @@ describe("atomic SOP publication", () => {
       .rejects.toThrow("NBJ_FREE_FEEDING_SLOTS_INVALID");
   });
 
+  it("preserves all eight enabled windows in the published config", async () => {
+    const store = setup();
+    const starts = ["09:00", "12:00", "15:00", "18:00", "21:00", "00:00", "03:00", "06:00"];
+    const ends = ["09:30", "12:30", "15:30", "18:30", "21:30", "00:30", "03:30", "06:30"];
+    const slots = starts.map((startLocal, index) => ({
+      slot: index + 1,
+      enabled: true,
+      label: `时段 ${index + 1}`,
+      startLocal,
+      endLocal: ends[index],
+    }));
+    const published = await publishSop({ store, index: new MemoryKnowledgeIndex(), version: "v-eight", name: "SOP 8",
+      config: { freeFeedingTemplate: { windows: slots } }, sourceMarkdown: "# 教奶\n\n17:00开始教奶。", createdBy: "admin" });
+    const windows = ((published.config.freeFeedingTemplate as Record<string, unknown>).windows as unknown[]);
+    expect(windows).toHaveLength(8);
+    expect(windows.map((row) => {
+      const window = row as { startLocal: string; endLocal: string };
+      return { startLocal: window.startLocal, endLocal: window.endLocal };
+    })).toEqual(slots.map(({ startLocal, endLocal }) => ({ startLocal, endLocal })));
+  });
+
   it("preserves the previous active version when a new index verification fails", async () => {
     const store = setup();
     const first = await publishSop({ store, index: new MemoryKnowledgeIndex(), version: "v1", name: "SOP 1",

@@ -343,6 +343,15 @@ Real Device Control Gate: CLOSED
 - `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
 - Verified `npm run check`, `npm test` 36 files / 352 tests, p0 gate 99 tests, p1 gate 179 tests, `smoke:dist`, and root `npm test`.
 
+### EC-P1-8.1 — complete
+
+- Removed flat Today fallback from UI authority: `planCount()` treats missing free `freeDispenseLimit` as undefined, `deviceSchedule()` only uses canonical schedule, exceptions use `plannedDecision.exceptionActions`, and version uses `planEvidence()`.
+- Added static UI guard against `source.freeWindows`, `source.free_windows`, `source.mealTimes`, `source.meal_times`, `state.today.exceptionActions`, `state.today.exception_actions`, `value(today, 'modelVersion'`, and `value(today, 'sopVersion'`.
+- Added `free-window-propagation.test.ts` and publication regression proving 8 enabled windows survive published config, new batch freeze, planned decision, Today API, and SOP migration 1 → 8 while old batches stay frozen at 1.
+- Root cause for one-window UI is default slot1-only SOP plus old-batch freeze; root cause for old UI text is stale Web artifact, now verified by running Web HTTP body.
+- Verified `npm run check`, `npm test` 37 files / 359 tests, p0 gate 99 tests, p1 gate 185 tests, `smoke:dist`, root `npm test`.
+- Verified running Web HTTP body includes `今日执行状态`/`execModeValue` and excludes `今日设备设定`/`建议单日下粉总量`/`今日执行：`.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

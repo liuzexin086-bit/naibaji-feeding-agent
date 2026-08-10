@@ -68,6 +68,10 @@ describe("local frontend contract", () => {
     expect(html).toContain('id="execRuntimeValue"');
     expect(html).toContain("function todayPlanMode(today)");
     expect(html).toContain("function planSetting(today)");
+    expect(html).toContain("function planCount(today)");
+    expect(html).toContain("function decisionForDisplay(today)");
+    expect(html).toContain("function planEvidence(today)");
+    expect(html).toContain("function plannedExceptionActions(today)");
     expect(html).toContain("function renderExecutionState()");
     expect(html).toContain("$('singlePowderStat').hidden = false");
     expect(html).toContain("今日最大配奶次数");
@@ -84,6 +88,18 @@ describe("local frontend contract", () => {
     expect(html).not.toContain("suggestedDailyMealCount");
     expect(html).not.toContain("今日执行：");
     expect(html).not.toContain('id="effectiveModeLabel"');
+    for (const forbidden of [
+      "source.freeWindows",
+      "source.free_windows",
+      "source.mealTimes",
+      "source.meal_times",
+      "state.today.exceptionActions",
+      "state.today.exception_actions",
+      "value(today, 'modelVersion'",
+      "value(today, 'sopVersion'",
+    ]) {
+      expect(html).not.toContain(forbidden);
+    }
     expect(html).toContain("只给我次日的单次奶粉量、程序总奶粉量和配奶时间点。");
   });
 
@@ -110,7 +126,7 @@ describe("local frontend contract", () => {
     expect(todayPlanMode({ effectiveMode: "free_feeding" })).toBe("");
   });
 
-  it("renders free-feeding windows instead of timed meal points", () => {
+  it("renders canonical free-feeding windows instead of timed meal points", () => {
     const planSource = html.match(/function planSetting\(today\) \{[^\n]+\}/)?.[0];
     const modeSource = html.match(/function todayPlanMode\(today\) \{[^\n]+\}/)?.[0];
     const scheduleSource = html.match(/function deviceSchedule\(today\) \{[^\n]+\}/)?.[0];
@@ -137,6 +153,108 @@ describe("local frontend contract", () => {
     });
     expect(schedule.label).toBe("自由采食窗口");
     expect(schedule.entries).toEqual(["09:00–17:00"]);
+
+    const threeWindows = [
+      { startLocal: "09:00", endLocal: "10:00" },
+      { startLocal: "12:00", endLocal: "13:00" },
+      { startLocal: "15:00", endLocal: "16:00" },
+    ];
+    const threeSchedule = deviceSchedule({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "free_feeding", freeWindows: threeWindows } },
+    });
+    expect(threeSchedule.entries).toEqual(["09:00–10:00", "12:00–13:00", "15:00–16:00"]);
+
+    const eightWindows = Array.from({ length: 8 }, (_, index) => ({
+      startLocal: `${String(9 + index).padStart(2, "0")}:00`,
+      endLocal: `${String(9 + index).padStart(2, "0")}:30`,
+    }));
+    const eightSchedule = deviceSchedule({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "free_feeding", freeWindows: eightWindows } },
+    });
+    expect(eightSchedule.entries).toHaveLength(8);
+    expect(eightSchedule.entries[0]).toBe("09:00–09:30");
+    expect(eightSchedule.entries.at(-1)).toBe("16:00–16:30");
+  });
+
+  it("never falls back to flat freeWindows, mealTimes, or freeDispenseLimit", () => {
+    const planSource = html.match(/function planSetting\(today\) \{[^\n]+\}/)?.[0];
+    const modeSource = html.match(/function todayPlanMode\(today\) \{[^\n]+\}/)?.[0];
+    const countSource = html.match(/function planCount\(today\) \{[^\n]+\}/)?.[0];
+    const scheduleSource = html.match(/function deviceSchedule\(today\) \{[^\n]+\}/)?.[0];
+    expect(planSource).toBeTruthy();
+    expect(modeSource).toBeTruthy();
+    expect(countSource).toBeTruthy();
+    expect(scheduleSource).toBeTruthy();
+    const value = (object: Record<string, unknown> | undefined, camel: string, snake: string, fallback: unknown) => {
+      const result = object?.[camel] ?? object?.[snake];
+      return result == null ? fallback : result;
+    };
+    const planSetting = new Function("value", `${planSource}\nreturn planSetting;`)(value) as (today: Record<string, unknown>) => Record<string, unknown>;
+    const todayPlanMode = new Function("value", `${modeSource}\nreturn todayPlanMode;`)(value) as (today: Record<string, unknown>) => string;
+    const planCount = new Function("value", "planSetting", "todayPlanMode", `${countSource}\nreturn planCount;`)(value, planSetting, todayPlanMode) as (today: Record<string, unknown>) => unknown;
+    const deviceSchedule = new Function("value", "planSetting", "todayPlanMode", `${scheduleSource}\nreturn deviceSchedule;`)(value, planSetting, todayPlanMode) as (today: Record<string, unknown>) => { label: string; entries: string[] };
+
+    expect(planCount({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "free_feeding", mealCount: 9 } },
+      mealCount: 9,
+    })).toBeUndefined();
+    expect(planCount({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "timed_quantity", mealCount: 9 } },
+    })).toBe(9);
+
+    const freeMissing = deviceSchedule({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "free_feeding" } },
+      freeWindows: [{ startLocal: "00:00", endLocal: "23:59" }],
+    });
+    expect(freeMissing.entries).toEqual([]);
+
+    const timedMissing = deviceSchedule({
+      activeDecision: null,
+      plannedDecision: { setting: { mode: "timed_quantity" } },
+      mealTimes: ["10:00", "14:00"],
+    });
+    expect(timedMissing.entries).toEqual([]);
+  });
+
+  it("keeps planned curve-cap and decision evidence as layered UI authority", () => {
+    const exceptionSource = html.match(/function plannedExceptionActions\(today\) \{[^\n]+\}/)?.[0];
+    const decisionSource = html.match(/function decisionForDisplay\(today\) \{[^\n]+\}/)?.[0];
+    const evidenceSource = html.match(/function planEvidence\(today\) \{[^\n]+\}/)?.[0];
+    expect(exceptionSource).toBeTruthy();
+    expect(decisionSource).toBeTruthy();
+    expect(evidenceSource).toBeTruthy();
+    const value = (object: Record<string, unknown> | undefined, camel: string, snake: string, fallback: unknown) => {
+      const result = object?.[camel] ?? object?.[snake];
+      return result == null ? fallback : result;
+    };
+    const plannedExceptionActions = new Function("value", `${exceptionSource}\nreturn plannedExceptionActions;`)(value) as (today: Record<string, unknown>) => Array<{ type: string }>;
+    const decisionForDisplay = new Function("value", `${decisionSource}\nreturn decisionForDisplay;`)(value) as (today: Record<string, unknown>) => Record<string, unknown> | null;
+    const planEvidence = new Function("value", "decisionForDisplay", `${evidenceSource}\nreturn planEvidence;`)(value, decisionForDisplay) as (today: Record<string, unknown>) => Record<string, unknown>;
+
+    expect(plannedExceptionActions({
+      activeDecision: { exceptionActions: [] },
+      plannedDecision: { exceptionActions: [{ type: "curve_cap" }] },
+      exceptionActions: [],
+    }).map((action) => action.type)).toEqual(["curve_cap"]);
+
+    expect(planEvidence({
+      activeDecision: { evidence: { modelVersion: "active-model", sopVersion: "active-sop" } },
+      plannedDecision: { evidence: { modelVersion: "planned-model", sopVersion: "planned-sop" } },
+      modelVersion: "flat-model",
+      sopVersion: "flat-sop",
+    })).toEqual({ modelVersion: "active-model", sopVersion: "active-sop" });
+
+    expect(planEvidence({
+      activeDecision: null,
+      plannedDecision: { evidence: { modelVersion: "planned-model", sopVersion: "planned-sop" } },
+      modelVersion: "flat-model",
+      sopVersion: "flat-sop",
+    })).toEqual({ modelVersion: "planned-model", sopVersion: "planned-sop" });
   });
 
   it("keeps the complete daily table and mobile-only horizontal scrolling", () => {

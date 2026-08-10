@@ -251,6 +251,14 @@
 - Added UI contract regressions for layered authority and free-window rendering.
 - `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
 
+### EC-P1-8.1 UI Authority + Free Window Propagation Seal — complete
+
+- Removed all deprecated flat Today fallbacks from UI: free mode no longer uses `mealCount` as `freeDispenseLimit`, `deviceSchedule()` reads only canonical `freeWindows`/`timedMeals`, exceptions come from `plannedDecision.exceptionActions`, and version provenance comes from `planEvidence()`.
+- Added 8-slot propagation regressions: published config keeps 8 enabled windows, new batch freezes 8 windows into `devicePlanSnapshot`, planned decision and API Today return all 8, old batches stay frozen at 1, and SOP migration preview/apply moves 1 → 8.
+- Root cause for the one-window screenshot is the default SOP having only slot 1 enabled and the old batch retaining its frozen snapshot; the 8-slot code path itself was not dropping windows.
+- Root cause for the old UI screenshot is a stale Web artifact; current Web image is built from tracked `agent/ui/liquid-index.html`, and the running HTTP response contains the new UI markers and none of the old markers.
+- `p1-safety-gate` now includes `tests/local-integration/free-window-propagation.test.ts`.
+
 Baseline:
 
 ```text

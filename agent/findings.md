@@ -311,6 +311,15 @@ Real Device Control Gate: CLOSED
 - UI contract tests prove active decision wins over planned decision, planned-only fallback works, and free-feeding schedules render windows instead of timed meals.
 - `p1-safety-gate` now includes the UI shell contract test so future UI regressions are part of the safety gate.
 
+### EC-P1-8.1 — 2026-08-10
+
+- Review required P1-8.1 to remove every remaining flat Today fallback from execution UI and to prove 8 free-feeding slots propagate through publication, snapshot, planned decision, Today API, and UI.
+- UI now uses `planCount(today)` for free `freeDispenseLimit` (missing displays `—`), `deviceSchedule()` only reads canonical `setting.freeWindows`/`setting.timedMeals`, exceptions only read `plannedDecision.exceptionActions`, and version text only reads `planEvidence()`.
+- Static UI guard prevents `source.freeWindows`, `source.free_windows`, `source.mealTimes`, `source.meal_times`, `state.today.exceptionActions`, `state.today.exception_actions`, `value(today, 'modelVersion'`, and `value(today, 'sopVersion'` from re-entering the execution UI path.
+- New `free-window-propagation.test.ts` proves 8 enabled windows survive publication, new-batch freeze, `computeFrozenBatchDecision()`, SOP migration 1 → 8, and API Today after switching to free feeding; old batches remain frozen at their original 1-window snapshot.
+- The one-window screenshot is explained by the default SOP having only slot 1 enabled and old batch freeze semantics; it is not a propagation bug.
+- The old UI screenshot is explained by a stale Web artifact. The rebuilt Web image is generated from tracked `agent/ui/liquid-index.html`, and the running HTTP body contains `id="deviceHeading">今日执行状态` and `id="execModeValue"` while excluding `今日设备设定`, `建议单日下粉总量`, and `今日执行：`.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.
