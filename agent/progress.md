@@ -379,6 +379,12 @@ Real Device Control Gate: CLOSED
 - Added behavior parity tests and deterministic generation tests.
 - Verified `npm run check`, `npm test` 39 files / 364 tests, p0 gate 99 tests, p1 gate 190 tests, `smoke:dist`.
 
+### EC-P1-10 — complete
+
+- Added `.github/workflows/agent-safety.yml` with Node 24.18.0, root/Python/Agent gates, Docker builds, Compose config, clean-source gate, and runtime provenance.
+- Added `agent/scripts/ci-runtime-check.mjs` and `tests/ci-contract.test.ts`; runtime check passed against local Agent/Web images.
+- Verified `npm run check`, `npm test` 40 files / 366 tests, p0 gate 99 tests, p1 gate 192 tests, `smoke:dist`, root `npm test`, Python 12 tests, and `compileall`.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

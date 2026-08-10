@@ -348,6 +348,13 @@ Real Device Control Gate: CLOSED
 - Root tracked `feeding-model.min.js` is regenerated from the same source so desktop and Web cannot drift.
 - Added source→artifact behavior parity tests for persisted control start and control-history fail-closed errors.
 
+### EC-P1-10 — 2026-08-10
+
+- Implemented GitHub Actions `agent-safety.yml` for Node 24.18.0, full Agent gates, Docker builds, Compose config, and runtime provenance.
+- Added `ci-runtime-check.mjs` to verify `/version` against actual container files and live Web UI markers.
+- Added `tests/ci-contract.test.ts` to lock the workflow and runtime check contract.
+- Local verification completed with 40 files / 366 tests, P0 99, P1 192, Python 12, root smoke, clean source gate, Docker no-cache, and runtime provenance.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

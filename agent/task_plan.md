@@ -284,6 +284,12 @@
 - Root `feeding-model.min.js` is synchronized from the same deterministic generation so the desktop bundle does not keep a stale model.
 - Added behavior parity tests proving authoritative and generated Web models agree on persisted control start, `NBJ_CONTROL_HISTORY_NON_MONOTONIC`, and `NBJ_CONTROL_HISTORY_STEP_INVALID`.
 
+### EC-P1-10 CI and Final Verification — complete
+
+- Added `.github/workflows/agent-safety.yml` pinned to Node 24.18.0, running root smoke, Python optimizer tests, `npm ci`, check, full tests, P0/P1 gates, build, clean-source gate, Docker Agent/Web builds, Compose config, and runtime provenance.
+- Added `agent/scripts/ci-runtime-check.mjs` to start Agent/Web containers, verify `/version` commit/schema/policy, compare `/version` artifact hashes against actual image files, and assert live Web UI markers.
+- Added `tests/ci-contract.test.ts` and wired it into `p1-safety-gate`.
+
 Baseline:
 
 ```text
