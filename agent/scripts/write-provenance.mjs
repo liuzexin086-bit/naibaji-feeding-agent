@@ -79,8 +79,9 @@ export async function computeProvenance({
 export async function computeWebProvenance(input = {}) {
   const agentProvenance = await computeProvenance(input);
   const agentRoot = input.agentRoot ?? DEFAULT_AGENT_ROOT;
-  const resolvedSourceRoot = input.sourceRoot ?? await resolveSourceRoot(agentRoot);
-  const feedingModelArtifactSha256 = await sha256File(resolve(resolvedSourceRoot, "feeding-model.min.js"));
+  const feedingModelArtifactSha256 = await sha256File(
+    resolve(agentRoot, ".generated-web", "feeding-model.min.js"),
+  );
   return {
     commit: agentProvenance.commit,
     schemaVersion: agentProvenance.schemaVersion,

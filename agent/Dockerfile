@@ -10,7 +10,7 @@ COPY agent/tsconfig.json ./
 COPY agent/src ./src
 COPY agent/scripts ./scripts
 COPY agent/ui ./ui
-COPY feeding-model.js v5lite-model.js feeding-model.min.js ./
+COPY feeding-model.js v5lite-model.js ./
 RUN npm run build
 RUN node scripts/write-provenance.mjs "$GIT_COMMIT"
 RUN npm prune --omit=dev
@@ -43,7 +43,8 @@ FROM nginx:1.29.1-alpine AS web
 ARG GIT_COMMIT=unknown
 COPY --chmod=755 agent/docker/nginx-entrypoint.sh /usr/local/bin/nginx-entrypoint
 COPY agent/docker/nginx.conf.template /etc/nginx/templates/naibaji.conf.template
-COPY admin.html admin.js chart.umd.min.js feeding-model.min.js v5lite-model.js /tmp/naibaji-assets/
+COPY admin.html admin.js chart.umd.min.js v5lite-model.js /tmp/naibaji-assets/
+COPY --from=build /app/.generated-web/feeding-model.min.js /tmp/naibaji-assets/feeding-model.min.js
 COPY agent/ui /tmp/naibaji-assets/ui/
 RUN mkdir -p /usr/share/nginx/html \
     && cp /tmp/naibaji-assets/admin.html /tmp/naibaji-assets/admin.js /tmp/naibaji-assets/chart.umd.min.js /tmp/naibaji-assets/feeding-model.min.js /tmp/naibaji-assets/v5lite-model.js /usr/share/nginx/html/ \

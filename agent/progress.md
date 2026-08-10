@@ -371,6 +371,14 @@ Real Device Control Gate: CLOSED
 - Added `.gitattributes` to force LF for shell scripts, source/config files, templates, and text assets.
 - Verified a staged-tree `git archive` produces LF `agent/docker/agent-entrypoint.sh`, closing the clean-archive entrypoint failure.
 
+### EC-P1-9.3 — complete
+
+- Pinned `terser@5.49.2`; Web model is now deterministically generated from authoritative `feeding-model.js`.
+- Docker Web copies only the generated `.generated-web` artifact; provenance and runtime `/version` hash that artifact.
+- Root `feeding-model.min.js` is synchronized from the same generator.
+- Added behavior parity tests and deterministic generation tests.
+- Verified `npm run check`, `npm test` 39 files / 364 tests, p0 gate 99 tests, p1 gate 190 tests, `smoke:dist`.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

@@ -340,6 +340,14 @@ Real Device Control Gate: CLOSED
 - Clean archive Docker image could not start its entrypoint because Windows `git archive` extraction wrote `agent-entrypoint.sh` with CRLF, making the shebang invalid.
 - Added root `.gitattributes` with explicit LF normalization for shell scripts and all tracked text/build files; verified a staged-tree archive now contains LF entrypoint bytes.
 
+### EC-P1-9.3 — 2026-08-10
+
+- Review found Web was copying a stale independent `feeding-model.min.js` instead of deriving the Web model from authoritative `feeding-model.js`.
+- Added pinned `terser@5.49.2` and `prepare-web-model-assets.mjs`; the generated artifact is deterministic and hashed by Web provenance.
+- Docker Web no longer copies root min; it copies `/app/.generated-web/feeding-model.min.js` from the same build stage.
+- Root tracked `feeding-model.min.js` is regenerated from the same source so desktop and Web cannot drift.
+- Added source→artifact behavior parity tests for persisted control start and control-history fail-closed errors.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

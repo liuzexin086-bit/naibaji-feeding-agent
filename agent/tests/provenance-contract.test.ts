@@ -33,7 +33,9 @@ describe("build provenance contract", () => {
     expect(web.schemaVersion).toBe(12);
     expect(web.decisionPolicyVersion).toBe("execution-contract-v1");
     expect(web.feedingModelSourceSha256).toBe(agent.feedingModelSourceSha256);
-    expect(web.feedingModelArtifactSha256).toBe(sha256File(resolve(repoRoot, "feeding-model.min.js")));
+    expect(web.feedingModelArtifactSha256).toBe(
+      sha256File(resolve(agentRoot, ".generated-web", "feeding-model.min.js")),
+    );
     expect(web.uiSha256).toBe(agent.uiSha256);
   });
 
@@ -56,7 +58,10 @@ describe("build provenance contract", () => {
 
     const dockerfile = readFileSync(resolve(repoRoot, "agent", "Dockerfile"), "utf8");
     expect(dockerfile).toContain("COPY agent/ui ./ui");
-    expect(dockerfile).toContain("COPY feeding-model.js v5lite-model.js feeding-model.min.js ./");
+    expect(dockerfile).toContain("COPY feeding-model.js v5lite-model.js ./");
+    expect(dockerfile).not.toContain("COPY feeding-model.js v5lite-model.js feeding-model.min.js ./");
+    expect(dockerfile).toContain("COPY --from=build /app/.generated-web/feeding-model.min.js /tmp/naibaji-assets/feeding-model.min.js");
+    expect(dockerfile).not.toContain("COPY admin.html admin.js chart.umd.min.js feeding-model.min.js");
     expect(dockerfile).toContain('RUN node scripts/write-provenance.mjs "$GIT_COMMIT"');
     expect(dockerfile).toContain("COPY --from=build /app/agent-provenance.json ./agent-provenance.json");
     expect(dockerfile).toContain("COPY --from=build /app/web-provenance.json /usr/share/nginx/html/version.json");

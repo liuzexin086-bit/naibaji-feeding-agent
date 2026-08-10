@@ -20,7 +20,8 @@ describe("Docker Compose deployment contract", () => {
     expect(dockerfile).toContain("FROM node:24.18.0-slim AS agent");
     expect(dockerfile).toContain("FROM nginx:1.29.1-alpine AS web");
     expect(dockerfile).toContain("USER node");
-    expect(dockerfile).toContain("COPY admin.html admin.js chart.umd.min.js feeding-model.min.js v5lite-model.js /tmp/naibaji-assets/");
+    expect(dockerfile).toContain("COPY admin.html admin.js chart.umd.min.js v5lite-model.js /tmp/naibaji-assets/");
+    expect(dockerfile).toContain("COPY --from=build /app/.generated-web/feeding-model.min.js /tmp/naibaji-assets/feeding-model.min.js");
     expect(dockerfile).toContain("COPY agent/ui /tmp/naibaji-assets/ui/");
     expect(dockerfile).toContain('echo "$GIT_COMMIT" > /usr/share/nginx/html/version');
     expect(compose).toContain("context: ../..");

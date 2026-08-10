@@ -277,6 +277,13 @@
 
 - Added root `.gitattributes` forcing LF for shell scripts, source/config files, templates, and text assets so `git archive HEAD` clean builds do not produce CRLF entrypoints or line-ending drift.
 
+### EC-P1-9.3 Web Model Derivation Seal — complete
+
+- Pinned `terser@5.49.2` as a devDependency and added `prepare-web-model-assets.mjs`, which deterministically minifies authoritative `feeding-model.js` into `agent/.generated-web/feeding-model.min.js`.
+- Docker Web stage now copies only the generated Web artifact; provenance hashes that generated artifact, not the old root min copy.
+- Root `feeding-model.min.js` is synchronized from the same deterministic generation so the desktop bundle does not keep a stale model.
+- Added behavior parity tests proving authoritative and generated Web models agree on persisted control start, `NBJ_CONTROL_HISTORY_NON_MONOTONIC`, and `NBJ_CONTROL_HISTORY_STEP_INVALID`.
+
 Baseline:
 
 ```text

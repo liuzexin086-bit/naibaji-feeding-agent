@@ -8,17 +8,18 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "prebuild": "npm run prepare:models",
+    "prebuild": "npm run prepare:models && npm run prepare:web-model",
     "check": "tsc -p tsconfig.json --noEmit",
-    "precheck": "npm run prepare:models",
+    "precheck": "npm run prepare:models && npm run prepare:web-model",
     "test": "vitest run",
-    "pretest": "npm run prepare:models",
+    "pretest": "npm run prepare:models && npm run prepare:web-model",
     "prepare:models": "node scripts/prepare-model-assets.mjs",
-    "prepare:provenance": "node scripts/write-provenance.mjs",
+    "prepare:web-model": "node scripts/prepare-web-model-assets.mjs --root",
+    "prepare:provenance": "npm run prepare:models && npm run prepare:web-model && node scripts/write-provenance.mjs",
     "clean-source-gate": "node scripts/clean-source-gate.mjs",
     "smoke:dist": "npm run build && node scripts/dist-model-smoke.mjs",
     "p0-release-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/batch-decision-service.test.ts tests/decision/runtime-state.test.ts tests/langgraph-runtime.test.ts tests/local-integration/local-tools.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts",
-    "p1-safety-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/runtime-state.test.ts tests/operations/observation-feedback.test.ts tests/local-db/local-store.test.ts tests/local-integration/local-api.test.ts tests/local-integration/amendments.test.ts tests/local-integration/local-tools.test.ts tests/langgraph-runtime.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts tests/local-integration/today-operations.test.ts tests/local-integration/free-window-propagation.test.ts tests/provenance-contract.test.ts tests/ui-shell-contract.test.ts",
+    "p1-safety-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/runtime-state.test.ts tests/operations/observation-feedback.test.ts tests/local-db/local-store.test.ts tests/local-integration/local-api.test.ts tests/local-integration/amendments.test.ts tests/local-integration/local-tools.test.ts tests/langgraph-runtime.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts tests/local-integration/today-operations.test.ts tests/local-integration/free-window-propagation.test.ts tests/provenance-contract.test.ts tests/web-model-derivation.test.ts tests/ui-shell-contract.test.ts",
     "test:watch": "vitest",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "start:container": "node dist/container/server.js"
@@ -37,6 +38,7 @@
   },
   "devDependencies": {
     "@types/node": "24.10.1",
+    "terser": "5.49.2",
     "typescript": "5.9.3",
     "vitest": "3.2.4"
   }
