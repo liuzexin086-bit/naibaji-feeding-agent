@@ -9,8 +9,7 @@ const agentRoot = resolve(here, "..");
 const repoRoot = resolve(agentRoot, "..");
 
 function sha256File(path) {
-  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
-  return createHash("sha256").update(source, "utf8").digest("hex").toUpperCase();
+  return createHash("sha256").update(readFileSync(path)).digest("hex").toUpperCase();
 }
 
 function docker(args) {

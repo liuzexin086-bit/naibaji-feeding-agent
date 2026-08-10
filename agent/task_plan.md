@@ -290,6 +290,10 @@
 - Added `agent/scripts/ci-runtime-check.mjs` to start Agent/Web containers, verify `/version` commit/schema/policy, compare `/version` artifact hashes against actual image files, and assert live Web UI markers.
 - Added `tests/ci-contract.test.ts` and wired it into `p1-safety-gate`.
 
+### EC-P1-10.1 CI Runtime Raw Hash Alignment — complete
+
+- `ci-runtime-check.mjs` now hashes raw source bytes to match `write-provenance.mjs` and the actual Docker artifact bytes on both Windows working trees and Linux CI checkouts.
+
 Baseline:
 
 ```text

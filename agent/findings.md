@@ -355,6 +355,11 @@ Real Device Control Gate: CLOSED
 - Added `tests/ci-contract.test.ts` to lock the workflow and runtime check contract.
 - Local verification completed with 40 files / 366 tests, P0 99, P1 192, Python 12, root smoke, clean source gate, Docker no-cache, and runtime provenance.
 
+### EC-P1-10.1 — 2026-08-10
+
+- Local Windows runtime check exposed a UI hash mismatch because `ci-runtime-check.mjs` normalized LF while `write-provenance.mjs` hashes raw artifact bytes.
+- Runtime check now hashes raw source bytes, matching both local Windows Docker artifacts and Linux CI checkout artifacts.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

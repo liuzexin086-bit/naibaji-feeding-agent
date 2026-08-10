@@ -385,6 +385,11 @@ Real Device Control Gate: CLOSED
 - Added `agent/scripts/ci-runtime-check.mjs` and `tests/ci-contract.test.ts`; runtime check passed against local Agent/Web images.
 - Verified `npm run check`, `npm test` 40 files / 366 tests, p0 gate 99 tests, p1 gate 192 tests, `smoke:dist`, root `npm test`, Python 12 tests, and `compileall`.
 
+### EC-P1-10.1 — complete
+
+- `ci-runtime-check.mjs` now hashes raw source bytes, matching `write-provenance.mjs` and the actual Docker artifact bytes on Windows and Linux.
+- Rerun runtime provenance against final `a54cf95` images passed.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
