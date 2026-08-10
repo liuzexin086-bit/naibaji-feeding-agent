@@ -234,6 +234,13 @@
 - Mode-change proposal construction reads `plannedDecision` explicitly.
 - Added policy registry unit/API regressions and planned approval authority unit regressions.
 
+### EC-P1-7.2 Final Layered Seal — complete
+
+- `classifyDecisionPolicyVersion("")` now fails closed as `unsupported`; only missing/null is known legacy.
+- `decisionForToday()` and `parseObservation()` no longer fall back to the flat `today` object when `plannedDecision` is absent; layered write/approval paths fail closed.
+- Planned decisions now carry `decisionPolicyVersion: execution-contract-v1` in evidence inputs; `policyVersionAtCommit` follows `activeDecision ?? plannedDecision`, so planned/current-active commits record `v1` and legacy-active commits record `null`.
+- Added empty-policy API regression, missing-`plannedDecision` write regression, and policy-version commit snapshot regressions for planned, current-active, and legacy-active authorities.
+
 Baseline:
 
 ```text

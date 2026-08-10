@@ -510,7 +510,7 @@ function batchPublic(batch: LocalBatch): JsonObject {
 }
 
 export function classifyDecisionPolicyVersion(value: unknown): "legacy" | "current" | "unsupported" {
-  if (value === undefined || value === null || value === "") return "legacy";
+  if (value === undefined || value === null) return "legacy";
   if (value === DECISION_POLICY_VERSION) return "current";
   return "unsupported";
 }
@@ -699,9 +699,7 @@ function decisionForToday(store: SqliteLocalStore, userId: string, batch: LocalB
   const amendments = businessDate
     ? store.getDailyOperationAmendments(userId, batch.batchId, businessDate)
     : [];
-  const plannedForApproval = today.plannedDecision
-    ? object(today.plannedDecision, "today.plannedDecision")
-    : today;
+  const plannedForApproval = object(today.plannedDecision, "planned_decision");
   const approvalState = amendments.some(
     (amendment) => amendment.status === "pending" || amendment.status === "confirmed",
   )
@@ -918,7 +916,9 @@ function recordPublic(
     activeDecisionIdAtCommit: row.activeDecisionIdAtCommit == null
       ? null
       : String(row.activeDecisionIdAtCommit),
-    policyVersionAtCommit: String(row.policyVersionAtCommit ?? "legacy"),
+    policyVersionAtCommit: row.policyVersionAtCommit == null
+      ? null
+      : String(row.policyVersionAtCommit),
     estimatedAverageWeightKg: Number(row.estimatedAverageWeightKg ?? modelWeight?.weightStart ?? 0) || null,
     estimatedEndWeightKg: Number(row.estimatedEndWeightKg ?? modelWeight?.weightEnd ?? 0) || null,
     actualPowderGrams: row.actualPowderGrams == null ? null : Number(row.actualPowderGrams),
@@ -980,7 +980,7 @@ function requestUsesHttps(request: IncomingMessage): boolean {
   return values.some((value) => value.split(",").some((part) => part.trim().toLowerCase() === "https"));
 }
 
-function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
+export function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch): JsonObject {
   const source = object(body.observation ?? {}, "observation");
   for (const key of Object.keys(source)) {
     if (!OBSERVATION_ALLOWLIST.has(key)) {
@@ -1035,9 +1035,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
       : feedingResponseRaw === "refusing"
         ? "refusal"
         : feedingResponseRaw;
-  const plannedDecision = today.plannedDecision
-    ? object(today.plannedDecision, "planned_decision")
-    : today;
+  const plannedDecision = object(today.plannedDecision, "planned_decision");
   const activeDecision = today.activeDecision
     ? object(today.activeDecision, "active_decision")
     : null;
@@ -1047,6 +1045,16 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     commitDecision.evidence ?? {},
     "commit_authority.evidence",
   );
+  const commitInputs = object(
+    commitEvidence.inputs ?? {},
+    "commit_authority.evidence.inputs",
+  );
+  const commitPolicyRaw = commitInputs.decisionPolicyVersion == null
+    ? null
+    : String(commitInputs.decisionPolicyVersion);
+  if (classifyDecisionPolicyVersion(commitPolicyRaw) === "unsupported") {
+    throw new Error("NBJ_DECISION_POLICY_UNSUPPORTED");
+  }
   const planTotalAtCommit = Number(setting.dailyPowderGrams ?? 0);
   const feedTimesAtCommit = Number(setting.mealCount ?? 0);
   const freeDispenseLimitAtCommit = Number(
@@ -1083,7 +1091,7 @@ function parseObservation(body: JsonObject, today: JsonObject, batch: LocalBatch
     activeDecisionIdAtCommit: today.activeDecisionId == null
       ? null
       : String(today.activeDecisionId),
-    policyVersionAtCommit: DECISION_POLICY_VERSION,
+    policyVersionAtCommit: commitPolicyRaw,
     estimatedAverageWeightKg: Number(today.estimatedAverageWeightKg ?? 0),
     estimatedEndWeightKg: Number(today.estimatedEndWeightKg ?? 0),
     actualPowderGrams: source.actualPowderGrams == null ? null : finite(source.actualPowderGrams, "actualPowderGrams", 0),

@@ -7,11 +7,13 @@ import { AIMessage } from "@langchain/core/messages";
 import {
   classifyDecisionPolicyVersion,
   handleLocalApi,
+  parseObservation,
   plannedApprovalState,
   type LocalApiDeps,
 } from "../../src/container/local-api.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
+import type { LocalBatch } from "../../src/shared/local-store-contract.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -55,12 +57,20 @@ describe("local execution API", () => {
   it("classifies policy versions and reads planned approval authority", () => {
     expect(classifyDecisionPolicyVersion(undefined)).toBe("legacy");
     expect(classifyDecisionPolicyVersion(null)).toBe("legacy");
+    expect(classifyDecisionPolicyVersion("")).toBe("unsupported");
     expect(classifyDecisionPolicyVersion("execution-contract-v1")).toBe("current");
     expect(classifyDecisionPolicyVersion("future-x")).toBe("unsupported");
     expect(plannedApprovalState({ exceptionActions: [] })).toBe("ready");
     expect(plannedApprovalState({
       exceptionActions: [{ type: "curve_cap" }],
     })).toBe("manual_confirmation_required");
+  });
+
+  it("fails closed when the layered today response lacks plannedDecision", () => {
+    const today: Record<string, unknown> = { dayIndex: 0, dayAge: 3 };
+    const batch = { data: {} } as LocalBatch;
+    expect(() => parseObservation({ observation: {} }, today, batch))
+      .toThrow("NBJ_PLANNED_DECISION_INVALID");
   });
 
   it("authenticates locally, creates batches and advances atomically", async () => {

@@ -536,10 +536,17 @@ describe("batch device plan snapshot and mode switching", () => {
     });
     expect(recordAfterConfirm.status).toBe(200);
     const recordAfterConfirmBody = await recordAfterConfirm.json() as {
-      records: Array<{ activeDecisionIdAtCommit: string | null }>;
+      records: Array<{
+        activeDecisionIdAtCommit: string | null;
+        modeAtCommit: string;
+        policyVersionAtCommit: string | null;
+      }>;
     };
-    expect(recordAfterConfirmBody.records.at(-1)?.activeDecisionIdAtCommit)
-      .toBe(activeBefore!.id);
+    expect(recordAfterConfirmBody.records.at(-1)).toMatchObject({
+      activeDecisionIdAtCommit: activeBefore!.id,
+      modeAtCommit: "timed_quantity",
+      policyVersionAtCommit: DECISION_POLICY_VERSION,
+    });
 
     const switched = await apiRequest(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
@@ -622,10 +629,17 @@ describe("batch device plan snapshot and mode switching", () => {
     });
     expect(recordAfterApply.status).toBe(200);
     const recordAfterApplyBody = await recordAfterApply.json() as {
-      records: Array<{ activeDecisionIdAtCommit: string | null }>;
+      records: Array<{
+        activeDecisionIdAtCommit: string | null;
+        modeAtCommit: string;
+        policyVersionAtCommit: string | null;
+      }>;
     };
-    expect(recordAfterApplyBody.records.at(-1)?.activeDecisionIdAtCommit)
-      .toBe(activeAfter!.id);
+    expect(recordAfterApplyBody.records.at(-1)).toMatchObject({
+      activeDecisionIdAtCommit: activeAfter!.id,
+      modeAtCommit: "free_feeding",
+      policyVersionAtCommit: DECISION_POLICY_VERSION,
+    });
   });
 
   it("rejects mode switch when cumulative actual is unknown or already executed", async () => {
@@ -967,6 +981,18 @@ describe("batch device plan snapshot and mode switching", () => {
       }),
     });
     expect(executed.status).toBe(200);
+    const executedBody = await executed.json() as {
+      records: Array<{
+        activeDecisionIdAtCommit: string | null;
+        modeAtCommit: string;
+        policyVersionAtCommit: string | null;
+      }>;
+    };
+    expect(executedBody.records.at(-1)).toMatchObject({
+      activeDecisionIdAtCommit: "legacy-active-layered",
+      modeAtCommit: "free_feeding",
+      policyVersionAtCommit: null,
+    });
     const blockedToday = await apiRequest(base, `/api/batches/${created.batch.id}`, {
       headers: { cookie },
     });
@@ -1119,6 +1145,79 @@ describe("batch device plan snapshot and mode switching", () => {
       JSON.stringify(unsupportedDecision.setting),
       JSON.stringify(unsupportedDecision.evidence),
       JSON.stringify(unsupportedDecision),
+      "2026-08-08T00:00:00Z",
+      "2026-08-08T00:00:00Z",
+    );
+    database.close();
+
+    const response = await apiRequest(base, `/api/batches/${created.batch.id}`, {
+      headers: { cookie },
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ code: "NBJ_DECISION_POLICY_UNSUPPORTED" });
+  });
+
+  it("fails closed when an active decision carries an explicitly empty policy version", async () => {
+    const { base, cookie, filename, store, userId } = await startApi();
+    const created = await createBatch(base, cookie);
+    const advance = await apiRequest(base, `/api/batches/${created.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 0,
+        idempotencyKey: "empty-policy-advance",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(advance.status).toBe(200);
+    const dayActual = await apiRequest(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "empty-policy-day-zero",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(dayActual.status).toBe(200);
+    const batch = store.getBatch(userId, created.batch.id)!;
+    const data = batch.data as { config: Record<string, unknown>; records?: unknown[] };
+    const canonical = computeFrozenBatchDecision(loadFrozenBatchDecisionContext({
+      batchId: batch.batchId,
+      revision: batch.revision,
+      currentDayIndex: batch.currentDay,
+      config: data.config,
+      records: Array.isArray(data.records) ? data.records : [],
+    }));
+    const emptyPolicyDecision = {
+      ...canonical.decision,
+      evidence: {
+        ...canonical.decision.evidence,
+        inputs: {
+          ...canonical.decision.evidence.inputs,
+          decisionPolicyVersion: "",
+        },
+      },
+    };
+    const database = new DatabaseSync(filename);
+    database.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)
+    `).run(
+      userId,
+      "empty-policy-active",
+      created.batch.id,
+      emptyPolicyDecision.revision,
+      emptyPolicyDecision.dateLocal,
+      emptyPolicyDecision.evidence.sopVersion,
+      emptyPolicyDecision.evidence.modelVersion,
+      emptyPolicyDecision.evidence.calculationDate,
+      JSON.stringify(emptyPolicyDecision.setting),
+      JSON.stringify(emptyPolicyDecision.evidence),
+      JSON.stringify(emptyPolicyDecision),
       "2026-08-08T00:00:00Z",
       "2026-08-08T00:00:00Z",
     );

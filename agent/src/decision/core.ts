@@ -17,6 +17,7 @@ import type {
   FeedingDecision,
   TimedMeal,
 } from "../shared/agent-v2-contract.js";
+import { DECISION_POLICY_VERSION } from "../shared/agent-v2-contract.js";
 
 const TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/;
 const GRADE_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
@@ -411,6 +412,7 @@ export function computeDayDecision(input: DayDecisionInput): FeedingDecision {
       inputs: {
         requestedMode: input.requestedMode ?? "timed_quantity",
         requestedStatus: input.requestedStatus ?? "draft",
+        decisionPolicyVersion: DECISION_POLICY_VERSION,
         modelInput: structuredClone(input.modelInput),
         sop: structuredClone(input.sop ?? {}),
         creepFeedGradesLast3Days: [...(input.creepFeedGradesLast3Days ?? [])],

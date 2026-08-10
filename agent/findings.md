@@ -294,6 +294,14 @@ Real Device Control Gate: CLOSED
 - Observation commit and mode-change proposal now consume canonical `activeDecision ?? plannedDecision` instead of `today.setting`.
 - Added future-policy same-mode API regression and planned approval unit regression.
 
+### EC-P1-7.2 — 2026-08-10
+
+- Review found explicit `""` was still classified as known legacy, layered consumers retained flat `today` fallback, and `policyVersionAtCommit` was hardcoded to `v1` even when the commit authority was a legacy active decision.
+- `classifyDecisionPolicyVersion("")` now returns `unsupported`; only missing/null is known legacy.
+- `decisionForToday()` and `parseObservation()` require `plannedDecision` and fail closed instead of re-entering flat `today` as the write/approval authority.
+- `computeDayDecision()` now stamps `decisionPolicyVersion: execution-contract-v1` in planned evidence inputs; `policyVersionAtCommit` is read from the selected `activeDecision ?? plannedDecision`, so legacy active commits audit as `null`.
+- Added regressions for empty policy same-mode API rejection, missing-layered-authority write rejection, and planned/current-active/legacy-active commit policy snapshots.
+
 ## Requirements
 
 - Produce a Codex-readable work plan only; do not implement source changes in the planning turn.

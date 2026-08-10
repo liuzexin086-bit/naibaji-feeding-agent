@@ -325,6 +325,15 @@ Real Device Control Gate: CLOSED
 - Verified `npm run check`, `npm test` 36 files / 349 tests, p0 gate 98 tests, p1 gate 156 tests.
 - Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
 
+### EC-P1-7.2 — complete
+
+- Explicit empty `decisionPolicyVersion` now fails closed as `unsupported`; only missing/null is known legacy.
+- Removed flat `today` fallback from `decisionForToday()` and `parseObservation()`; missing `plannedDecision` returns `NBJ_PLANNED_DECISION_INVALID`.
+- `computeDayDecision()` now writes `decisionPolicyVersion: execution-contract-v1` into planned evidence inputs, and `policyVersionAtCommit` follows the actual `activeDecision ?? plannedDecision` authority.
+- Added empty-policy API regression, missing-layered-authority write regression, and planned/current-active/legacy-active policy snapshot regressions.
+- Verified `npm run check`, `npm test` 36 files / 351 tests, p0 gate 99 tests, p1 gate 158 tests.
+- Verified `npm run smoke:dist`, Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
+
 ## Session: 2026-08-04
 
 ### Plan authoring
