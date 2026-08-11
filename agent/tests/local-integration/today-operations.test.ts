@@ -187,7 +187,7 @@ describe("today operations API", () => {
     database.close();
   });
 
-  it("materializes diarrhea feedback into today operations and writes the confirmed device decision", async () => {
+  it("keeps moderate diarrhea out of routine confirmation and requires amendment apply", async () => {
     const { store, base, cookie, userId } = await startApi();
     const created = await request(base, "/api/batches", {
       method: "POST",
@@ -203,7 +203,7 @@ describe("today operations API", () => {
       body: JSON.stringify({
         expectedRevision: 0,
         idempotencyKey: "record-diarrhea-1",
-        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "mild", actualPowderGrams: 0 },
+        observation: { recordedAt: "2026-08-05T10:00:00+08:00", effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "moderate", actualPowderGrams: 0 },
       }),
     });
     expect(saved.status).toBe(200);
@@ -225,20 +225,28 @@ describe("today operations API", () => {
       plan: {
         status: string;
         id: string;
+        businessDate: string;
         operationsSha256: string;
-        proposedSetting: { kind: string; dailyPowderGrams: number };
-        feedbackOrigin: { id: string; kind: string };
-        operations: Array<{ code: string; feedbackRef: { originId: string } }>;
+        proposedSetting: unknown;
+        feedbackOrigin: unknown;
       };
+      amendments: Array<{
+        id: string;
+        status: string;
+        amendmentSha256: string;
+        proposal: { kind: string; dailyPowderGrams: number };
+      }>;
     };
     expect(planBody.plan).toMatchObject({
       status: "pending",
-      proposedSetting: { kind: "diarrhea" },
-      feedbackOrigin: { kind: "diarrhea" },
+      proposedSetting: null,
+      feedbackOrigin: null,
     });
-    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
-    expect(planBody.plan.operations.find((item) => item.code === "feedback_diarrhea_confirm")?.feedbackRef)
-      .toMatchObject({ originId: planBody.plan.feedbackOrigin.id });
+    expect(planBody.amendments).toHaveLength(1);
+    expect(planBody.amendments[0]).toMatchObject({
+      status: "pending",
+      proposal: { kind: "diarrhea" },
+    });
 
     const confirmed = await request(base, `/api/batches/${batchId}/today-operations/confirm`, {
       method: "POST",
@@ -250,27 +258,55 @@ describe("today operations API", () => {
       }),
     });
     const confirmedBody = await confirmed.json() as {
-      confirmation: { deviceSetting: { mode: string; dailyPowderGrams: number }; decisionId: string };
-      decision: { status: string; evidence: { modelVersion: string } };
+      confirmation: { deviceSetting: unknown; decisionId: string | null };
+      decision: unknown;
     };
-    expect(confirmedBody.confirmation.deviceSetting).toMatchObject({
-      mode: "timed_quantity",
-      dailyPowderGrams: planBody.plan.proposedSetting.dailyPowderGrams,
-    });
-    expect(confirmedBody.confirmation.decisionId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(confirmedBody.decision).toMatchObject({
-      status: "active",
-      evidence: { modelVersion: "daily-operation-confirmation@1" },
-    });
+    expect(confirmedBody.confirmation.deviceSetting).toBeNull();
+    expect(confirmedBody.confirmation.decisionId).toBeNull();
+    expect(confirmedBody.decision).toBeNull();
     expect(store.getBatch(userId, batchId)?.revision).toBe(1);
 
-    const batchAfter = await request(base, `/api/batches/${batchId}`, { headers: { cookie } });
-    const batchAfterBody = await batchAfter.json() as {
-      today: { setting: { dailyPowderGrams: number; singlePowderGrams: number; mealCount: number } };
-    };
-    expect(batchAfterBody.today.setting.dailyPowderGrams).toBe(confirmedBody.confirmation.deviceSetting.dailyPowderGrams);
-    expect(batchAfterBody.today.setting.singlePowderGrams).toBe(confirmedBody.confirmation.deviceSetting.singlePowderGrams);
-    expect(batchAfterBody.today.setting.mealCount).toBe(confirmedBody.confirmation.deviceSetting.mealCount);
+    const amendment = planBody.amendments[0]!;
+    const revision = store.getBatch(userId, batchId)?.revision ?? 0;
+    const amendmentConfirm = await request(
+      base,
+      `/api/batches/${batchId}/amendments/${amendment.id}/confirm`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: revision,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "confirm-moderate-amendment",
+        }),
+      },
+    );
+    expect(amendmentConfirm.status).toBe(200);
+    expect((await amendmentConfirm.json() as { amendment: { status: string; decisionId: string | null } }).amendment)
+      .toMatchObject({ status: "confirmed", decisionId: null });
+    expect(store.getActiveDecision(userId, batchId, planBody.plan.businessDate)).toBeNull();
+
+    const amendmentApply = await request(
+      base,
+      `/api/batches/${batchId}/amendments/${amendment.id}/apply`,
+      {
+        method: "POST",
+        headers: { cookie },
+        body: JSON.stringify({
+          expectedRevision: revision,
+          expectedAmendmentSha256: amendment.amendmentSha256,
+          idempotencyKey: "apply-moderate-amendment",
+        }),
+      },
+    );
+    expect(amendmentApply.status).toBe(200);
+    const applied = (await amendmentApply.json() as {
+      amendment: { status: string; decisionId: string | null };
+    }).amendment;
+    expect(applied.status).toBe("applied");
+    expect(applied.decisionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(store.getActiveDecision(userId, batchId, planBody.plan.businessDate)?.status)
+      .toBe("active");
   });
 
   it("removes pending diarrhea handling after the latest grade returns to none", async () => {
@@ -298,16 +334,17 @@ describe("today operations API", () => {
     };
     expect(mildBody.feedback).toMatchObject({
       kind: "diarrhea",
-      operations: [{ code: "feedback_diarrhea_confirm" }],
+      operations: [{ code: "feedback_diarrhea_intervention" }],
     });
 
     const activePlan = await request(base, `/api/batches/${batchId}/today-operations`, {
       headers: { cookie },
     });
     const activeBody = await activePlan.json() as {
-      plan: { operations: Array<{ code: string }> };
+      feedback: { kind: string; operations: Array<{ code: string }> } | null;
     };
-    expect(activeBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(activeBody.feedback?.operations.map((item) => item.code))
+      .toContain("feedback_diarrhea_intervention");
 
     const none = await request(base, `/api/batches/${batchId}/records`, {
       method: "POST",
@@ -328,10 +365,9 @@ describe("today operations API", () => {
       headers: { cookie },
     });
     const clearedBody = await clearedPlan.json() as {
-      plan: { operations: Array<{ code: string }> };
+      feedback: { kind: string; operations: Array<{ code: string }> } | null;
     };
-    expect(clearedBody.plan.operations.map((item) => item.code))
-      .not.toContain("feedback_diarrhea_confirm");
+    expect(clearedBody.feedback).toBeNull();
   });
 
   it("keeps pending diarrhea feedback after a same-day observation omits diarrheaGrade", async () => {
@@ -381,9 +417,10 @@ describe("today operations API", () => {
       headers: { cookie },
     });
     const planBody = await planResponse.json() as {
-      plan: { operations: Array<{ code: string }> };
+      feedback: { kind: string; operations: Array<{ code: string }> } | null;
     };
-    expect(planBody.plan.operations.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(planBody.feedback?.operations.map((item) => item.code))
+      .toContain("feedback_diarrhea_intervention");
   });
 
   it("normalizes recordedAt to UTC and rejects invalid timestamps", async () => {

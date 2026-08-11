@@ -185,7 +185,7 @@ describe("local deterministic tools", () => {
     }
   });
 
-  it("previews diarrhea adjustment from the current observation and keeps a frozen receipt", async () => {
+  it("previews mild diarrhea as individual intervention and keeps a frozen receipt", async () => {
     const { store, context } = contextFor("user-a");
     try {
       const previewContext = {
@@ -204,17 +204,22 @@ describe("local deterministic tools", () => {
       const details = output.details as {
         data: {
           worstGrade: string;
+          status: string;
           cumulativePowderGrams: number;
           cumulativeSource: string;
-          deviceOperation: { mode: string; manualDispositionRequired: boolean };
+          deviceOperation: unknown;
+          affectsWholePen: boolean;
+          isolateAffectedPiglets: boolean;
         };
         evidenceReceipt: { receiptId: string };
       };
       expect(details.data.worstGrade).toBe("mild");
+      expect(details.data.status).toBe("individual_intervention");
       expect(details.data.cumulativePowderGrams).toBe(0);
       expect(details.data.cumulativeSource).toBe("observation");
-      expect(details.data.deviceOperation.mode).toBe("timed_quantity");
-      expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
+      expect(details.data.deviceOperation).toBeNull();
+      expect(details.data.affectsWholePen).toBe(false);
+      expect(details.data.isolateAffectedPiglets).toBe(true);
       expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
     } finally {
       store.close();
@@ -224,7 +229,7 @@ describe("local deterministic tools", () => {
   it("falls back to the latest record grade when observation and params carry none", async () => {
     const { store, context } = contextFor("user-a", [
       { recordedAt: "2026-08-05T08:00:00.000Z", diarrheaGrade: "none", actualPowderGrams: 80 },
-      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "mild", actualPowderGrams: 0 },
+      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "moderate", actualPowderGrams: 0 },
     ]);
     try {
       const tool = createFeedingTools(context)
@@ -238,12 +243,14 @@ describe("local deterministic tools", () => {
       const details = output.details as {
         data: {
           worstGrade: string;
+          status: string;
           cumulativePowderGrams: number;
           cumulativeSource: string;
           deviceOperation: { manualDispositionRequired: boolean };
         };
       };
-      expect(details.data.worstGrade).toBe("mild");
+      expect(details.data.worstGrade).toBe("moderate");
+      expect(details.data.status).toBe("feeding_reduction_proposal");
       expect(details.data.cumulativePowderGrams).toBe(0);
       expect(details.data.cumulativeSource).toBe("latest_record");
       expect(details.data.deviceOperation.manualDispositionRequired).toBe(false);
@@ -257,7 +264,7 @@ describe("local deterministic tools", () => {
       {
         recordedAt: "2026-08-05T09:00:00.000Z",
         dayIndex: 0,
-        diarrheaGrade: "mild",
+        diarrheaGrade: "moderate",
         actualPowderGrams: 0,
       },
     ]);
@@ -270,6 +277,8 @@ describe("local deterministic tools", () => {
         data: {
           status: string;
           feedbackOrigin: { kind: string };
+          feedback: { kind: string; operations: Array<{ code: string }>; proposedSetting: unknown };
+          amendments: Array<{ id: string; severity: string; proposal: unknown }>;
           dailyOperationPlan: {
             businessDate: string;
             operations: Array<{ code: string }>;
@@ -277,18 +286,29 @@ describe("local deterministic tools", () => {
         };
         evidenceReceipt: { receiptId: string };
       };
-      expect(details.data.status).toBe("ok");
+      expect(details.data.status).toBe("amendment");
       expect(details.data.feedbackOrigin.kind).toBe("diarrhea");
       expect(details.data.dailyOperationPlan.operations.map((item) => item.code))
+        .not.toContain("feedback_diarrhea_confirm");
+      expect(details.data.feedback.operations.map((item) => item.code))
         .toContain("feedback_diarrhea_confirm");
+      expect(details.data.feedback.proposedSetting).not.toBeNull();
+      expect(details.data.amendments).toHaveLength(1);
       expect(details.evidenceReceipt.receiptId).toMatch(/^nbj-receipt-[0-9a-f]{24}$/);
       const stored = store.getDailyOperationPlan(
         "user-a",
         "batch-1",
         details.data.dailyOperationPlan.businessDate,
       );
-      expect(stored?.proposedSetting).not.toBeNull();
-      expect(stored?.feedbackOrigin?.kind).toBe("diarrhea");
+      expect(stored?.proposedSetting).toBeNull();
+      expect(stored?.feedbackOrigin).toBeNull();
+      const amendments = store.getDailyOperationAmendments(
+        "user-a",
+        "batch-1",
+        details.data.dailyOperationPlan.businessDate,
+      );
+      expect(amendments).toHaveLength(1);
+      expect(amendments[0]?.proposal).not.toBeNull();
     } finally {
       store.close();
     }

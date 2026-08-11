@@ -184,6 +184,8 @@ export interface CommitModeSwitchInput {
   devicePlanSha256: string;
   nextData: Record<string, unknown>;
   result: Record<string, unknown>;
+  /** Optional pending daily-operation plan refresh applied in the same transaction. */
+  planInput?: EnsureDailyOperationPlanInput;
 }
 
 /**
@@ -231,7 +233,8 @@ export interface DailyObservation {
   createdAt: string;
 }
 
-export type FeedbackOriginKind = "diarrhea" | "creep_control";
+export type FeedbackOriginKind = "diarrhea" | "creep_control" | "mode_change";
+export type BusinessDayExecutionState = "unknown" | "zero" | "executed";
 
 export interface FeedbackDeviceProposal {
   kind: FeedbackOriginKind;
@@ -249,7 +252,7 @@ export interface FeedbackDeviceProposal {
   manualDispositionRequired: boolean;
   proposalDigest: string;
   cumulativePowderGrams?: number;
-  resultKind?: "proposal" | "preview_only" | "manual_only";
+  resultKind?: "individual_intervention" | "feeding_reduction_proposal" | "manual_only";
   adjustedProgramTotal?: number;
   remainingDeliverable?: number;
   targetSlot?: string;
@@ -360,7 +363,7 @@ export interface EnsureDailyOperationAmendmentInput {
   batchId: string;
   businessDate: string;
   basePlanId: string;
-  baseConfirmationId: string;
+  baseConfirmationId: string | null;
   originId: string;
   originKind: FeedbackOriginKind;
   severity: "mild" | "moderate" | "severe" | null;
@@ -375,7 +378,7 @@ export interface DecideDailyOperationAmendmentInput {
   userId: string;
   batchId: string;
   amendmentId: string;
-  action: "confirm" | "reject" | "apply";
+  action: "confirm" | "reject" | "apply" | "cancel";
   decidedBy: string;
   expectedRevision: number;
   expectedAmendmentSha256: string;
@@ -559,6 +562,16 @@ export interface LocalStore {
     batchId: string,
     dateLocal?: string,
   ): FeedingDecision | null;
+  getActiveDecisionRecord(
+    userId: string,
+    batchId: string,
+    dateLocal?: string,
+  ): { id: string; decision: FeedingDecision } | null;
+  getBusinessDayExecutionState(
+    userId: string,
+    batchId: string,
+    businessDate: string,
+  ): { state: BusinessDayExecutionState; cumulativeActualGrams: number | null };
   createSession(input: CreateSessionInput): AgentSession;
   listSessions(userId: string, batchId: string): AgentSession[];
   appendMessage(input: AppendMessageInput): AgentMessage;

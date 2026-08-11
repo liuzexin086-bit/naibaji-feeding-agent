@@ -13,6 +13,7 @@ describe("local container contract", () => {
     expect(dockerfile).toContain("USER node");
     expect(dockerfile).toContain("HEALTHCHECK");
     expect(dockerfile).toContain("http://127.0.0.1:8080/health");
+    expect(dockerfile).toContain('echo "$GIT_COMMIT" > /app/version');
     expect(dockerfile).not.toMatch(/COPY\s+\.\s+/);
   });
 

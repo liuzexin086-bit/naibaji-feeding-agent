@@ -93,11 +93,19 @@
     .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 20px; }
     .section-head h1, .section-head h2, .section-head h3 { margin: 0; font-size: 20px; line-height: 1.2; letter-spacing: -.025em; }
     .section-head p { margin: 5px 0 0; color: var(--muted); }
-    .program-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .program-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; }
     .program-stat { min-width: 0; }
     .program-stat .label { display: block; color: var(--muted); font-size: 13px; }
     .program-stat strong { display: inline-block; margin-top: 3px; font-size: clamp(25px, 4vw, 38px); line-height: 1.1; font-variant-numeric: tabular-nums; letter-spacing: -.045em; }
-    .program-stat .unit { margin-left: 4px; color: var(--muted); font-size: 14px; }
+    .program-stat .unit { margin-left: 4px; color: var(--muted); font-size: 14px; white-space: normal; }
+    .execution-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 22px; }
+    .execution-block { min-width: 0; padding: 13px 14px; background: var(--surface-secondary); border: 1px solid var(--line); border-radius: 13px; }
+    .execution-block .label { display: block; color: var(--muted); font-size: 12px; font-weight: 650; }
+    .execution-block strong { display: block; margin-top: 5px; font-size: 17px; line-height: 1.25; letter-spacing: -.01em; }
+    .execution-detail { display: block; margin-top: 4px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .execution-block strong.ok { color: var(--green); }
+    .execution-block strong.warn { color: var(--amber); }
+    .execution-block strong.blocked { color: var(--red); }
     .program-time-label { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-weight: 650; }
     .device-feedback-status { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-secondary); color: var(--amber); font-size: 13px; font-weight: 650; }
     .tag { display: inline-flex; align-items: center; min-height: 30px; padding: 0 10px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
@@ -229,6 +237,7 @@
 
     @media (max-width: 900px) {
       .program-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .execution-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .record-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .schedule-amount { grid-column: 1 / -1; }
     }
@@ -272,6 +281,7 @@
     }
     @media (max-width: 339px) {
       .program-grid { grid-template-columns: 1fr; }
+      .execution-grid { grid-template-columns: 1fr; }
       .top-actions .icon-btn:last-child { display: none; }
     }
     @media (prefers-reduced-motion: reduce) {
@@ -307,10 +317,18 @@
 
     <main class="page">
       <section class="device-program surface-content" aria-labelledby="deviceHeading">
-        <header class="section-head"><div><h1 id="deviceHeading">今日设备设定</h1></div></header>
+        <header class="section-head"><div><h1 id="deviceHeading">今日执行状态</h1></div></header>
+        <div class="execution-grid">
+          <div class="execution-block"><span class="label">模式</span><strong id="execModeValue">—</strong><span id="execModeDetail" class="execution-detail">—</span></div>
+          <div class="execution-block"><span class="label">教槽控奶</span><strong id="execControlValue">—</strong><span id="execControlDetail" class="execution-detail">—</span></div>
+          <div class="execution-block"><span class="label">今日计划</span><strong id="execPlanValue">—</strong><span id="execPlanDetail" class="execution-detail">—</span></div>
+          <div class="execution-block"><span class="label">运行状态</span><strong id="execRuntimeValue">—</strong><span id="execRuntimeDetail" class="execution-detail">—</span></div>
+        </div>
         <div class="program-grid">
           <div id="singlePowderStat" class="program-stat"><span class="label">单次下粉</span><strong id="singlePowder">—</strong><span class="unit">g / 次</span></div>
+          <div class="program-stat"><span id="feedCountLabel" class="label">今日最大配奶次数</span><strong id="feedCount">—</strong><span class="unit">次</span></div>
           <div class="program-stat"><span id="dailyPowderLabel" class="label">程序总量</span><strong id="dailyPowder">—</strong><span class="unit">g</span></div>
+          <div class="program-stat"><span class="label">设备方案</span><strong id="deviceSourceValue">—</strong><span id="programBasisVisible" class="unit">—</span></div>
         </div>
         <p id="deviceFeedbackStatus" class="device-feedback-status" role="status" aria-live="polite" hidden></p>
         <div class="program-time-label" id="programTimeLabel">配奶时间点</div>
@@ -320,7 +338,7 @@
       </section>
 
       <section id="modePanel" class="mode-panel surface-content" aria-labelledby="modeHeading">
-        <header class="section-head"><div><h2 id="modeHeading">饲喂模式模板</h2></div><div class="mode-current"><strong id="selectedModeLabel" class="tag tag-blue">等待批次</strong><span id="effectiveModeLabel" class="tag tag-green" hidden></span></div></header>
+        <header class="section-head"><div><h2 id="modeHeading">饲喂模式模板</h2></div><div class="mode-current"><strong id="selectedModeLabel" class="tag tag-blue">等待批次</strong><span id="plannedModeLabel" class="tag tag-green" hidden></span></div></header>
         <div class="mode-options" role="group" aria-label="选择饲喂模式模板">
           <button id="timedModeButton" class="mode-option" type="button" data-mode="timed_quantity" aria-pressed="false"><strong>定时定量</strong><span>保留既有时间点、排除时段、精度和减餐优先级</span></button>
           <button id="freeModeButton" class="mode-option" type="button" data-mode="free_feeding" aria-pressed="false"><strong>自由采食</strong><span>采用批次冻结 SOP 的窗口、阶段条件与异常阻断</span></button>
@@ -379,7 +397,7 @@
     (function () {
       'use strict';
       var $ = function (id) { return document.getElementById(id); };
-      var state = { user: null, batches: [], currentBatchId: null, batch: null, today: null, todayOperations: null, todayOperationsConfirmation: null, todayAmendments: [], records: [], agentSession: null, agentMessages: [], agentHistoryLoaded: false, agentBusy: false, modeBusy: false, operationsBusy: false, dialog: null, dialogCloseTimer: null, batchMenuTimer: null, longPressTimer: null, longPressStart: null, toastTimer: null };
+      var state = { user: null, batches: [], currentBatchId: null, batch: null, today: null, todayOperations: null, todayOperationsConfirmation: null, todayAmendments: [], diarrheaFeedback: null, records: [], agentSession: null, agentMessages: [], agentHistoryLoaded: false, agentBusy: false, modeBusy: false, operationsBusy: false, dialog: null, dialogCloseTimer: null, batchMenuTimer: null, longPressTimer: null, longPressStart: null, toastTimer: null };
       var creepLabels = { none: '无', low: '低', medium: '中', high: '高', excellent: '极好' };
       var diarrheaLabels = { none: '无', mild: '轻', moderate: '中', severe: '重' };
       var waterLabels = { closed: '关闭', open: '开启', exception: '异常' };
@@ -395,7 +413,20 @@
       function dayNumber() { return number(value(state.batch, 'currentDayIndex', 'current_day_index', 0), 0) + 1; }
       function currentHeads() { return number(value(state.batch, 'effectiveHeads', 'effective_heads', first(value(state.batch, 'initialHeads', 'initial_heads', 0), 0)), 0); }
       function selectedMode() { var snapshot = value(state.batch, 'devicePlanSnapshot', 'device_plan_snapshot', null) || {}; return value(state.batch, 'selectedMode', 'selected_mode', first(value(snapshot, 'selectedMode', 'selected_mode', null), value(snapshot, 'mode', 'mode', null), 'timed_quantity')); }
-      function effectiveMode() { var setting = value(state.today, 'setting', 'setting', null) || {}; return value(setting, 'mode', 'mode', value(state.today, 'deviceMode', 'device_mode', selectedMode())); }
+      function layeredModeState(today) {
+        var source = today || {};
+        var modeState = value(source, 'modeState', 'mode_state', null);
+        if (modeState && typeof modeState === 'object') return modeState;
+        return { selectedMode: selectedMode(), plannedMode: selectedMode() };
+      }
+      function todayPlanMode(today) { var source = today || {}; var active = value(source, 'activeDecision', 'active_decision', null); var planned = value(source, 'plannedDecision', 'planned_decision', null); var decision = active || planned || {}; var setting = decision.setting && typeof decision.setting === 'object' ? decision.setting : {}; return value(setting, 'mode', 'mode', ''); }
+      function planSetting(today) { var source = today || {}; var active = value(source, 'activeDecision', 'active_decision', null); var planned = value(source, 'plannedDecision', 'planned_decision', null); var decision = active || planned || {}; if (decision.setting && typeof decision.setting === 'object') return decision.setting; return {}; }
+      function planCount(today) { var setting = planSetting(today); return todayPlanMode(today) === 'free_feeding' ? setting.freeDispenseLimit : setting.mealCount; }
+      function controlStateOf(today) { return value(today || {}, 'controlState', 'control_state', {}) || {}; }
+      function runtimeStateOf(today) { return value(today || {}, 'runtimeState', 'runtime_state', {}) || {}; }
+      function decisionForDisplay(today) { var source = today || {}; var active = value(source, 'activeDecision', 'active_decision', null); if (active && typeof active === 'object') return active; var planned = value(source, 'plannedDecision', 'planned_decision', null); return planned && typeof planned === 'object' ? planned : null; }
+      function planEvidence(today) { var decision = decisionForDisplay(today); return decision && decision.evidence && typeof decision.evidence === 'object' ? decision.evidence : {}; }
+      function plannedExceptionActions(today) { var source = today || {}; var planned = value(source, 'plannedDecision', 'planned_decision', null); return planned && Array.isArray(planned.exceptionActions) ? planned.exceptionActions : []; }
       function isFirstBatchDay() { return !!state.batch && number(value(state.batch, 'currentDayIndex', 'current_day_index', 0), 0) === 0; }
       function eventText(event) { return typeof event === 'string' ? event : first(event && event.instruction, event && event.action, event && event.title, event && event.message, '请按现场 SOP 处置'); }
       function showToast(message) { var toast = $('toast'); toast.textContent = message; toast.classList.add('show'); clearTimeout(state.toastTimer); state.toastTimer = setTimeout(function () { toast.classList.remove('show'); }, 2600); }
@@ -442,18 +473,91 @@
       function closeDialog() { var active = state.dialog; if (!active) return; var scrim = $('scrim'); active.element.classList.remove('open'); active.element.setAttribute('aria-hidden', 'true'); scrim.classList.remove('open'); document.body.classList.remove('modal-open'); state.dialog = null; clearTimeout(state.dialogCloseTimer); state.dialogCloseTimer = setTimeout(function () { if (!state.dialog || state.dialog.element !== active.element) active.element.hidden = true; if (!state.dialog) scrim.hidden = true; }, 320); if (active.trigger && typeof active.trigger.focus === 'function') active.trigger.focus({ preventScroll: true }); }
       function trapFocus(event, dialog) { if (event.key !== 'Tab') return; var nodes = Array.from(dialog.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[href],[tabindex="0"]')); if (!nodes.length) return; var firstNode = nodes[0]; var lastNode = nodes[nodes.length - 1]; if (event.shiftKey && document.activeElement === firstNode) { event.preventDefault(); lastNode.focus(); } else if (!event.shiftKey && document.activeElement === lastNode) { event.preventDefault(); firstNode.focus(); } }
 
-      function deviceMode(today) { var source = today || {}; var setting = value(source, 'setting', 'setting', {}) || {}; return value(source, 'deviceMode', 'device_mode', value(source, 'effectiveMode', 'effective_mode', value(setting, 'mode', 'mode', ''))); }
-      function deviceSchedule(today) {
-        var source = today || {}; var mode = deviceMode(source); var windows = first(source.freeWindows, source.free_windows, value(source.setting || {}, 'freeWindows', 'free_windows', [])); if (mode === 'free_feeding' && Array.isArray(windows)) { var labels = windows.map(function (window) { var start = value(window || {}, 'startLocal', 'start_local', ''); var end = value(window || {}, 'endLocal', 'end_local', ''); return start && end ? String(start) + '–' + String(end) : ''; }).filter(Boolean); return { label: '自由采食时间段', entries: labels }; } var times = first(source.mealTimes, source.meal_times, []); return { label: '配奶时间点', entries: Array.isArray(times) ? times : [] }; }
+      function deviceSchedule(today) { var setting = planSetting(today); var mode = todayPlanMode(today); if (mode === 'free_feeding') { var windows = Array.isArray(setting.freeWindows) ? setting.freeWindows : []; var labels = windows.map(function (window) { var start = value(window || {}, 'startLocal', 'start_local', ''); var end = value(window || {}, 'endLocal', 'end_local', ''); return start && end ? String(start) + '–' + String(end) : ''; }).filter(Boolean); return { label: '自由采食窗口', entries: labels }; } var timed = Array.isArray(setting.timedMeals) ? setting.timedMeals.map(function (meal) { return value(meal || {}, 'timeLocal', 'time_local', ''); }).filter(Boolean) : []; return { label: '配奶时间点', entries: timed }; }
       function renderTimeline() {
         var timeline = $('timeline'); var schedule = deviceSchedule(state.today); $('programTimeLabel').textContent = schedule.label; if (!schedule.entries.length) { timeline.innerHTML = '<div class="empty">暂无设备程序</div>'; return; }
         timeline.innerHTML = schedule.entries.map(function (entry) { return '<div class="timeline-item"><span class="timeline-time">' + escapeHtml(entry) + '</span></div>'; }).join('');
       }
+      function diarrheaCardHtml(feedback, amendment) {
+        var batchId = state.batch && state.batch.id ? String(state.batch.id) : '';
+        var origin = feedback && feedback.feedbackOrigin || {};
+        var source = origin.sourceObservation || {};
+        var grade = source.diarrheaGrade || '';
+        var proposal = feedback && feedback.proposedSetting || null;
+        if (grade === 'mild') {
+          return '<li class="exception-card"><strong>轻度腹泻 · 个体干预</strong><span>建议处理：标记并隔离腹泻仔猪；病猪控奶一次；其他仔猪继续执行当前饲喂程序。</span><span>当前设备程序保持不变。</span><span class="exception-actions"><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'individual_intervention_completed\')">已完成隔离与控奶</button><button type="button" onclick="openAgent(\'已录入轻度腹泻，请给出个体隔离与病猪控奶建议；不要修改整栏设备。\', true)">打开 Agent</button></span></li>';
+        }
+        if (grade === 'severe') {
+          return '<li class="exception-card"><strong>重度腹泻 · 紧急人工处置</strong><span>自动饲喂调整已停止。请立即隔离明显腹泻仔猪，检查精神状态、呕吐、粪便性状、体温、脱水、发病头数和传播速度，并检查栏舍温度、湿度、饮水、饲料和卫生。</span><span>设备方案保持当前方案，不自动修改。</span><span class="exception-actions"><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'examination_recorded\')">记录现场检查</button><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'isolation_completed\')">记录隔离</button><button type="button" onclick="diarrheaManualAction(\'' + batchId + '\', \'veterinary_referral\')">联系/转兽医处置</button></span></li>';
+        }
+        if (grade === 'moderate') {
+          var target = proposal && proposal.targetSlot ? String(proposal.targetSlot) : '待确认';
+          var total = proposal && proposal.dailyPowderGrams != null ? number(proposal.dailyPowderGrams, 0) : '—';
+          if (amendment && amendment.status === 'cancelled') {
+            return '<li class="exception-card"><strong>中度腹泻减餐方案已取消</strong><span>设备程序未修改。如果现场仍为中度腹泻，请重新记录最新观察后重新评估。</span></li>';
+          }
+          if (amendment && amendment.status === 'superseded') {
+            return '<li class="exception-card"><strong>中度腹泻减餐方案已被更新观察替代</strong><span>不应用旧方案；请基于最新现场观察重新评估。</span></li>';
+          }
+          var buttons = '';
+          if (amendment && amendment.status === 'pending') {
+            buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'confirm\')">确认减餐</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'reject\')">拒绝</button>';
+          } else if (amendment && amendment.status === 'confirmed') {
+            buttons = '<button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'apply\')">应用调整</button><button type="button" onclick="amendAction(\'' + batchId + '\', \'' + String(amendment.id) + '\', \'cancel\')">取消调整</button>';
+          } else if (amendment && amendment.status === 'applied') {
+            buttons = '<span>已应用</span>';
+          }
+          return '<li class="exception-card"><strong>中度腹泻 · 整栏减一次采食</strong><span>目标槽位：' + escapeHtml(target) + '；当前饲喂模式保持不变。</span><span>调整后整日程序总量：' + escapeHtml(String(total)) + ' g；需独立人工确认后应用。</span><span class="exception-actions">' + buttons + '</span></li>';
+        }
+        return '';
+      }
       function renderExceptions() {
-        var actions = state.today && (state.today.exceptionActions || state.today.exception_actions); var panel = $('exceptionPanel'); if (!Array.isArray(actions) || !actions.length) { panel.hidden = true; return; } panel.hidden = false; $('exceptionList').innerHTML = actions.map(function (action) { return '<li>' + escapeHtml(eventText(action)) + '</li>'; }).join('');
+        var actions = plannedExceptionActions(state.today); var panel = $('exceptionPanel'); var items = [];
+        if (Array.isArray(actions)) items = actions.map(function (action) { return '<li>' + escapeHtml(eventText(action)) + '</li>'; });
+        var feedback = state.diarrheaFeedback;
+        if (feedback && feedback.kind === 'diarrhea') {
+          var origin = feedback.feedbackOrigin || {};
+          var grade = origin.sourceObservation && origin.sourceObservation.diarrheaGrade;
+          var amendment = (state.todayAmendments || []).find(function (row) { return row.originKind === 'diarrhea' && row.severity === grade; });
+          var card = diarrheaCardHtml(feedback, amendment);
+          if (card) items.push(card);
+        }
+        if (!items.length) { panel.hidden = true; return; }
+        panel.hidden = false; $('exceptionList').innerHTML = items.join('');
+      }
+      function runtimeLabel(reason) {
+        return ({ blockage: '设备堵塞', probe_contamination: '探头污染', refusal: '持续拒奶', manual_hold: '手动保持', device_blocked: '设备堵塞', feeding_refusal: '持续拒奶' })[reason] || reason || '';
+      }
+      function renderExecutionState() {
+        var today = state.today || {}; var modeState = layeredModeState(today); var selected = modeState.selectedMode || selectedMode(); var planned = modeState.plannedMode || selected; var control = controlStateOf(today); var runtime = runtimeStateOf(today); var setting = planSetting(today); var planMode = todayPlanMode(today) || planned || selected;
+        if (!state.batch || !state.today) {
+          $('execModeValue').textContent = '—'; $('execModeDetail').textContent = '—'; $('execControlValue').textContent = '—'; $('execControlDetail').textContent = '—'; $('execPlanValue').textContent = '—'; $('execPlanDetail').textContent = '—'; $('execRuntimeValue').textContent = '—'; $('execRuntimeDetail').textContent = '—'; $('execRuntimeValue').className = ''; return;
+        }
+        $('execModeValue').textContent = modeLabels[selected] || selected || '—';
+        $('execModeDetail').textContent = '计划模式：' + (modeLabels[planned] || planned || '—');
+        var controlActive = control.status === 'active';
+        $('execControlValue').textContent = controlActive ? '已启动' : '未启动';
+        $('execControlDetail').textContent = controlActive
+          ? '起始日 D' + (number(control.startDay, 0) + 1) + (control.triggerGrade ? ' · 触发档位 ' + (creepLabels[control.triggerGrade] || control.triggerGrade) : '')
+          : '教槽控奶未启动';
+        var single = setting.singlePowderGrams;
+        var count = planCount(today);
+        var total = setting.dailyPowderGrams;
+        $('execPlanValue').textContent = modeLabels[planMode] || planMode || '—';
+        var planParts = [];
+        if (single != null) planParts.push('单次 ' + number(single, 0) + ' g/次');
+        if (count != null) planParts.push('今日最大配奶次数 ' + number(count, 0) + ' 次');
+        if (total != null) planParts.push('程序总量 ' + number(total, 0) + ' g');
+        var schedule = deviceSchedule(today);
+        if (schedule.entries.length) planParts.push(schedule.label + ' ' + schedule.entries.join('、'));
+        $('execPlanDetail').textContent = planParts.length ? planParts.join(' · ') : '—';
+        var runtimeValue = $('execRuntimeValue'); var runtimeDetail = $('execRuntimeDetail'); runtimeValue.className = '';
+        runtimeValue.textContent = runtime.state === 'blocked' ? '已阻断' : runtime.state === 'manual_hold' ? '手动保持' : runtime.state === 'normal' ? '正常' : '—';
+        runtimeDetail.textContent = runtime.state === 'normal' ? '设备可继续执行' : (Array.isArray(runtime.reasons) && runtime.reasons.length ? runtime.reasons.map(runtimeLabel).join('、') : '需人工处理');
+        runtimeValue.classList.add(runtime.state === 'blocked' ? 'blocked' : runtime.state === 'manual_hold' ? 'warn' : 'ok');
       }
       function renderDevice() {
-        var today = state.today || {}; var single = value(today, 'singlePowderGrams', 'single_powder_grams', null); var count = value(today, 'mealCount', 'meal_count', null); var total = value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', null); var suggestedTotal = value(today, 'suggestedDailyPowderGrams', 'suggested_daily_powder_grams', total); var suggestedCount = value(today, 'suggestedDailyMealCount', 'suggested_daily_meal_count', 12); var mode = deviceMode(today); var freeFeeding = mode === 'free_feeding'; $('singlePowderStat').hidden = freeFeeding; $('dailyPowderLabel').textContent = freeFeeding ? '建议单日下粉总量（' + number(suggestedCount, 12) + '次）' : '程序总量'; $('singlePowder').textContent = single == null ? '—' : number(single, 0); $('mealCount').textContent = count == null ? '—' : number(count, 0); $('dailyPowder').textContent = (freeFeeding ? suggestedTotal : total) == null ? '—' : number(freeFeeding ? suggestedTotal : total, 0); $('nextMeal').textContent = value(today, 'nextMealTime', 'next_meal_time', first(today.mealTimes, today.meal_times, [])[0]) || '—'; $('modePill').textContent = modeLabels[mode] || mode || '—'; $('programVersion').textContent = [value(today, 'modelVersion', 'model_version', ''), value(today, 'sopVersion', 'sop_version', '')].filter(Boolean).join(' · ') || '版本未返回'; $('programBasis').textContent = freeFeeding ? '建议总量按冻结模型日总量归一化' : '程序总量 = 单次量 × 实际餐次'; $('deviceSource').textContent = value(today, 'planSource', 'plan_source', '模型程序'); renderDeviceFeedbackStatus(); renderTimeline(); renderExceptions(); }
+        var today = state.today || {}; var setting = planSetting(today); var mode = todayPlanMode(today); var freeFeeding = mode === 'free_feeding'; var activeDecision = value(today, 'activeDecision', 'active_decision', null); var evidence = planEvidence(today); var single = setting.singlePowderGrams; var count = planCount(today); var total = setting.dailyPowderGrams; $('singlePowderStat').hidden = false; $('singlePowder').textContent = single == null ? '—' : number(single, 0); $('feedCountLabel').textContent = freeFeeding ? '今日最大配奶次数' : '配奶次数'; $('feedCount').textContent = count == null ? '—' : number(count, 0); $('dailyPowderLabel').textContent = '程序总量'; $('dailyPowder').textContent = total == null ? '—' : number(total, 0); $('deviceSourceValue').textContent = activeDecision ? '已应用设备方案' : '今日计划方案'; $('programBasisVisible').textContent = freeFeeding ? '程序总量 = 单次 × 今日最大配奶次数' : '程序总量 = 单次 × 配奶次数'; $('mealCount').textContent = count == null ? '—' : number(count, 0); $('nextMeal').textContent = deviceSchedule(today).entries[0] || '—'; $('modePill').textContent = modeLabels[mode] || mode || '—'; $('programVersion').textContent = [value(evidence, 'modelVersion', 'model_version', ''), value(evidence, 'sopVersion', 'sop_version', '')].filter(Boolean).join(' · ') || '版本未返回'; $('programBasis').textContent = freeFeeding ? '程序总量 = 单次 × 今日最大配奶次数' : '程序总量 = 单次量 × 实际餐次'; $('deviceSource').textContent = activeDecision ? '已应用设备方案' : '今日计划方案'; renderDeviceFeedbackStatus(); renderTimeline(); renderExecutionState(); renderExceptions(); }
       function renderDeviceFeedbackStatus() {
         var plan = state.todayOperations; var confirmation = state.todayOperationsConfirmation; var status = '';
         if (confirmation && confirmation.deviceSetting) status = '已应用方案';
@@ -466,16 +570,15 @@
         body.innerHTML = rows.slice().sort(function (a, b) { return number(value(a, 'dayIndex', 'day_index', 0), 0) - number(value(b, 'dayIndex', 'day_index', 0), 0); }).map(function (row) { var times = first(value(row, 'mealTimes', 'meal_times', null), []); var timeText = Array.isArray(times) ? times.join('、') : String(times || '—'); var mode = modeLabels[value(row, 'deviceMode', 'device_mode', '')] || value(row, 'deviceMode', 'device_mode', '—'); var estimatedWeight = value(row, 'estimatedAverageWeightKg', 'estimated_average_weight_kg', null); var actualPowder = value(row, 'actualPowderGrams', 'actual_powder_grams', null); var rowHeads = number(value(row, 'effectiveHeads', 'effective_heads', 0), 0); var perHeadPowder = actualPowder == null || rowHeads <= 0 ? null : number(actualPowder, 0) / rowHeads; return '<tr><td>第' + (number(value(row, 'dayIndex', 'day_index', 0), 0) + 1) + '天</td><td><strong>' + escapeHtml(value(row, 'dayAge', 'day_age', '—')) + '</strong></td><td>' + (estimatedWeight == null ? '—' : escapeHtml(number(estimatedWeight, 0).toFixed(3)) + ' kg') + '</td><td>' + escapeHtml(value(row, 'effectiveHeads', 'effective_heads', '—')) + '</td><td>' + escapeHtml(mode) + '</td><td>' + escapeHtml(value(row, 'singlePowderGrams', 'single_powder_grams', '—')) + ' g</td><td>' + escapeHtml(value(row, 'mealCount', 'meal_count', '—')) + '</td><td>' + escapeHtml(timeText) + '</td><td>' + escapeHtml(value(row, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')) + ' g</td><td>' + escapeHtml(value(row, 'actualPowderGrams', 'actual_powder_grams', '—')) + ' g</td><td>' + escapeHtml(creepLabels[value(row, 'creepGrade', 'creep_grade', 'none')] || '无') + '</td><td>' + (perHeadPowder == null ? '—' : escapeHtml(perHeadPowder.toFixed(2) + ' g/头')) + '</td><td>' + escapeHtml(diarrheaLabels[value(row, 'diarrheaGrade', 'diarrhea_grade', 'none')] || '无') + '</td><td>' + escapeHtml(waterLabels[value(row, 'waterState', 'water_state', 'closed')] || value(row, 'waterState', 'water_state', '—')) + '</td></tr>'; }).join('');
       }
       function renderMode() {
-        var timedButton = $('timedModeButton'); var freeButton = $('freeModeButton'); var message = $('modeMessage'); var selectedLabel = $('selectedModeLabel'); var effectiveLabel = $('effectiveModeLabel');
-        if (!state.batch) { selectedLabel.textContent = '等待批次'; effectiveLabel.hidden = true; timedButton.setAttribute('aria-pressed', 'false'); freeButton.setAttribute('aria-pressed', 'false'); timedButton.disabled = true; freeButton.disabled = true; message.className = 'mode-message'; message.hidden = true; message.textContent = ''; return; }
-        var selected = selectedMode(); var effective = effectiveMode(); var firstDayLocked = isFirstBatchDay(); var completed = value(state.batch, 'status', 'status', 'active') === 'completed'; var available = value(state.batch, 'availableModes', 'available_modes', ['timed_quantity', 'free_feeding']); if (!Array.isArray(available) || !available.length) available = ['timed_quantity', 'free_feeding'];
-        selectedLabel.textContent = modeLabels[selected] || '未选择'; timedButton.setAttribute('aria-pressed', selected === 'timed_quantity' ? 'true' : 'false'); freeButton.setAttribute('aria-pressed', selected === 'free_feeding' ? 'true' : 'false'); timedButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('timed_quantity') < 0; freeButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('free_feeding') < 0;
-        effectiveLabel.hidden = effective === selected; effectiveLabel.textContent = '今日执行：' + (modeLabels[effective] || effective);
+        var timedButton = $('timedModeButton'); var freeButton = $('freeModeButton'); var message = $('modeMessage'); var selectedLabel = $('selectedModeLabel'); var plannedLabel = $('plannedModeLabel');
+        if (!state.batch) { selectedLabel.textContent = '等待批次'; plannedLabel.hidden = true; timedButton.setAttribute('aria-pressed', 'false'); freeButton.setAttribute('aria-pressed', 'false'); timedButton.disabled = true; freeButton.disabled = true; message.className = 'mode-message'; message.hidden = true; message.textContent = ''; return; }
+        var modeState = layeredModeState(state.today || {}); var selected = modeState.selectedMode || selectedMode(); var planned = modeState.plannedMode || selected; var firstDayLocked = isFirstBatchDay(); var completed = value(state.batch, 'status', 'status', 'active') === 'completed'; var available = value(state.batch, 'availableModes', 'available_modes', ['timed_quantity', 'free_feeding']); if (!Array.isArray(available) || !available.length) available = ['timed_quantity', 'free_feeding'];
+        selectedLabel.textContent = modeLabels[selected] || '未选择'; plannedLabel.hidden = planned === selected; plannedLabel.textContent = '今日计划：' + (modeLabels[planned] || planned); timedButton.setAttribute('aria-pressed', selected === 'timed_quantity' ? 'true' : 'false'); freeButton.setAttribute('aria-pressed', selected === 'free_feeding' ? 'true' : 'false'); timedButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('timed_quantity') < 0; freeButton.disabled = state.modeBusy || firstDayLocked || completed || available.indexOf('free_feeding') < 0;
         message.className = 'mode-message'; message.hidden = false;
         if (state.modeBusy) message.textContent = '正在切换并重新读取批次状态……';
         else if (firstDayLocked) { message.className += ' warning'; message.textContent = '首日固定执行 17:00 / 20:00 / 23:00 / 02:00 / 05:00 / 08:00 六次定时定量程序，不可切换。'; }
         else if (completed) message.textContent = '批次已结束，模式只读。';
-        else if (effective !== selected) { message.className += ' warning'; message.textContent = '已选择' + (modeLabels[selected] || selected) + '，今日因控奶或异常阻断按' + (modeLabels[effective] || effective) + '执行；存储的两套模板均未改动。'; }
+        else if (planned !== selected) { message.className += ' warning'; message.textContent = '当前选择与今日计划模式不一致；控奶和异常不会自动改变模式。请核对下方今日计划与运行状态。'; }
         else { message.hidden = true; message.textContent = ''; }
       }
       function operationWindowText(window) {
@@ -516,12 +619,20 @@
         }).join('') : '<li class="empty">该业务日没有待执行操作</li>';
         var amendments = Array.isArray(state.todayAmendments) ? state.todayAmendments : [];
         if (amendments.length) {
-          var amendmentStatusLabels = { pending: '待独立确认', confirmed: '已独立确认', rejected: '已拒绝', applied: '已应用' };
+          var amendmentStatusLabels = { pending: '待独立确认', confirmed: '已独立确认', rejected: '已拒绝', applied: '已应用', cancelled: '已取消', superseded: '已被更新替代' };
           var amendmentSeverityLabels = { mild: '轻度', moderate: '中度', severe: '重度' };
           list.innerHTML += amendments.map(function (amendment) {
             var originLabel = amendment.originKind === 'diarrhea' ? '腹泻' : '教槽控奶';
             var severityLabel = amendment.severity ? (amendmentSeverityLabels[amendment.severity] || amendment.severity) : '人工处置';
-            return '<li class="operation-row amendment-row"><span class="operation-window">确认后修订</span><span class="operation-copy"><strong>' + escapeHtml(originLabel + severityLabel + ' · ' + (amendmentStatusLabels[amendment.status] || amendment.status)) + '</strong><span>' + escapeHtml('优先级 ' + (amendment.priority || 'routine') + '；原计划保持不可变；修订 SHA-256 ' + String(amendment.amendmentSha256 || '').slice(0, 12)) + '</span>' + (amendment.proposal ? '<span class="operation-safety">待独立确认的设备提案</span>' : '<span class="operation-safety">无自动设备提案，需人工处置</span>') + '</span></li>';
+            var kindLabel = amendment.originKind === 'diarrhea' && amendment.severity === 'mild' && !amendment.proposal
+              ? '轻度腹泻 · 个体干预'
+              : originLabel + severityLabel;
+            var safetyText = amendment.proposal
+              ? '待独立确认的整栏减餐提案；设备保持原模式'
+              : amendment.originKind === 'diarrhea' && amendment.severity === 'mild'
+                ? '整栏设备程序保持不变；需现场标记隔离并病猪控奶一次'
+                : '无自动设备提案，需人工处置';
+            return '<li class="operation-row amendment-row"><span class="operation-window">确认后修订</span><span class="operation-copy"><strong>' + escapeHtml(kindLabel + ' · ' + (amendmentStatusLabels[amendment.status] || amendment.status)) + '</strong><span>' + escapeHtml('优先级 ' + (amendment.priority || 'routine') + '；原计划保持不可变；修订 SHA-256 ' + String(amendment.amendmentSha256 || '').slice(0, 12)) + '</span><span class="operation-safety">' + escapeHtml(safetyText) + '</span></span></li>';
           }).join('');
         }
         if (plan.status === 'confirmed') {
@@ -540,11 +651,11 @@
         $('currentBatchLabel').textContent = state.batch ? batchLabel(state.batch) : '等待批次'; $('executedText').textContent = state.batch ? '当前日龄 ' + age() : '当前日龄 —'; $('advanceDayBtn').disabled = !state.batch || state.agentBusy || state.modeBusy || state.operationsBusy; $('advanceDayBtn').textContent = state.batch ? '记录并进入下一日' : '请先选择批次'; $('dailySource').textContent = state.batch ? batchLabel(state.batch) + ' · ' + state.records.length + ' 天' : '批次记录'; $('agentStatus').textContent = state.batch ? batchLabel(state.batch) + ' · 第' + dayNumber() + '天 · 日龄' + age() : '未选择批次'; renderDevice(); renderMode(); renderTodayOperations(); renderRows(); }
 
       function replayContentTransition() { var page = document.querySelector('.page'); if (!page) return; page.classList.remove('content-refresh'); void page.offsetWidth; page.classList.add('content-refresh'); }
-      function applyBatchResponse(response) { var previousBatchId = state.batch && value(state.batch, 'id', 'id', null); var previousDay = state.batch && value(state.batch, 'currentDayIndex', 'current_day_index', null); state.batch = response.batch || state.batch; if (!state.todayOperations || previousBatchId !== value(state.batch, 'id', 'id', null) || previousDay !== value(state.batch, 'currentDayIndex', 'current_day_index', null)) { state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; } state.today = response.today || null; state.records = Array.isArray(response.records) ? response.records : []; if (response.agentSession) { state.agentSession = response.agentSession; if (Array.isArray(response.agentSession.messages)) { state.agentMessages = response.agentSession.messages; state.agentHistoryLoaded = true; } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } else { state.agentMessages = []; state.agentHistoryLoaded = false; } } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } state.currentBatchId = state.batch && value(state.batch, 'id', 'id', state.currentBatchId); state.batches = state.batches.map(function (batch) { return value(batch, 'id', 'id', '') === value(state.batch, 'id', 'id', '') ? state.batch : batch; }); renderAgentMessages(); render(); replayContentTransition(); }
-      async function loadTodayOperations(batchId) { if (!batchId) return false; var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/today-operations'); if (String(batchId) !== String(state.currentBatchId)) return false; state.todayOperations = response.plan || null; state.todayOperationsConfirmation = response.confirmation || null; state.todayAmendments = Array.isArray(response.amendments) ? response.amendments : []; render(); return true; }
+      function applyBatchResponse(response) { var previousBatchId = state.batch && value(state.batch, 'id', 'id', null); var previousDay = state.batch && value(state.batch, 'currentDayIndex', 'current_day_index', null); state.batch = response.batch || state.batch; if (!state.todayOperations || previousBatchId !== value(state.batch, 'id', 'id', null) || previousDay !== value(state.batch, 'currentDayIndex', 'current_day_index', null)) { state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; state.diarrheaFeedback = null; } state.today = response.today || null; state.records = Array.isArray(response.records) ? response.records : []; if (response.feedback) state.diarrheaFeedback = response.feedback; if (response.agentSession) { state.agentSession = response.agentSession; if (Array.isArray(response.agentSession.messages)) { state.agentMessages = response.agentSession.messages; state.agentHistoryLoaded = true; } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } else { state.agentMessages = []; state.agentHistoryLoaded = false; } } else if (Array.isArray(response.messages)) { state.agentMessages = response.messages; state.agentHistoryLoaded = true; } state.currentBatchId = state.batch && value(state.batch, 'id', 'id', state.currentBatchId); state.batches = state.batches.map(function (batch) { return value(batch, 'id', 'id', '') === value(state.batch, 'id', 'id', '') ? state.batch : batch; }); renderAgentMessages(); render(); replayContentTransition(); }
+      async function loadTodayOperations(batchId) { if (!batchId) return false; var response = await api('/api/batches/' + encodeURIComponent(batchId) + '/today-operations'); if (String(batchId) !== String(state.currentBatchId)) return false; state.todayOperations = response.plan || null; state.todayOperationsConfirmation = response.confirmation || null; state.todayAmendments = Array.isArray(response.amendments) ? response.amendments : []; state.diarrheaFeedback = response.feedback || null; render(); return true; }
       async function loadBatch(batchId) { var response = await api('/api/batches/' + encodeURIComponent(batchId)); if (String(batchId) !== String(state.currentBatchId)) return false; applyBatchResponse(response); try { await loadTodayOperations(batchId); } catch (error) { if (String(batchId) === String(state.currentBatchId)) { state.todayOperations = null; render(); showToast(error.message || '当日操作载入失败'); } } restoreDraft(); return true; }
-      async function loadBatches() { var response = await api('/api/batches'); state.batches = Array.isArray(response.batches) ? response.batches : []; state.currentBatchId = response.currentBatchId || (state.batches[0] && value(state.batches[0], 'id', 'id', null)); if (state.currentBatchId) await loadBatch(state.currentBatchId); else { state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); } renderBatchMenu(); }
-      async function selectBatch(batchId) { closeBatchMenu(); if (!batchId || String(batchId) === String(state.currentBatchId)) return; state.currentBatchId = batchId; state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); try { var loaded = await loadBatch(batchId); if (loaded && String(batchId) === String(state.currentBatchId)) showToast('已切换批次'); } catch (error) { if (String(batchId) === String(state.currentBatchId)) showToast(error.message || '批次载入失败'); } }
+      async function loadBatches() { var response = await api('/api/batches'); state.batches = Array.isArray(response.batches) ? response.batches : []; state.currentBatchId = response.currentBatchId || (state.batches[0] && value(state.batches[0], 'id', 'id', null)); if (state.currentBatchId) await loadBatch(state.currentBatchId); else { state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; state.diarrheaFeedback = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); } renderBatchMenu(); }
+      async function selectBatch(batchId) { closeBatchMenu(); if (!batchId || String(batchId) === String(state.currentBatchId)) return; state.currentBatchId = batchId; state.batch = null; state.today = null; state.todayOperations = null; state.todayOperationsConfirmation = null; state.todayAmendments = []; state.diarrheaFeedback = null; state.records = []; state.agentSession = null; state.agentMessages = []; state.agentHistoryLoaded = false; render(); try { var loaded = await loadBatch(batchId); if (loaded && String(batchId) === String(state.currentBatchId)) showToast('已切换批次'); } catch (error) { if (String(batchId) === String(state.currentBatchId)) showToast(error.message || '批次载入失败'); } }
       async function createBatch(event) { event.preventDefault(); var button = $('createBatchBtn'); var error = $('newBatchError'); error.textContent = ''; button.disabled = true; button.setAttribute('aria-busy', 'true'); try { var payload = { name: $('newBatchName').value.trim(), room: $('newBatchRoom').value.trim(), startAge: number($('newBatchStartAge').value, 1), endAge: number($('newBatchEndAge').value, 30), headCount: number($('newBatchHeads').value, 1) }; var response = await api('/api/batches', { method: 'POST', body: payload }); state.currentBatchId = value(response.batch, 'id', 'id', null); state.batches = [response.batch].concat(state.batches.filter(function (batch) { return value(batch, 'id', 'id', '') !== state.currentBatchId; })); applyBatchResponse(response); await loadTodayOperations(state.currentBatchId); closeDialog(); renderBatchMenu(); showToast('批次已创建'); } catch (err) { error.textContent = err.message || '创建失败'; } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }
       function openNewBatch() { $('newBatchName').value = '批次_' + new Date().toLocaleDateString('zh-CN'); $('newBatchRoom').value = ''; $('newBatchStartAge').value = state.batch ? String(number(value(state.batch, 'startAge', 'start_age', 3), 3)) : '3'; $('newBatchEndAge').value = '30'; $('newBatchHeads').value = String(currentHeads() || ''); $('newBatchError').textContent = ''; openDialog($('batchSurface'), $('historyBtn')); }
 
@@ -559,11 +670,56 @@
       function consumeSse(buffer, handler) { var chunks = buffer.split(/\r?\n\r?\n/); var rest = chunks.pop() || ''; chunks.forEach(function (chunk) { var eventName = 'message'; var dataLines = []; chunk.split(/\r?\n/).forEach(function (line) { if (line.indexOf('event:') === 0) eventName = line.slice(6).trim(); else if (line.indexOf('data:') === 0) dataLines.push(line.slice(5).trimStart()); }); if (!dataLines.length) return; var raw = dataLines.join('\n'); var data; try { data = JSON.parse(raw); } catch (_) { data = { text: raw }; } handler(eventName, data); }); return rest; }
       async function sendAgent(event) { event.preventDefault(); if (state.agentBusy) return; var message = $('agentInput').value.trim(); if (!message || !state.batch) return; var batchId = value(state.batch, 'id', 'id', null); state.agentBusy = true; $('agentSendBtn').disabled = true; $('agentDrawer').setAttribute('aria-busy', 'true'); $('agentInput').value = ''; addBubble('user', message, false); var bubble = addBubble('assistant', '<div class="typing" role="status" aria-label="Agent 正在思考"><i></i><i></i><i></i></div>', true); var text = ''; try { if (!state.agentSession || !state.agentSession.id) await loadAgentSession(batchId); var response = await fetch('/api/feeding-agent/chat', { method: 'POST', credentials: 'include', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ batchId: batchId, sessionId: state.agentSession && state.agentSession.id, message: message, clientMessageId: uuid(), observation: observationPayload() }) }); if (!response.ok) { var errorBody = await response.text(); var parsed; try { parsed = JSON.parse(errorBody); } catch (_) { parsed = {}; } var error = new Error(parsed.message || parsed.code || 'Agent 暂不可用'); error.code = parsed.code; throw error; } var reader = response.body && response.body.getReader ? response.body.getReader() : null; if (!reader) throw new Error('Agent 未返回流'); var decoder = new TextDecoder(); var buffer = ''; while (true) { var part = await reader.read(); if (part.done) break; if (String(batchId) !== String(state.currentBatchId)) { await reader.cancel(); throw new Error('批次已切换，请重新发送'); } buffer += decoder.decode(part.value, { stream: true }); buffer = consumeSse(buffer, function (eventName, data) { if (eventName === 'delta' || eventName === 'message' || eventName === 'text') { var delta = typeof data === 'string' ? data : first(data.text, data.delta, data.content, ''); text += String(delta || ''); bubble.innerHTML = markdown(text); $('agentLog').scrollTop = $('agentLog').scrollHeight; } else if (eventName === 'error') { var code = data && data.code; text += '\n\n**' + agentErrorText(code) + '**'; bubble.innerHTML = markdown(text); } }); } if (buffer.trim()) consumeSse(buffer + '\n\n', function (eventName, data) { if (eventName === 'delta' || eventName === 'message' || eventName === 'text') { var delta = typeof data === 'string' ? data : first(data.text, data.delta, data.content, ''); text += String(delta || ''); bubble.innerHTML = markdown(text); } }); if (!text) bubble.innerHTML = markdown('Agent 已结束本轮，请重试。'); } catch (err) { bubble.innerHTML = markdown('**连接失败**\n\n' + (err.code ? agentErrorText(err.code) : (err.message || '请稍后重试'))); } finally { state.agentBusy = false; $('agentSendBtn').disabled = false; $('agentDrawer').setAttribute('aria-busy', 'false'); }
       }
-      function openAgent(prefill) { if (prefill) $('agentInput').value = prefill; openDialog($('agentDrawer'), $('agentLauncher')); render(); if (state.batch) { if (!state.agentSession || !state.agentHistoryLoaded) loadAgentSession(value(state.batch, 'id', 'id', null)).catch(function () {}); } else { renderAgentMessages(); } }
+      async function amendAction(batchId, amendmentId, action) {
+        if (!state.batch || state.operationsBusy) return;
+        var amendment = (state.todayAmendments || []).find(function (row) { return String(row.id) === String(amendmentId); });
+        if (!amendment) return;
+        state.operationsBusy = true; render();
+        try {
+          await api('/api/batches/' + encodeURIComponent(batchId) + '/amendments/' + encodeURIComponent(amendmentId) + '/' + action, {
+            method: 'POST',
+            body: {
+              expectedRevision: number(value(state.batch, 'revision', 'revision', 0), 0),
+              expectedAmendmentSha256: amendment.amendmentSha256,
+              idempotencyKey: action + '-' + amendmentId
+            }
+          });
+          if (action === 'apply') await loadBatch(batchId);
+          else await loadTodayOperations(batchId);
+          showToast(action === 'confirm' ? '减餐方案已独立确认' : action === 'apply' ? '减餐方案已应用' : action === 'cancel' ? '减餐方案已取消' : '修订已拒绝');
+        } catch (error) {
+          showToast(error.message || '修订操作失败');
+        } finally {
+          state.operationsBusy = false; render();
+        }
+      }
+      async function diarrheaManualAction(batchId, action) {
+        if (!state.batch || state.operationsBusy) return;
+        var origin = state.diarrheaFeedback && state.diarrheaFeedback.feedbackOrigin || {};
+        var observationId = origin.sourceObservation && origin.sourceObservation.recordedAt || 'none';
+        var feedbackOriginId = origin.id || 'none';
+        var stableKey = 'nbj-diarrhea-manual:' + batchId + ':' + feedbackOriginId + ':' + action;
+        if (localStorage.getItem(stableKey)) { showToast('现场处置已记录'); return; }
+        var idempotencyKey = 'diarrhea-manual:' + batchId + ':' + feedbackOriginId + ':' + action;
+        state.operationsBusy = true; render();
+        try {
+          await api('/api/batches/' + encodeURIComponent(batchId) + '/diarrhea/manual-action', {
+            method: 'POST',
+            body: { action: action, feedbackOriginId: feedbackOriginId, observationId: observationId, idempotencyKey: idempotencyKey }
+          });
+          localStorage.setItem(stableKey, idempotencyKey);
+          showToast('现场处置已记录');
+        } catch (error) {
+          showToast(error.message || '记录失败');
+        } finally {
+          state.operationsBusy = false; render();
+        }
+      }
+      function openAgent(prefill, autoSend) { if (prefill) $('agentInput').value = prefill; openDialog($('agentDrawer'), $('agentLauncher')); render(); if (state.batch) { if (!state.agentSession || !state.agentHistoryLoaded) loadAgentSession(value(state.batch, 'id', 'id', null)).catch(function () {}); if (autoSend) setTimeout(function () { sendAgent({ preventDefault: function () {} }); }, 80); } else { renderAgentMessages(); } }
 
       function saveTableImage() { var table = $('dailyTable'); var rows = Array.from(table.querySelectorAll('tr')); var cellRows = rows.map(function (row) { return Array.from(row.children).map(function (cell) { return cell.textContent.trim(); }); }); var widths = [90, 55, 90, 75, 90, 80, 55, 260, 100, 100, 65, 75, 65, 65]; var rowHeight = 36; var width = widths.reduce(function (a, b) { return a + b; }, 0); var height = rowHeight * cellRows.length + 24; var svgRows = cellRows.map(function (cells, rowIndex) { var x = 0; var y = rowIndex * rowHeight + 24; return cells.map(function (cell, index) { var w = widths[index] || 100; var fill = rowIndex === 0 ? '#f2f2f7' : '#ffffff'; var text = escapeHtml(cell.length > 42 ? cell.slice(0, 42) + '…' : cell); var out = '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + rowHeight + '" fill="' + fill + '" stroke="#d8d8dd"/><text x="' + (x + 8) + '" y="' + (y + 23) + '" font-family="Arial,sans-serif" font-size="12" fill="#1d1d1f">' + text + '</text>'; x += w; return out; }).join(''); }).join(''); var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + width + '" height="' + height + '"><rect width="100%" height="100%" fill="#ffffff"/><text x="12" y="16" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#1d1d1f">奶爸机每日明细</text>' + svgRows + '</svg>'; var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' }); var link = document.createElement('a'); link.download = '奶爸机每日明细.svg'; link.href = URL.createObjectURL(blob); link.click(); setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000); showToast('每日明细图片已保存'); }
       function bindLongPress() { var target = $('dailyTable'); target.addEventListener('pointerdown', function (event) { if (event.pointerType === 'mouse' && event.button !== 0) return; if (!event.target || !event.target.closest || !event.target.closest('td,th')) return; state.longPressStart = { x: event.clientX, y: event.clientY }; clearTimeout(state.longPressTimer); state.longPressTimer = setTimeout(function () { state.longPressStart = null; if (navigator.vibrate) navigator.vibrate(12); saveTableImage(); }, 650); }); ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (name) { target.addEventListener(name, function () { clearTimeout(state.longPressTimer); state.longPressStart = null; }); }); target.addEventListener('pointermove', function (event) { if (state.longPressStart && Math.hypot(event.clientX - state.longPressStart.x, event.clientY - state.longPressStart.y) > 10) { clearTimeout(state.longPressTimer); state.longPressStart = null; } }); }
-      function copySetting() { var today = state.today || {}; var schedule = deviceSchedule(today); var freeFeeding = deviceMode(today) === 'free_feeding'; var suggestion = value(today, 'suggestedDailyPowderGrams', 'suggested_daily_powder_grams', value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')); var count = value(today, 'suggestedDailyMealCount', 'suggested_daily_meal_count', 12); var text = (freeFeeding ? ['建议单日下粉总量（' + number(count, 12) + '次）：' + suggestion + ' g'] : ['单次下粉：' + (value(today, 'singlePowderGrams', 'single_powder_grams', '—')) + ' g', '程序总量：' + (value(today, 'plannedTotalPowderGrams', 'planned_total_powder_grams', '—')) + ' g']).concat([schedule.label + '：' + (schedule.entries.length ? schedule.entries.join('、') : '—')]).join('\n'); navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).then(function () { showToast('设备设定已复制'); }).catch(function () { showToast('复制失败'); }) : showToast('浏览器不支持复制'); }
+      function copySetting() { var today = state.today || {}; var schedule = deviceSchedule(today); var setting = planSetting(today); var mode = todayPlanMode(today); var freeFeeding = mode === 'free_feeding'; var single = setting.singlePowderGrams; var count = planCount(today); var total = setting.dailyPowderGrams; var lines = []; if (single != null) lines.push('单次下粉：' + number(single, 0) + ' g/次'); if (count != null) lines.push((freeFeeding ? '今日最大配奶次数：' : '配奶次数：') + number(count, 0) + ' 次'); if (total != null) lines.push('程序总量：' + number(total, 0) + ' g'); lines.push(schedule.label + '：' + (schedule.entries.length ? schedule.entries.join('、') : '—')); var text = lines.join('\n'); navigator.clipboard && navigator.clipboard.writeText ? navigator.clipboard.writeText(text).then(function () { showToast('设备设定已复制'); }).catch(function () { showToast('复制失败'); }) : showToast('浏览器不支持复制'); }
       async function confirmTodayOperations() {
         if (!state.batch || !state.todayOperations || state.todayOperations.status === 'confirmed' || state.operationsBusy) return;
         var batchId = value(state.batch, 'id', 'id', '');
@@ -581,11 +737,14 @@
             var confirmed = response.decision;
             var confirmedSetting = confirmed.setting || {};
             state.today = Object.assign({}, state.today || {}, {
+              activeDecision: confirmed,
+              activeDecisionId: value(response, 'activeDecisionId', 'active_decision_id', value(state.today, 'activeDecisionId', 'active_decision_id', null)),
               setting: confirmedSetting,
               effectiveMode: confirmedSetting.mode || value(state.today, 'effectiveMode', 'effective_mode', null),
-              exceptionActions: Array.isArray(confirmed.exceptionActions) ? confirmed.exceptionActions : (state.today && state.today.exceptionActions),
               modelVersion: confirmed.evidence && confirmed.evidence.modelVersion,
               singlePowderGrams: confirmedSetting.singlePowderGrams,
+              freeDispenseLimit: confirmedSetting.freeDispenseLimit,
+              freeWindows: Array.isArray(confirmedSetting.freeWindows) ? confirmedSetting.freeWindows : [],
               plannedTotalPowderGrams: confirmedSetting.dailyPowderGrams,
               mealCount: confirmedSetting.mealCount,
               mealTimes: Array.isArray(confirmedSetting.timedMeals) ? confirmedSetting.timedMeals.map(function (meal) { return meal.timeLocal; }) : []
@@ -623,7 +782,9 @@
           if (String(batchId) === String(state.currentBatchId)) await loadTodayOperations(batchId);
           restoreDraft();
           $('quickMessage').textContent = '当日记录已保存'; showToast('当日记录已保存');
-          if (savedDiarrheaGrade !== 'none') openAgent('已录入' + (diarrheaLabels[savedDiarrheaGrade] || '') + '腹泻' + (savedActualPowderGrams == null ? '' : '，已下粉' + savedActualPowderGrams + 'g') + '，请给出具体设备操作。');
+          if (savedDiarrheaGrade === 'mild') openAgent('已录入轻度腹泻，请给出个体隔离与病猪控奶建议；不要修改整栏设备。', true);
+          else if (savedDiarrheaGrade === 'moderate') openAgent('已录入中度腹泻' + (savedActualPowderGrams == null ? '' : '，已下粉' + savedActualPowderGrams + 'g') + '，请给出整栏减一次采食的待确认方案。', true);
+          else if (savedDiarrheaGrade === 'severe') openAgent('已录入重度腹泻，请给出立即隔离、观察、环境检查和转兽医处置建议；不要生成药物或设备方案。', true);
         } catch (error) {
           if (error.code === 'NBJ_BATCH_STALE') showToast('批次已更新，请刷新后重试');
           else showToast(error.message || '保存失败');

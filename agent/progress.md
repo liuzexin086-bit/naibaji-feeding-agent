@@ -135,6 +135,261 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
+### NBJ-DIARRHEA-CLOSURE Revision — 2026-08-07
+
+- Replaced mild-as-proposal and moderate-as-preview with the revised three-tier contract.
+- Mild now emits `individual_intervention`; moderate emits `feeding_reduction_proposal`; severe remains `manual_only` with no device proposal.
+- Removed assumed-zero cumulative handling for moderate; missing cumulative actual powder fails closed.
+- Updated decision core, observation feedback, Agent tool, LangGraph deterministic responses, UI labels, and tests.
+- Added regression for moderate→severe supersede and updated mild/moderate/severe/unknown-cumulative coverage.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 311 tests and `p1-safety-gate` 8 files / 113 tests; build, root npm test, Python 12 tests and compileall pass.
+
+### NBJ-DIARRHEA-CLOSURE-R1 — 2026-08-07
+
+- Moderate diarrhea is fully removed from routine `DailyOperationPlan.proposedSetting` and becomes an independent amendment, including before routine confirmation.
+- Routine confirmation cannot apply diarrhea proposals; amendment `confirm → apply` is the only device activation path.
+- Mild/severe are audited as manual intervention/emergency records and no longer create device amendments.
+- Added `diarrhea-response` and `diarrhea/manual-action` APIs, independent UI exception cards, and amendment action buttons.
+- Docker web image now builds from source without `agent/public`; `GIT_COMMIT` is baked into `/version`; verified UI SHA matches source after removing gitignored `public/`.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 312 tests and `p1-safety-gate` 8 files / 114 tests pass; targeted Docker reproducibility build passes.
+
+### NBJ-DIARRHEA-CLOSURE-R2 — 2026-08-07
+
+- Added migration version 11 and confirmed→cancelled amendment transition with a dedicated cancel endpoint and action idempotency.
+- Removed invalid confirmed `拒绝调整` UI; apply now reloads batch/today so top device settings refresh immediately.
+- Updated gateway system prompt to the revised three-tier diarrhea contract.
+- Manual diarrhea actions use stable localStorage-backed idempotency keys.
+- Removed `DIARRHEA_RATIO`.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 313 tests and `p1-safety-gate` 8 files / 115 tests pass; build, root npm test, Python 12 tests and compileall pass.
+
+### NBJ-DIARRHEA-CLOSURE-R3 — 2026-08-07
+
+- Mild completion now audits `diarrhea.individual_intervention_completed` and records isolation + one piglet milk-control completion.
+- Manual-action keys are deterministic and bound to `feedbackOriginId`/`observationId`; no per-click UUID is sent.
+- Cancelled/superseded statuses and cancelled moderate card are fully rendered.
+- Added exact V10→V11 action-table migration regression with two action rows, payload equality, replay, cancel CHECK, FK and integrity checks.
+- Verified under exact Node 24.18.0: full Agent suite 34 files / 314 tests and `p1-safety-gate` 8 files / 116 tests pass; build, root npm test, Python 12 tests and compileall pass.
+
+### NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
+
+- P1-0 Contract Freeze complete.
+- Added `agent/docs/execution-contract.md` with five-layer separation: selectedMode, controlState, plannedDecision, activeDecision, runtimeState.
+- Recorded baseline: branch `nbj-execution-contract-p1`, HEAD `ecadecb`, merge-base main `413a4c0`, clean worktree, Node v24.16.0, npm 11.13.0, Python 3.10.9.
+- Updated `agent/task_plan.md`, `agent/findings.md`, and `agent/progress.md`.
+- Removed the previous root `execution-contract.md` because the user superseded that freeze.
+- No decision-core implementation changes were made in P1-0; EC-P1-1 awaits P1-0.1 review.
+
+### P1-0.1 Contract Closure — complete
+
+- Closed the P1-0 review gaps in `agent/docs/execution-contract.md` only; no runtime source, schema, or migration changed.
+- Added server-owned persisted `CreepControlState` with monotonic `startDay` latch and no `config.controlStartDay`/`model.controlStartDay` dual authority.
+- Added INV-007 Control Monotonicity and INV-008 No Double Control Reduction; free mode maps model `feedTimes` to `freeDispenseLimit` exactly once.
+- Added Legacy Decision Reconciliation with legacy mismatch vs new-policy invariant; added Today API layered contract and deprecated flat fields.
+- Added runtime explicit lifecycle (omitted keeps state, explicit normal clears), curve-cap approval semantics, strict observation allowlist, manual audit action/severity mapping, exact V11→V12 migration evidence, clean source/model provenance, root `.dockerignore`, and CI contract.
+- Added Supersession Notice to `agent/task_plan.md` and marked conflicting legacy rules as superseded by `execution-contract-v1`.
+- No runtime tests run because this phase is documentation-only; `git diff --check` is required before commit.
+
+### P1-0.2 Final Contract Seal — complete
+
+- Updated `agent/docs/execution-contract.md` for the five final review boundaries; no runtime source, schema, or migration changed.
+- Mode switch now uses `cumulativeActualPowderGramsForBusinessDay`; missing/unknown fails closed, and `actualPowderGrams=0` on the latest observation cannot erase business-day cumulative actual.
+- Runtime aggregation now uses independent device/feeding latches and precedence `blocked > manual_hold > normal`; explicit normal only clears its own domain.
+- Policy compatibility now treats only null/missing or an explicit legacy registry as legacy; unknown/future policy versions fail closed with `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Provenance contract now requires both source SHA and actual artifact SHA for Agent and Web, plus deterministic source→artifact CI fixture.
+- Removed remaining `effectiveMode` implementation instructions from `agent/task_plan.md`; layered `modeState`/`activeDecision`/`runtimeState` are authoritative.
+
+### EC-P1-1 — complete
+
+- Removed `forcedTimed` from `agent/src/decision/core.ts`; mode is `requestedMode` (Day 0 remains the only timed exception).
+- Removed generic `diarrhea` action from base decision exceptions; diarrhea feedback remains the only diarrhea authority.
+- Removed `FREE_FEEDING_BLOCKERS` mode forcing from `agent/src/decision/batch-decision-service.ts`; `selectedMode` is authoritative.
+- Added regression coverage in decision core, batch service, and local mode-switch API.
+- Verified `npm run p0-release-gate`: 6 files / 75 tests passed.
+- Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
+- No migration or schema change in this phase.
+
+### EC-P1-2 — complete
+
+- Fixed root `feeding-model.js` committed anchor: `currentCount = Math.min(currentCount, cp.feedTimes)`, preventing a stored higher anchor from increasing future control counts.
+- Changed `agent/src/model/production-model.ts` to import tracked root model files instead of ignored `agent/container-models`.
+- Updated `agent/Dockerfile` to copy root model sources into build and agent stages.
+- Added/updated model parity tests for monotonic committed anchors.
+- Verified `npx vitest run tests/production-model-parity.test.ts`: 16 tests passed.
+- Verified `npm run p0-release-gate`: 6 files / 75 tests passed.
+- Verified `npm run p1-safety-gate`: 8 files / 116 tests passed.
+
+### EC-P1-3 — complete
+
+- Added `freeDispenseLimit` to `DeviceSetting` and a `FreeFeedingSetting` type; free mode enforces `daily = single × limit`.
+- Free direct totals now map through `single = floor(total / limit)` with `daily <= total`.
+- Moderate free diarrhea reduces quota only, keeps windows/single unchanged, and fails closed when base limit is 1.
+- Free future deliverable uses `hasActiveOrFutureBusinessDayWindow()` and remaining deliverable; no `windows.length × single`.
+- Exposed `freeDispenseLimit` through local API today/record public mappings.
+- Added business-day and core regressions; verified `npm run check`, `npm test` 35 files / 321 tests.
+
+### EC-P1-2.1 / EC-P1-3.1 Closure — complete
+
+- Added generated model asset pipeline: `agent/.generated-models`, `prepare-model-assets.mjs`, `dist-model-smoke.mjs`, package hooks, and Docker copy of generated assets.
+- Fixed compiled runtime import path; `npm run smoke:dist` PASS and `node dist/container/server.js` `/health=200` PASS.
+- Fixed persisted `controlStartDay` replay authority; `automaticStart` no longer overrides an explicit latch.
+- Rewrote committed-anchor state machine: committed 10 no longer hides a pre-decrement and next future is 9 instead of 7.
+- Free moderate future deliverable is discretized to whole standard dispenses; `actual=600/single=70/adjusted=630` returns manual-only, while `actual=560` returns a 70g proposal.
+- Free moderate reason no longer contains `null`; `freeReductionPriority` is deprecated compatibility only.
+- Decision Core requires at least one free window for executable free-feeding.
+- Verified `npm run check`, `npm test` 35 files / 323 tests, p0 gate 80 tests, p1 gate 121 tests.
+- Verified Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
+
+### EC-P1-1.1 / EC-P1-2.2 / EC-P1-3.2 Closure — complete
+
+- Added `evaluateFreeFeedingEligibility()` in BatchDecisionService and wired `/mode` to `409 NBJ_FREE_FEEDING_NOT_ELIGIBLE` before any selectedMode write.
+- Added API regression: frozen earliest day 3 + current day 1 free request returns 409 and selectedMode remains timed.
+- Fixed free SOP quantity amplification: `effectiveLimit = min(modelMealCount, SOP mealCount)`; `perMeal=25, mealCount=4, precision=3` now yields `single=24, limit=4, daily=96`.
+- Added `NBJ_DECISION_SOP_QUANTITY_CONFLICT` when free SOP per-meal program exceeds direct total.
+- Added `NBJ_CONTROL_HISTORY_NON_MONOTONIC` for committed history such as `8 → 10`; valid `10 → 9 → 8` remains accepted.
+- Verified `npm run check`, `npm test` 35 files / 328 tests, p0 gate 83 tests, p1 gate 122 tests.
+- Verified `npm run smoke:dist`, Docker agent build, dist server `/health=200`, and container model smoke.
+
+### EC-P1-3.3 Final Seal — complete
+
+- `resolveSopTarget()` now rejects fractional or non-positive `mealCount` with `NBJ_DECISION_INVALID_SOP_MEAL_COUNT`.
+- Added final visible-sequence INV-007 validation: no upward feedTimes and no adjacent drop greater than one; tests cover `10→8`, `8→10`, `10→9→8`, and generated `9→committed 10`.
+- Eligibility no longer treats `requiresOperatorSelection=false` or missing as a blocker; explicit `/mode` is the operator action.
+- `exceptionBlockers` schema validation restores the legacy known enum; unknown values return eligibility invalid while selectedMode remains unchanged.
+- Raw SOP conflict policy B is frozen: `perMeal × mealCount > directTotal` fails before precision rounding.
+- Verified `npm run check`, `npm test` 35 files / 333 tests, p0 gate 87 tests, p1 gate 124 tests.
+- Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
+
+### EC-P1-4 — complete
+
+- Added `RuntimeExecutionState` types and `agent/src/decision/runtime-state.ts`; runtime is independent from `FeedingDecision`.
+- Added domain latch resolution with omitted-keeps, explicit-normal-clears-own-domain, invalid timestamp quarantine, and `blocked > manual_hold > normal` aggregation.
+- Added Observation API runtime enum validation/normalization for `deviceStatus` and `feedingResponse`.
+- Exposed `today.runtimeState` in the local API and added unit + API integration regressions.
+- Updated p0/p1 gates to include `tests/decision/runtime-state.test.ts`.
+- Verified `npm run check`, `npm test` 36 files / 339 tests, p0 gate 92 tests, p1 gate 129 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
+### EC-P1-5 — complete
+
+- Schema V12 implemented: `mode_change` origin kind, one-active-decision unique index, duplicate-active preflight, and exact V11→V12 history-preserving migration.
+- Mode switch API now rejects unknown/executed cumulative actual and open pending/confirmed amendments.
+- Confirmed-plan mode switch creates a `mode_change` amendment; confirm does not change selected mode, apply updates selectedMode + supersedes old active + creates one new active decision atomically.
+- Pending-plan mode switch refreshes the daily plan in the same transaction via `CommitModeSwitchInput.planInput`.
+- Added mode amendment API regression, unknown/executed actual regressions, V11→V12 migration fixture, and duplicate-active migration failure test.
+- Verified `npm run check`, `npm test` 36 files / 343 tests, p0 gate 94 tests, p1 gate 131 tests.
+- Verified `npm run smoke:dist`, Docker agent build, and container model smoke.
+
+### EC-P1-6 — complete
+
+- Added `OBSERVATION_ALLOWLIST` in local API and reject all unknown/plan fields with `NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN`.
+- Server now writes canonical commit snapshot: plan per-pig/total, feed times, free dispense limit, mode, active decision ID, and policy version.
+- Record public response exposes server-authored snapshot fields for audit/parity.
+- Removed client-authored `mealCount` from the anchored local API regression and added forged/unknown-field tests.
+- Verified `npm run check`, `npm test` 36 files / 344 tests, p0 gate 94 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
+### EC-P1-5.1 / EC-P1-6.1 Authority Seal — complete
+
+- Fixed cumulative actual scope to current `dayIndex` in `/mode` and mode-change apply; D0 actual=0 no longer makes D1 look executable.
+- Added `getActiveDecisionRecord()` and exposed real active decision row id in `today.activeDecisionId` and `activeDecisionIdAtCommit`.
+- Fixed `planPerPigAtCommit` to use server planned heads; observation `effectiveHeads` cannot rewrite the planned program snapshot.
+- Added `DECISION_POLICY_VERSION` constant and used it for `policyVersionAtCommit`.
+- Added regressions: D1 unknown/zero/executed actual, mode amendment apply after state change, active id before/after mode apply, and plan-per-pig stability under effectiveHeads change.
+- Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist` and Docker agent build.
+
+### EC-P1-5.2 Execution Evidence Seal — complete
+
+- Added `getBusinessDayExecutionState()` over immutable `daily_observations`; execution state is monotonic and cannot be reset by a later zero record.
+- `/mode` and mode-change apply use the shared store method; removed duplicate API/store helpers.
+- Added `180 → 0` overwrite regressions for mode switch and amendment apply.
+- Verified `npm run check`, `npm test` 36 files / 345 tests, p0 gate 95 tests, p1 gate 140 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
+### EC-P1-7 — complete
+
+- Added layered Today API: `modeState`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`, `approvalState`, `reconciliation`.
+- New active decisions are tagged with `DECISION_POLICY_VERSION` in evidence inputs.
+- Legacy mode mismatch surfaces as reconciliation; new-policy mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- Reconciliation is blocked when current-day execution evidence exists.
+- `approvalState` reflects curve cap and pending/confirmed amendments.
+- Verified `npm run check`, `npm test` 36 files / 347 tests, p0 gate 97 tests, p1 gate 154 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
+### EC-P1-7.1 — complete
+
+- Added `classifyDecisionPolicyVersion()`; unsupported/future policy versions fail closed before mode matching.
+- Approval state now reads `plannedDecision` curve-cap and open amendments; active decision exceptions are not approval authority.
+- Observation snapshot and mode-change proposal read canonical `activeDecision ?? plannedDecision`, not flat `today.setting`.
+- Added future-policy same-mode API regression and planned approval authority unit regression.
+- Verified `npm run check`, `npm test` 36 files / 349 tests, p0 gate 98 tests, p1 gate 156 tests.
+- Verified `npm run smoke:dist`, Docker agent build, container `/health=200`, and container model smoke.
+
+### EC-P1-7.2 — complete
+
+- Explicit empty `decisionPolicyVersion` now fails closed as `unsupported`; only missing/null is known legacy.
+- Removed flat `today` fallback from `decisionForToday()` and `parseObservation()`; missing `plannedDecision` returns `NBJ_PLANNED_DECISION_INVALID`.
+- `computeDayDecision()` now writes `decisionPolicyVersion: execution-contract-v1` into planned evidence inputs, and `policyVersionAtCommit` follows the actual `activeDecision ?? plannedDecision` authority.
+- Added empty-policy API regression, missing-layered-authority write regression, and planned/current-active/legacy-active policy snapshot regressions.
+- Verified `npm run check`, `npm test` 36 files / 351 tests, p0 gate 99 tests, p1 gate 158 tests.
+- Verified `npm run smoke:dist`, Docker agent image build, container `/health=200`, and container `computeProductionPlan` smoke.
+
+### EC-P1-8 — complete
+
+- Replaced the flat “今日执行” effective badge with four execution blocks: mode, creep control, today plan, and runtime state.
+- UI now reads canonical `activeDecision ?? plannedDecision`; free-feeding displays single powder, `freeDispenseLimit`, daily total, and windows, without timed meal points.
+- Removed the old “建议单日下粉总量” free-feeding presentation and `今日执行：定时定量` text.
+- Added UI contract regressions for active-over-planned authority, planned-only fallback, and free-window rendering.
+- `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
+- Verified `npm run check`, `npm test` 36 files / 352 tests, p0 gate 99 tests, p1 gate 179 tests, `smoke:dist`, and root `npm test`.
+
+### EC-P1-8.1 — complete
+
+- Removed flat Today fallback from UI authority: `planCount()` treats missing free `freeDispenseLimit` as undefined, `deviceSchedule()` only uses canonical schedule, exceptions use `plannedDecision.exceptionActions`, and version uses `planEvidence()`.
+- Added static UI guard against `source.freeWindows`, `source.free_windows`, `source.mealTimes`, `source.meal_times`, `state.today.exceptionActions`, `state.today.exception_actions`, `value(today, 'modelVersion'`, and `value(today, 'sopVersion'`.
+- Added `free-window-propagation.test.ts` and publication regression proving 8 enabled windows survive published config, new batch freeze, planned decision, Today API, and SOP migration 1 → 8 while old batches stay frozen at 1.
+- Root cause for one-window UI is default slot1-only SOP plus old-batch freeze; root cause for old UI text is stale Web artifact, now verified by running Web HTTP body.
+- Verified `npm run check`, `npm test` 37 files / 359 tests, p0 gate 99 tests, p1 gate 185 tests, `smoke:dist`, root `npm test`.
+- Verified running Web HTTP body includes `今日执行状态`/`execModeValue` and excludes `今日设备设定`/`建议单日下粉总量`/`今日执行：`.
+
+### EC-P1-9 — complete
+
+- Added root `.dockerignore` and two provenance scripts: `write-provenance.mjs` and `clean-source-gate.mjs`.
+- Agent and Web `/version` now return JSON provenance from the same Docker build stage, including model source/artifact SHA and `uiSha256`.
+- Added `tests/provenance-contract.test.ts` and wired it into `p1-safety-gate`.
+- Verified `npm run check`, `npm test` 38 files / 361 tests, p0 gate 99 tests, p1 gate 187 tests, `smoke:dist`, root `npm test`.
+- Pre-commit Docker Agent/Web build and `/version` JSON smoke passed; final commit rebuild and clean-source gate will be rerun after commit.
+
+### EC-P1-9.1 — complete
+
+- Clean `git archive HEAD` verification on Windows showed CRLF-sensitive model-hash and Compose-contract tests.
+- Model parity source hashing now normalizes CRLF to LF; deployment contract reads normalize CRLF.
+- Local full suite passes 38 files / 361 tests after the fix.
+
+### EC-P1-9.2 — complete
+
+- Added `.gitattributes` to force LF for shell scripts, source/config files, templates, and text assets.
+- Verified a staged-tree `git archive` produces LF `agent/docker/agent-entrypoint.sh`, closing the clean-archive entrypoint failure.
+
+### EC-P1-9.3 — complete
+
+- Pinned `terser@5.49.2`; Web model is now deterministically generated from authoritative `feeding-model.js`.
+- Docker Web copies only the generated `.generated-web` artifact; provenance and runtime `/version` hash that artifact.
+- Root `feeding-model.min.js` is synchronized from the same generator.
+- Added behavior parity tests and deterministic generation tests.
+- Verified `npm run check`, `npm test` 39 files / 364 tests, p0 gate 99 tests, p1 gate 190 tests, `smoke:dist`.
+
+### EC-P1-10 — complete
+
+- Added `.github/workflows/agent-safety.yml` with Node 24.18.0, root/Python/Agent gates, Docker builds, Compose config, clean-source gate, and runtime provenance.
+- Added `agent/scripts/ci-runtime-check.mjs` and `tests/ci-contract.test.ts`; runtime check passed against local Agent/Web images.
+- Verified `npm run check`, `npm test` 40 files / 366 tests, p0 gate 99 tests, p1 gate 192 tests, `smoke:dist`, root `npm test`, Python 12 tests, and `compileall`.
+
+### EC-P1-10.1 — complete
+
+- `ci-runtime-check.mjs` now hashes raw source bytes, matching `write-provenance.mjs` and the actual Docker artifact bytes on Windows and Linux.
+- Rerun runtime provenance against final `a54cf95` images passed.
+
 ## Session: 2026-08-04
 
 ### Plan authoring

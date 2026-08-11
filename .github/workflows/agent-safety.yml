@@ -1,0 +1,83 @@
+name: agent-safety
+
+on:
+  push:
+    branches:
+      - nbj-execution-contract-p1
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  safety:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: agent/package-lock.json
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: 3.10.9
+
+      - name: Root smoke test
+        run: npm test
+
+      - name: Install Python optimizer dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r optimizer/requirements.txt
+
+      - name: Python optimizer tests
+        run: |
+          python -m unittest discover -s optimizer/tests -p "test_*.py"
+          python -m compileall -q optimizer
+
+      - name: Agent npm ci
+        working-directory: agent
+        run: npm ci
+
+      - name: Agent type check
+        working-directory: agent
+        run: npm run check
+
+      - name: Agent full tests
+        working-directory: agent
+        run: npm test
+
+      - name: P0 release gate
+        working-directory: agent
+        run: npm run p0-release-gate
+
+      - name: P1 safety gate
+        working-directory: agent
+        run: npm run p1-safety-gate
+
+      - name: Agent build
+        working-directory: agent
+        run: npm run build
+
+      - name: Clean source gate
+        working-directory: agent
+        run: npm run clean-source-gate
+
+      - name: Build Agent image
+        run: docker build --target agent -f agent/Dockerfile -t naibaji-feeding-agent:ci --build-arg GIT_COMMIT=$GITHUB_SHA .
+
+      - name: Build Web image
+        run: docker build --target web -f agent/Dockerfile -t naibaji-feeding-web:ci --build-arg GIT_COMMIT=$GITHUB_SHA .
+
+      - name: Compose config
+        env:
+          LOCAL_ADMIN_EMAIL: ci@example.com
+          LOCAL_ADMIN_PASSWORD: ci-password
+          AGENT_GATEWAY_SECRET: ci-secret
+        run: docker compose -f agent/docker/compose.local.yaml config --quiet
+
+      - name: Runtime provenance and UI E2E
+        working-directory: agent
+        run: node scripts/ci-runtime-check.mjs "$GITHUB_SHA" naibaji-feeding-agent:ci naibaji-feeding-web:ci

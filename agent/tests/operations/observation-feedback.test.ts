@@ -73,7 +73,7 @@ describe("observation feedback engine", () => {
     ])).toBe("none");
   });
 
-  it("generates a confirm task and device proposal for mild diarrhea with cumulative powder", () => {
+  it("generates individual intervention for mild diarrhea without a device proposal", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
         recordedAt: "2026-08-05T09:00:00+08:00",
@@ -83,16 +83,33 @@ describe("observation feedback engine", () => {
     }));
     expect(result).not.toBeNull();
     expect(result?.kind).toBe("diarrhea");
+    expect(result?.operations[0]?.code).toBe("feedback_diarrhea_intervention");
+    expect(result?.operations[0]?.title).toBe("腹泻个体干预（轻度）");
+    expect(result?.operations[0]?.feedbackRef?.requiresDeviceConfirmation).toBe(false);
+    expect(result?.proposedSetting).toBeNull();
+    expect(result?.feedbackOrigin.status).toBe("manual");
+  });
+
+  it("generates a feeding reduction proposal for moderate diarrhea", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "2026-08-05T09:00:00+08:00",
+        diarrheaGrade: "moderate",
+        actualPowderGrams: 0,
+      }],
+    }));
     expect(result?.operations[0]?.code).toBe("feedback_diarrhea_confirm");
+    expect(result?.operations[0]?.feedbackRef?.requiresDeviceConfirmation).toBe(true);
     expect(result?.proposedSetting).toMatchObject({
       kind: "diarrhea",
+      resultKind: "feeding_reduction_proposal",
       manualDispositionRequired: false,
     });
     expect(result?.proposedSetting?.proposalDigest).toMatch(/^[A-F0-9]{64}$/);
     expect(result?.feedbackOrigin.status).toBe("proposed");
   });
 
-  it("generates a reduce-one-meal proposal for severe diarrhea", () => {
+  it("returns manual-only for severe diarrhea", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
         recordedAt: "2026-08-05T09:00:00+08:00",
@@ -106,7 +123,7 @@ describe("observation feedback engine", () => {
     expect(result?.operations[0]?.feedbackRef?.requiresDeviceConfirmation).toBe(false);
   });
 
-  it("generates a preview-only manual task when cumulative powder is missing", () => {
+  it("generates a manual task for moderate when cumulative powder is missing", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [{
         recordedAt: "2026-08-05T09:00:00+08:00",
@@ -293,13 +310,13 @@ describe("observation feedback engine", () => {
       records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 0 }],
     }))!;
     const merged = mergeFeedbackOperations(base, [], result);
-    expect(merged.map((item) => item.code)).toContain("feedback_diarrhea_confirm");
+    expect(merged.map((item) => item.code)).toContain("feedback_diarrhea_intervention");
     expect(merged.filter((item) => item.code === "daily_patrol")).toHaveLength(1);
   });
 
   it("hashes proposals and maps them to device settings deterministically", () => {
     const result = evaluateObservationFeedback(engineInput({
-      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "mild", actualPowderGrams: 0 }],
+      records: [{ recordedAt: "2026-08-05T09:00:00+08:00", diarrheaGrade: "moderate", actualPowderGrams: 0 }],
     }))!;
     const proposal = result.proposedSetting!;
     expect(digestFeedbackProposal(proposal)).toBe(proposal.proposalDigest);

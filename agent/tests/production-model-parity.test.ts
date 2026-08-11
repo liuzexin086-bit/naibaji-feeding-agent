@@ -7,7 +7,8 @@ import { computeProductionPlan, modelStandardWeight } from "../src/model/product
 const projectRoot = resolve(import.meta.dirname, "../..");
 
 function sha256(path: string): string {
-  return createHash("sha256").update(readFileSync(path)).digest("hex").toUpperCase();
+  const source = readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+  return createHash("sha256").update(source, "utf8").digest("hex").toUpperCase();
 }
 
 describe("protected production model parity", () => {
@@ -19,7 +20,7 @@ describe("protected production model parity", () => {
   });
   it("keeps the reviewed production model hashes", () => {
     expect(sha256(resolve(projectRoot, "feeding-model.js"))).toBe(
-      "61001D8629C51B7B9F6CCC59CEC5ECE2BB21FE5A4AD76DB186D5DCDE6A640465",
+      "35A0DD40E66D4C1FC4DC4EF6FB20CF44C28F70AA284EB5DADFE6F05F0E760C6D",
     );
     expect(sha256(resolve(projectRoot, "v5lite-model.js"))).toBe(
       "124385A11FD247013C7C4DD14FE95642DDEBF0B9621A797E72EB91794EC16EAE",
@@ -137,7 +138,7 @@ describe("protected production model parity", () => {
     expect(output.deviceOperation.curve[0]?.meals).toHaveLength(10);
   });
 
-  it("does not let a legacy frozen start bypass the sustained-grade condition", () => {
+  it("keeps a persisted control start as replay authority even when later observations no longer sustain", () => {
     const output = computeProductionPlan({
       startAge: 3,
       endAge: 8,
@@ -146,7 +147,7 @@ describe("protected production model parity", () => {
       controlStartDay: 2,
       records: [{ dayAge: 4, creepGrade: "high", headCount: 20 }],
     });
-    expect(output.controlStartDay).toBe(6);
+    expect(output.controlStartDay).toBe(2);
     expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 10, 10]);
   });
 
@@ -208,6 +209,129 @@ describe("protected production model parity", () => {
       ],
     });
     expect(output.control.feedTimes).toEqual([10, 10, 10, 10, 9]);
+  });
+
+  it("rejects a generated 9 followed by a committed 10 as non-monotonic", () => {
+    expect(() => computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+      ],
+    })).toThrow("NBJ_CONTROL_HISTORY_NON_MONOTONIC");
+  });
+
+  it("rejects committed 10 -> 8 as an invalid control step", () => {
+    expect(() => computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+      ],
+    })).toThrow("NBJ_CONTROL_HISTORY_STEP_INVALID");
+  });
+
+  it("fails closed when committed control history is non-monotonic", () => {
+    expect(() => computeProductionPlan({
+      startAge: 3,
+      endAge: 9,
+      startWeight: 10,
+      headCount: 20,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+      ],
+    })).toThrow("NBJ_CONTROL_HISTORY_NON_MONOTONIC");
+  });
+
+  it("accepts valid committed history 10 -> 9 -> 8 and keeps future non-increasing", () => {
+    const output = computeProductionPlan({
+      startAge: 3,
+      endAge: 10,
+      startWeight: 10,
+      headCount: 20,
+      controlStartDay: 2,
+      records: [
+        { dayAge: 3, creepGrade: "high", headCount: 20 },
+        { dayAge: 4, creepGrade: "high", headCount: 20 },
+        {
+          dayAge: 5,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 10,
+        },
+        {
+          dayAge: 6,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 9,
+        },
+        {
+          dayAge: 7,
+          creepGrade: "high",
+          headCount: 20,
+          planPerPigAtCommit: 300,
+          planTotalAtCommit: 6000,
+          feedTimesAtCommit: 8,
+        },
+      ],
+    });
+    expect(output.control.feedTimes.slice(0, 5)).toEqual([10, 10, 10, 9, 8]);
+    output.control.feedTimes.slice(1).forEach((count, index) => {
+      expect(count).toBeLessThanOrEqual(output.control.feedTimes[index]!);
+    });
   });
 
   it("keeps all days at ten meals when no non-none grade is recorded", () => {

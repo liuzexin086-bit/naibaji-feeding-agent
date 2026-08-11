@@ -3,9 +3,11 @@ name: naibaji-feeding-agent-local
 services:
   agent:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: agent/Dockerfile
       target: agent
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: naibaji-feeding-agent:local
     restart: unless-stopped
     init: true
@@ -52,9 +54,11 @@ services:
 
   nginx:
     build:
-      context: ..
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: agent/Dockerfile
       target: web
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
     image: naibaji-feeding-web:local
     restart: unless-stopped
     init: true

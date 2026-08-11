@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { normalizeIsoTimestamp } from "../shared/iso-time.js";
+import { DECISION_POLICY_VERSION } from "../shared/agent-v2-contract.js";
 import type {
   DeviceSetting,
   FeedingDecision,
@@ -14,6 +15,7 @@ import type {
   AuditEvent,
   AuditInput,
   BatchListOptions,
+  BusinessDayExecutionState,
   CommitAdvanceInput,
   CommitModeSwitchInput,
   CommitRecordInput,
@@ -72,7 +74,10 @@ export type LocalStoreErrorCode =
   | "LOCAL_STORE_USER_CONFIRM_MISMATCH"
   | "LOCAL_STORE_LAST_ADMIN"
   | "LOCAL_STORE_INVALID_INPUT"
-  | "LOCAL_STORE_INVALID_TIMESTAMP";
+  | "LOCAL_STORE_INVALID_TIMESTAMP"
+  | "LOCAL_STORE_MODE_SWITCH_AFTER_EXECUTION_BLOCKED"
+  | "LOCAL_STORE_MODE_SWITCH_ACTUAL_UNKNOWN"
+  | "LOCAL_STORE_MODE_SWITCH_AMENDMENT_PENDING";
 
 export class LocalStoreError extends Error {
   constructor(
@@ -144,7 +149,7 @@ function nullableJsonObject(value: unknown, field: string): Record<string, unkno
 }
 
 function feedbackOriginKind(value: unknown, field: string): FeedbackOrigin["kind"] {
-  if (value !== "diarrhea" && value !== "creep_control") {
+  if (value !== "diarrhea" && value !== "creep_control" && value !== "mode_change") {
     throw new Error(`Invalid database ${field}`);
   }
   return value;
@@ -599,7 +604,7 @@ function dailyOperationAmendmentFromRow(row: Row): DailyOperationAmendment {
     : stringValue(row.severity, "daily_operation_amendments.severity");
   const priority = stringValue(row.priority, "daily_operation_amendments.priority");
   const status = stringValue(row.status, "daily_operation_amendments.status");
-  if (originKind !== "diarrhea" && originKind !== "creep_control") {
+  if (originKind !== "diarrhea" && originKind !== "creep_control" && originKind !== "mode_change") {
     throw new Error("Invalid database daily_operation_amendments.origin_kind");
   }
   if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
@@ -720,8 +725,11 @@ export class SqliteLocalStore implements LocalStore {
   migrate(): void {
     this.#ensureOpen();
     return this.#transaction(() => {
+      this.#preflightDuplicateActiveDecisions();
       this.#database.exec(INITIAL_SCHEMA);
       this.#ensureAmendmentV10();
+      this.#ensureAmendmentActionCancelV11();
+      this.#ensureModeChangeV12();
       const appliesFrozenSopDigestBackfill = !this.#database.prepare(
         "SELECT 1 FROM schema_migrations WHERE version = ?",
       ).get(MIGRATION_VERSION);
@@ -796,6 +804,26 @@ export class SqliteLocalStore implements LocalStore {
         "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
       ).run(MIGRATION_VERSION, new Date().toISOString());
     });
+  }
+
+  #preflightDuplicateActiveDecisions(): void {
+    const tableExists = Boolean(this.#database.prepare(`
+      SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'feeding_decisions'
+    `).get());
+    if (!tableExists) return;
+    const duplicateActive = this.#database.prepare(`
+      SELECT user_id, batch_id, date_local, COUNT(*) AS count
+      FROM feeding_decisions
+      WHERE status = 'active'
+      GROUP BY user_id, batch_id, date_local
+      HAVING COUNT(*) > 1
+    `).all() as Row[];
+    if (duplicateActive.length > 0) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_INVALID_INPUT",
+        "migration V12 preflight found duplicate active decisions",
+      );
+    }
   }
 
   #ensureAmendmentV10(): void {
@@ -912,7 +940,7 @@ export class SqliteLocalStore implements LocalStore {
         user_id TEXT NOT NULL,
         batch_id TEXT NOT NULL,
         amendment_id TEXT NOT NULL,
-        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply')),
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply', 'cancel')),
         idempotency_key TEXT NOT NULL,
         expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
         expected_amendment_sha256 TEXT NOT NULL,
@@ -965,6 +993,285 @@ export class SqliteLocalStore implements LocalStore {
       throw new LocalStoreError(
         "LOCAL_STORE_INVALID_INPUT",
         "amendment migration would lose rows; transaction rolled back",
+      );
+    }
+  }
+
+  #ensureAmendmentActionCancelV11(): void {
+    const tableSql = String(
+      (this.#database.prepare(`
+        SELECT sql FROM sqlite_master
+        WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+      `).get() as Row | undefined)?.sql ?? "",
+    );
+    if (tableSql.includes("'cancel'")) return;
+    this.#database.exec(`
+      DROP TABLE IF EXISTS daily_operation_amendment_actions_v11_backup;
+      CREATE TABLE daily_operation_amendment_actions_v11_backup (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        amendment_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply', 'cancel')),
+        idempotency_key TEXT NOT NULL,
+        expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+        expected_amendment_sha256 TEXT NOT NULL,
+        resulting_status TEXT NOT NULL,
+        decision_id TEXT,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key)
+      ) STRICT;
+      INSERT INTO daily_operation_amendment_actions_v11_backup (
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      )
+      SELECT
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      FROM daily_operation_amendment_actions;
+      DROP TABLE daily_operation_amendment_actions;
+      CREATE TABLE daily_operation_amendment_actions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        amendment_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply', 'cancel')),
+        idempotency_key TEXT NOT NULL,
+        expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+        expected_amendment_sha256 TEXT NOT NULL,
+        resulting_status TEXT NOT NULL,
+        decision_id TEXT,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (amendment_id) REFERENCES daily_operation_amendments(id) ON DELETE CASCADE
+      ) STRICT;
+      INSERT INTO daily_operation_amendment_actions (
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      )
+      SELECT
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      FROM daily_operation_amendment_actions_v11_backup;
+      CREATE INDEX IF NOT EXISTS daily_operation_amendment_actions_amendment_idx
+        ON daily_operation_amendment_actions(amendment_id, created_at DESC);
+      DROP TABLE daily_operation_amendment_actions_v11_backup;
+    `);
+  }
+
+  #ensureModeChangeV12(): void {
+    const duplicateActive = this.#database.prepare(`
+      SELECT user_id, batch_id, date_local, COUNT(*) AS count
+      FROM feeding_decisions
+      WHERE status = 'active'
+      GROUP BY user_id, batch_id, date_local
+      HAVING COUNT(*) > 1
+    `).all() as Row[];
+    if (duplicateActive.length > 0) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_INVALID_INPUT",
+        "migration V12 preflight found duplicate active decisions",
+      );
+    }
+
+    const amendmentSql = String(
+      (this.#database.prepare(`
+        SELECT sql FROM sqlite_master
+        WHERE type = 'table' AND name = 'daily_operation_amendments'
+      `).get() as Row | undefined)?.sql ?? "",
+    );
+    const needsRebuild = !amendmentSql.includes("mode_change");
+    const actionTableExists = Boolean(this.#database.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+    `).get());
+    const amendmentCountBefore = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendments",
+      ).get() as Row).count,
+    );
+    const actionCountBefore = actionTableExists
+      ? Number((this.#database.prepare(
+          "SELECT count(*) AS count FROM daily_operation_amendment_actions",
+        ).get() as Row).count)
+      : 0;
+    const payloadHash = (table: string, columns: string[]): string => {
+      const rows = this.#database.prepare(
+        `SELECT ${columns.join(", ")} FROM ${table} ORDER BY id`,
+      ).all() as Row[];
+      return createHash("sha256").update(JSON.stringify(rows), "utf8").digest("hex");
+    };
+    const amendmentHashBefore = payloadHash(
+      "daily_operation_amendments",
+      ["id", "origin_kind", "status", "amendment_sha256", "based_on_batch_revision"],
+    );
+    const actionHashBefore = actionTableExists
+      ? payloadHash(
+          "daily_operation_amendment_actions",
+          ["id", "amendment_id", "action", "expected_amendment_sha256", "resulting_status"],
+        )
+      : "";
+
+    if (needsRebuild) {
+      if (actionTableExists) {
+        this.#database.exec(`
+          DROP TABLE IF EXISTS daily_operation_amendment_actions_v12_backup;
+          CREATE TABLE daily_operation_amendment_actions_v12_backup (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            batch_id TEXT NOT NULL,
+            amendment_id TEXT NOT NULL,
+            action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply', 'cancel')),
+            idempotency_key TEXT NOT NULL,
+            expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+            expected_amendment_sha256 TEXT NOT NULL,
+            resulting_status TEXT NOT NULL,
+            decision_id TEXT,
+            response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+            created_at TEXT NOT NULL,
+            UNIQUE (user_id, idempotency_key)
+          ) STRICT;
+          INSERT INTO daily_operation_amendment_actions_v12_backup (
+            id, user_id, batch_id, amendment_id, action, idempotency_key,
+            expected_batch_revision, expected_amendment_sha256, resulting_status,
+            decision_id, response_json, created_at
+          )
+          SELECT
+            id, user_id, batch_id, amendment_id, action, idempotency_key,
+            expected_batch_revision, expected_amendment_sha256, resulting_status,
+            decision_id, response_json, created_at
+          FROM daily_operation_amendment_actions;
+          DROP TABLE daily_operation_amendment_actions;
+        `);
+      }
+      this.#database.exec(`
+        CREATE TABLE daily_operation_amendments_v12 (
+          id TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          batch_id TEXT NOT NULL,
+          business_date TEXT NOT NULL,
+          base_plan_id TEXT NOT NULL,
+          base_confirmation_id TEXT,
+          origin_id TEXT NOT NULL,
+          origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control', 'mode_change')),
+          severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
+          priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
+          status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied', 'superseded', 'cancelled')),
+          operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+          proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+          decision_id TEXT,
+          amendment_sha256 TEXT NOT NULL,
+          based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+          idempotency_key TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          decided_at TEXT,
+          decided_by TEXT,
+          UNIQUE (user_id, origin_id),
+          UNIQUE (user_id, idempotency_key),
+          FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+          FOREIGN KEY (base_plan_id) REFERENCES daily_operation_plans(id) ON DELETE CASCADE,
+          FOREIGN KEY (base_confirmation_id) REFERENCES daily_operation_confirmations(id) ON DELETE SET NULL,
+          FOREIGN KEY (decided_by) REFERENCES users(id) ON DELETE SET NULL
+        ) STRICT;
+        INSERT INTO daily_operation_amendments_v12 (
+          id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+          origin_id, origin_kind, severity, priority, status, operations_json,
+          proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+          idempotency_key, created_at, decided_at, decided_by
+        )
+        SELECT
+          id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+          origin_id, origin_kind, severity, priority, status, operations_json,
+          proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+          idempotency_key, created_at, decided_at, decided_by
+        FROM daily_operation_amendments;
+        DROP TABLE daily_operation_amendments;
+        ALTER TABLE daily_operation_amendments_v12 RENAME TO daily_operation_amendments;
+      `);
+    }
+
+    this.#database.exec(`
+      CREATE TABLE IF NOT EXISTS daily_operation_amendment_actions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        amendment_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply', 'cancel')),
+        idempotency_key TEXT NOT NULL,
+        expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+        expected_amendment_sha256 TEXT NOT NULL,
+        resulting_status TEXT NOT NULL,
+        decision_id TEXT,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (amendment_id) REFERENCES daily_operation_amendments(id) ON DELETE CASCADE
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS daily_operation_amendment_actions_amendment_idx
+        ON daily_operation_amendment_actions(amendment_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS daily_operation_amendments_batch_date_idx
+        ON daily_operation_amendments(user_id, batch_id, business_date DESC);
+      CREATE UNIQUE INDEX IF NOT EXISTS feeding_decisions_one_active_idx
+        ON feeding_decisions(user_id, batch_id, date_local)
+        WHERE status = 'active';
+    `);
+
+    const backupExists = Boolean(this.#database.prepare(`
+      SELECT 1 FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions_v12_backup'
+    `).get());
+    if (backupExists) {
+      this.#database.exec(`
+        INSERT INTO daily_operation_amendment_actions (
+          id, user_id, batch_id, amendment_id, action, idempotency_key,
+          expected_batch_revision, expected_amendment_sha256, resulting_status,
+          decision_id, response_json, created_at
+        )
+        SELECT
+          id, user_id, batch_id, amendment_id, action, idempotency_key,
+          expected_batch_revision, expected_amendment_sha256, resulting_status,
+          decision_id, response_json, created_at
+        FROM daily_operation_amendment_actions_v12_backup;
+        DROP TABLE daily_operation_amendment_actions_v12_backup;
+      `);
+    }
+    const amendmentCountAfter = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendments",
+      ).get() as Row).count,
+    );
+    const actionCountAfter = Number(
+      (this.#database.prepare(
+        "SELECT count(*) AS count FROM daily_operation_amendment_actions",
+      ).get() as Row).count,
+    );
+    const amendmentHashAfter = payloadHash(
+      "daily_operation_amendments",
+      ["id", "origin_kind", "status", "amendment_sha256", "based_on_batch_revision"],
+    );
+    const actionHashAfter = actionTableExists || backupExists || actionCountAfter > 0
+      ? payloadHash(
+          "daily_operation_amendment_actions",
+          ["id", "amendment_id", "action", "expected_amendment_sha256", "resulting_status"],
+        )
+      : "";
+    if (
+      amendmentCountBefore !== amendmentCountAfter ||
+      actionCountBefore !== actionCountAfter ||
+      amendmentHashBefore !== amendmentHashAfter ||
+      actionHashBefore !== actionHashAfter
+    ) {
+      throw new LocalStoreError(
+        "LOCAL_STORE_INVALID_INPUT",
+        "migration V12 would lose amendment or action history; transaction rolled back",
       );
     }
   }
@@ -1232,7 +1539,8 @@ export class SqliteLocalStore implements LocalStore {
     if (batch.status !== "active") {
       throw new LocalStoreError("LOCAL_STORE_BATCH_TERMINAL", "daily operation confirmations require an active batch");
     }
-    const derivedDeviceSetting = storedPlan.proposedSetting
+    const derivedDeviceSetting = storedPlan.proposedSetting &&
+        storedPlan.proposedSetting.kind !== "diarrhea"
       ? proposalToDeviceSetting(storedPlan.proposedSetting)
       : null;
     const expectedDecisionId = input.decisionId ?? null;
@@ -1511,10 +1819,9 @@ export class SqliteLocalStore implements LocalStore {
     const batchId = requiredText(input.batchId, "batchId");
     const dateLocal = businessDate(input.businessDate, "businessDate");
     const basePlanId = requiredText(input.basePlanId, "basePlanId");
-    const baseConfirmationId = requiredText(
-      input.baseConfirmationId,
-      "baseConfirmationId",
-    );
+    const baseConfirmationId = input.baseConfirmationId === null
+      ? null
+      : requiredText(input.baseConfirmationId, "baseConfirmationId");
     const originId = requiredText(input.originId, "originId");
     const originKind = input.originKind;
     const severity = input.severity;
@@ -1524,7 +1831,7 @@ export class SqliteLocalStore implements LocalStore {
       input.basedOnBatchRevision,
       "basedOnBatchRevision",
     );
-    if (originKind !== "diarrhea" && originKind !== "creep_control") {
+    if (originKind !== "diarrhea" && originKind !== "creep_control" && originKind !== "mode_change") {
       throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid originKind");
     }
     if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
@@ -1612,20 +1919,33 @@ export class SqliteLocalStore implements LocalStore {
         SELECT * FROM daily_operation_plans
         WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
       `).get(basePlanId, userId, batchId, dateLocal) as Row | undefined;
-      if (!plan || String(plan.status) !== "confirmed") {
+      if (!plan) {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
-          "amendment requires a confirmed daily operation plan",
+          "amendment requires a daily operation plan",
         );
       }
-      const confirmation = this.#database.prepare(`
-        SELECT * FROM daily_operation_confirmations
-        WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
-      `).get(baseConfirmationId, userId, batchId, dateLocal) as Row | undefined;
-      if (!confirmation) {
+      if (baseConfirmationId) {
+        if (String(plan.status) !== "confirmed") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+            "amendment with a base confirmation requires a confirmed daily operation plan",
+          );
+        }
+        const confirmation = this.#database.prepare(`
+          SELECT * FROM daily_operation_confirmations
+          WHERE id = ? AND user_id = ? AND batch_id = ? AND business_date = ?
+        `).get(baseConfirmationId, userId, batchId, dateLocal) as Row | undefined;
+        if (!confirmation) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
+            "base confirmation not found",
+          );
+        }
+      } else if (String(plan.status) !== "pending") {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_CONFIRMATION_REQUIRED",
-          "base confirmation not found",
+          "amendment without a base confirmation requires a pending daily operation plan",
         );
       }
       this.#database.prepare(`
@@ -1704,7 +2024,7 @@ export class SqliteLocalStore implements LocalStore {
       "expectedAmendmentSha256",
     );
     const idempotencyKey = requiredText(input.idempotencyKey, "idempotencyKey");
-    if (action !== "confirm" && action !== "reject" && action !== "apply") {
+    if (action !== "confirm" && action !== "reject" && action !== "apply" && action !== "cancel") {
       throw new LocalStoreError("LOCAL_STORE_INVALID_INPUT", "invalid amendment action");
     }
     const row = this.#database.prepare(`
@@ -1742,6 +2062,13 @@ export class SqliteLocalStore implements LocalStore {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_NOT_PENDING",
           `amendment status ${stored.status} does not allow ${action}`,
+        );
+      }
+    } else if (action === "cancel") {
+      if (stored.status !== "confirmed") {
+        throw new LocalStoreError(
+          "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+          `amendment status ${stored.status} does not allow cancel`,
         );
       }
     } else if (stored.status !== "pending") {
@@ -1825,17 +2152,169 @@ export class SqliteLocalStore implements LocalStore {
             "amendment changed concurrently",
           );
         }
+      } else if (action === "cancel") {
+        if (current.status !== "confirmed") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_NOT_PENDING",
+            "amendment changed concurrently",
+          );
+        }
       } else if (current.status !== "pending") {
         throw new LocalStoreError(
           "LOCAL_STORE_AMENDMENT_NOT_PENDING",
           "amendment changed concurrently",
         );
       }
+      if (action === "apply" && current.originKind === "mode_change") {
+        if (!current.proposal) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_AMENDMENT_MANUAL_ONLY",
+            "mode change amendment has no proposal",
+          );
+        }
+        const targetMode = current.proposal.mode;
+        const batchData = transactionBatch.data as unknown as Record<string, unknown>;
+        const execution = this.getBusinessDayExecutionState(
+          userId,
+          batchId,
+          current.businessDate,
+        );
+        if (execution.state === "unknown") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_MODE_SWITCH_ACTUAL_UNKNOWN",
+            "mode switch apply requires explicit cumulative actual powder",
+          );
+        }
+        if (execution.state === "executed") {
+          throw new LocalStoreError(
+            "LOCAL_STORE_MODE_SWITCH_AFTER_EXECUTION_BLOCKED",
+            "mode switch apply is blocked after execution",
+          );
+        }
+        const otherOpen = this.#database.prepare(`
+          SELECT id FROM daily_operation_amendments
+          WHERE user_id = ? AND batch_id = ? AND business_date = ?
+            AND status IN ('pending', 'confirmed') AND id != ?
+        `).all(userId, batchId, current.businessDate, amendmentId) as Row[];
+        if (otherOpen.length > 0) {
+          throw new LocalStoreError(
+            "LOCAL_STORE_MODE_SWITCH_AMENDMENT_PENDING",
+            "another safety amendment is still open",
+          );
+        }
+        const config = (batchData.config ?? {}) as Record<string, unknown>;
+        const nextData = {
+          ...batchData,
+          config: { ...config, selectedMode: targetMode },
+        };
+        const decisionId = this.#insertActiveDecisionLocked({
+          userId,
+          batchId,
+          dateLocal: current.businessDate,
+          decision: {
+            revision: expectedRevision + 1,
+            batchId,
+            dateLocal: current.businessDate,
+            setting: proposalToDeviceSetting(current.proposal),
+            exceptionActions: [],
+            evidence: {
+              sopVersion: "mode-change-amendment@1",
+              modelVersion: "execution-contract@1",
+              calculationDate: current.businessDate,
+              reasons: ["操作员确认并应用模式切换修订；selectedMode 与 active decision 在同一事务变化。"],
+              inputs: {
+                amendmentId,
+                originId: current.originId,
+                proposalDigest: current.proposal.proposalDigest,
+                targetMode,
+              },
+              steps: [
+                {
+                  name: "mode_change_apply",
+                  value: { decidedBy, amendmentSha256: current.amendmentSha256 },
+                  explanation: "apply 前重新校验批次 revision、累计实际量和其它 pending 安全修订。",
+                },
+              ],
+            },
+            status: "active",
+          },
+          now,
+        });
+        const batchUpdate = this.#database.prepare(`
+          UPDATE batches SET revision = ?, data_json = ?, updated_at = ?
+          WHERE user_id = ? AND id = ? AND revision = ?
+        `).run(
+          expectedRevision + 1,
+          serializeObject(nextData, "nextData"),
+          now,
+          userId,
+          batchId,
+          expectedRevision,
+        );
+        if (Number(batchUpdate.changes) !== 1) this.#staleRevision(expectedRevision + 1, expectedRevision);
+        this.#database.prepare(`
+          UPDATE daily_operation_amendments SET
+            status = 'applied', decided_at = ?, decided_by = ?, decision_id = ?
+          WHERE id = ? AND user_id = ? AND batch_id = ?
+        `).run(now, decidedBy, decisionId, amendmentId, userId, batchId);
+        this.#database.prepare(`
+          INSERT INTO audit_events (
+            user_id, id, batch_id, action, details_json, idempotency_key, created_at
+          ) VALUES (?, ?, ?, 'daily_operation_amendments.applied', ?, ?, ?)
+        `).run(
+          userId,
+          randomUUID(),
+          batchId,
+          JSON.stringify({
+            amendmentId,
+            action,
+            decidedBy,
+            amendmentSha256: current.amendmentSha256,
+            decisionId,
+            previousRevision: expectedRevision,
+            newRevision: expectedRevision + 1,
+            targetMode,
+          }),
+          `daily-operation-amendment-applied:${idempotencyKey}`,
+          now,
+        );
+        const actionResult = dailyOperationAmendmentFromRow(this.#database.prepare(
+          "SELECT * FROM daily_operation_amendments WHERE id = ?",
+        ).get(amendmentId) as Row);
+        this.#database.prepare(`
+          INSERT INTO daily_operation_amendment_actions (
+            id, user_id, batch_id, amendment_id, action, idempotency_key,
+            expected_batch_revision, expected_amendment_sha256, resulting_status,
+            decision_id, response_json, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          randomUUID(),
+          userId,
+          batchId,
+          amendmentId,
+          action,
+          idempotencyKey,
+          expectedRevision,
+          expectedSha256,
+          "applied",
+          decisionId,
+          JSON.stringify({ amendment: actionResult, decisionId }),
+          now,
+        );
+        return {
+          amendment: dailyOperationAmendmentFromRow(this.#database.prepare(
+            "SELECT * FROM daily_operation_amendments WHERE id = ?",
+          ).get(amendmentId) as Row),
+          replayed: false,
+        };
+      }
       const nextStatus = action === "confirm"
         ? "confirmed" as const
         : action === "reject"
           ? "rejected" as const
-          : "applied" as const;
+          : action === "apply"
+            ? "applied" as const
+            : "cancelled" as const;
       let decisionId: string | null = current.decisionId;
       if (action === "apply" && current.proposal) {
         const plan = this.#database.prepare(`
@@ -1886,7 +2365,9 @@ export class SqliteLocalStore implements LocalStore {
         ? "confirmed"
         : action === "reject"
           ? "rejected"
-          : "applied";
+          : action === "apply"
+            ? "applied"
+            : "cancelled";
       this.#database.prepare(`
         INSERT INTO audit_events (
           user_id, id, batch_id, action, details_json, idempotency_key, created_at
@@ -2304,6 +2785,72 @@ export class SqliteLocalStore implements LocalStore {
     sql += " ORDER BY date_local DESC, revision DESC, created_at DESC LIMIT 1";
     const row = this.#database.prepare(sql).get(...params) as Row | undefined;
     return row ? decisionFromRow(row) : null;
+  }
+
+  getActiveDecisionRecord(
+    userId: string,
+    batchId: string,
+    dateLocal?: string,
+  ): { id: string; decision: FeedingDecision } | null {
+    this.#ensureOpen();
+    const params: string[] = [
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+    ];
+    let sql = `
+      SELECT id, decision_json FROM feeding_decisions
+      WHERE user_id = ? AND batch_id = ? AND status = 'active'
+    `;
+    if (dateLocal !== undefined) {
+      sql += " AND date_local = ?";
+      params.push(requiredText(dateLocal, "dateLocal"));
+    }
+    sql += " ORDER BY date_local DESC, revision DESC, created_at DESC LIMIT 1";
+    const row = this.#database.prepare(sql).get(...params) as Row | undefined;
+    if (!row) return null;
+    return {
+      id: stringValue(row.id, "feeding_decisions.id"),
+      decision: decisionFromRow(row),
+    };
+  }
+
+  getBusinessDayExecutionState(
+    userId: string,
+    batchId: string,
+    businessDateValue: string,
+  ): { state: BusinessDayExecutionState; cumulativeActualGrams: number | null } {
+    this.#ensureOpen();
+    const rows = this.#database.prepare(`
+      SELECT observed_at, data_json FROM daily_observations
+      WHERE user_id = ? AND batch_id = ? AND date_local = ?
+      ORDER BY created_at ASC, id ASC
+    `).all(
+      requiredText(userId, "userId"),
+      requiredText(batchId, "batchId"),
+      businessDate(businessDateValue, "businessDate"),
+    ) as Row[];
+    let state: BusinessDayExecutionState = "unknown";
+    let cumulativeActualGrams: number | null = null;
+    for (const row of rows) {
+      const data = jsonObject(row.data_json, "daily_observations.data_json");
+      const recordedAt = String(data.recordedAt ?? row.observed_at ?? "");
+      if (normalizeIsoTimestamp(recordedAt) === null) continue;
+      const raw = data.actualPowderGrams;
+      if (raw === undefined || raw === null || raw === "") continue;
+      const numeric = Number(raw);
+      if (!Number.isFinite(numeric) || numeric < 0) {
+        throw new LocalStoreError(
+          "LOCAL_STORE_INVALID_INPUT",
+          "daily observation contains invalid actualPowderGrams",
+        );
+      }
+      cumulativeActualGrams = cumulativeActualGrams === null
+        ? numeric
+        : Math.max(cumulativeActualGrams, numeric);
+      if (numeric > 0) state = "executed";
+      else if (state !== "executed") state = "zero";
+    }
+    return { state, cumulativeActualGrams };
   }
 
   listSopTemplates(): LocalSopTemplate[] {
@@ -2838,6 +3385,7 @@ export class SqliteLocalStore implements LocalStore {
     if (batch.revision !== expected) this.#staleRevision(batch.revision, expected);
     const now = new Date().toISOString();
     const resultJson = serializeObject(input.result, "result");
+    const planInput = input.planInput;
     const details = {
       fromMode: input.fromMode,
       toMode: input.toMode,
@@ -2861,6 +3409,16 @@ export class SqliteLocalStore implements LocalStore {
         expected,
       );
       if (Number(update.changes) !== 1) this.#staleRevision(expected + 1, expected);
+      if (planInput) {
+        const existingPlan = this.getDailyOperationPlan(
+          userId,
+          batchId,
+          businessDate(planInput.businessDate, "planInput.businessDate"),
+        );
+        if (!existingPlan || existingPlan.status === "pending") {
+          this.ensureDailyOperationPlan(planInput);
+        }
+      }
       this.#database.prepare(`
         INSERT INTO audit_events (
           user_id, id, batch_id, action, details_json, idempotency_key, created_at
@@ -3218,7 +3776,7 @@ export class SqliteLocalStore implements LocalStore {
     }
     const id = requiredText(input.id ?? randomUUID(), "id");
     const now = new Date().toISOString();
-    this.#transaction(() => {
+    const runAudit = () => {
       this.#database.prepare(
         "INSERT OR IGNORE INTO users (id, created_at) VALUES (?, ?)",
       ).run(userId, now);
@@ -3235,7 +3793,9 @@ export class SqliteLocalStore implements LocalStore {
         input.idempotencyKey ?? null,
         now,
       );
-    });
+    };
+    if (this.#transactionDepth > 0) runAudit();
+    else this.#transaction(runAudit);
     const row = this.#database.prepare(
       "SELECT * FROM audit_events WHERE user_id = ? AND id = ?",
     ).get(userId, id) as Row;
@@ -3302,6 +3862,16 @@ export class SqliteLocalStore implements LocalStore {
     decision: FeedingDecision;
     now: string;
   }): string {
+    const decisionWithPolicy: FeedingDecision = {
+      ...input.decision,
+      evidence: {
+        ...input.decision.evidence,
+        inputs: {
+          ...input.decision.evidence.inputs,
+          decisionPolicyVersion: DECISION_POLICY_VERSION,
+        },
+      },
+    };
     const revision = nonNegativeInteger(input.decision.revision, "decision.revision");
     const existing = this.#database.prepare(`
       SELECT id FROM feeding_decisions
@@ -3322,13 +3892,13 @@ export class SqliteLocalStore implements LocalStore {
           updated_at = ?
         WHERE id = ?
       `).run(
-        requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
-        requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
-        requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
-        JSON.stringify(input.decision.setting),
-        JSON.stringify(input.decision.evidence),
-        serializeDecision(input.decision),
-        input.decision.status,
+        requiredText(decisionWithPolicy.evidence.sopVersion, "decision.evidence.sopVersion"),
+        requiredText(decisionWithPolicy.evidence.modelVersion, "decision.evidence.modelVersion"),
+        requiredText(decisionWithPolicy.evidence.calculationDate, "decision.evidence.calculationDate"),
+        JSON.stringify(decisionWithPolicy.setting),
+        JSON.stringify(decisionWithPolicy.evidence),
+        serializeDecision(decisionWithPolicy),
+        decisionWithPolicy.status,
         input.now,
         stringValue(existing.id, "feeding_decisions.id"),
       );
@@ -3354,13 +3924,13 @@ export class SqliteLocalStore implements LocalStore {
       null,
       revision,
       requiredText(input.dateLocal, "dateLocal"),
-      requiredText(input.decision.evidence.sopVersion, "decision.evidence.sopVersion"),
-      requiredText(input.decision.evidence.modelVersion, "decision.evidence.modelVersion"),
-      requiredText(input.decision.evidence.calculationDate, "decision.evidence.calculationDate"),
-      JSON.stringify(input.decision.setting),
-      JSON.stringify(input.decision.evidence),
-      serializeDecision(input.decision),
-      input.decision.status,
+      requiredText(decisionWithPolicy.evidence.sopVersion, "decision.evidence.sopVersion"),
+      requiredText(decisionWithPolicy.evidence.modelVersion, "decision.evidence.modelVersion"),
+      requiredText(decisionWithPolicy.evidence.calculationDate, "decision.evidence.calculationDate"),
+      JSON.stringify(decisionWithPolicy.setting),
+      JSON.stringify(decisionWithPolicy.evidence),
+      serializeDecision(decisionWithPolicy),
+      decisionWithPolicy.status,
       null,
       input.now,
       input.now,

@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 10;
+export const MIGRATION_VERSION = 12;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS daily_operation_amendments (
   base_plan_id TEXT NOT NULL,
   base_confirmation_id TEXT,
   origin_id TEXT NOT NULL,
-  origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+  origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control', 'mode_change')),
   severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
   priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
   status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied', 'superseded', 'cancelled')),
@@ -293,8 +293,8 @@ CREATE INDEX IF NOT EXISTS daily_operation_amendments_batch_date_idx
   ON daily_operation_amendments(user_id, batch_id, business_date DESC);
 CREATE INDEX IF NOT EXISTS feeding_decisions_batch_date_revision_idx
   ON feeding_decisions(user_id, batch_id, date_local, revision DESC);
-CREATE INDEX IF NOT EXISTS feeding_decisions_active_idx
-  ON feeding_decisions(user_id, batch_id, date_local, revision DESC)
+CREATE UNIQUE INDEX IF NOT EXISTS feeding_decisions_one_active_idx
+  ON feeding_decisions(user_id, batch_id, date_local)
   WHERE status = 'active';
 CREATE INDEX IF NOT EXISTS agent_sessions_batch_idx
   ON agent_sessions(user_id, batch_id, updated_at DESC);

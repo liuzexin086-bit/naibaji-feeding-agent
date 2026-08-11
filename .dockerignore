@@ -1,0 +1,14 @@
+.git
+**/.env*
+**/node_modules
+agent/public
+agent/container-models
+agent/.generated-models
+agent/.generated-web
+agent/data
+*.db
+*.sqlite*
+coverage
+dist
+.pytest_cache
+__pycache__

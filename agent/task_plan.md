@@ -69,6 +69,245 @@
 - Optimizer Production Gate: CLOSED
 - Real Device Control Gate: CLOSED
 
+## NBJ-DIARRHEA-CLOSURE Revision — 2026-08-07
+
+- Mild diarrhea is an individual intervention: isolate affected piglets, one piglet milk-control opportunity, no whole-pen device change and no `DeviceSetting` proposal.
+- Moderate diarrhea is a whole-pen feeding reduction: one frozen-priority meal/window removed, mode preserved, independent human confirmation required before apply.
+- Severe diarrhea is an emergency manual path: immediate isolation, clinical/environment checks, no device proposal, no automatic medication/diagnosis.
+- `DiarrheaAdjustmentKind` now uses `individual_intervention`, `feeding_reduction_proposal`, and `manual_only`; `preview_only` and mild-as-proposal are removed.
+- Unknown cumulative actual powder in moderate fails closed to `manual_only`; no assumed-zero device proposal.
+- LangGraph deterministic responses, Agent tools, UI labels, and regressions follow the revised mild/moderate/severe contract.
+
+## NBJ-DIARRHEA-CLOSURE-R1 — 2026-08-07
+
+- Moderate diarrhea is removed from `DailyOperationPlan.proposedSetting` and materialized as an independent amendment even before routine plan confirmation.
+- `today-operations/confirm` never applies diarrhea proposals; only amendment `confirm → apply` creates an active device decision.
+- Mild and severe no longer create device amendments; they are audited as individual intervention or emergency manual disposition.
+- Frontend renders independent diarrhea exception cards with mild/manual, moderate confirm/reject/apply, and severe manual actions.
+- Docker web image builds from source-controlled `agent/ui/` and root static files without requiring gitignored `agent/public`; `/version` reports the build commit.
+
+## NBJ-DIARRHEA-CLOSURE-R2 — 2026-08-07
+
+- Confirmed amendments support `confirmed → cancelled` with a dedicated cancel endpoint and idempotent action record.
+- Frontend confirmed card uses `取消调整` instead of an invalid `拒绝调整`; apply success reloads the canonical batch/today so top device settings refresh immediately.
+- System prompt now states the revised mild/moderate/severe diarrhea contract instead of asking for concrete whole-pen device operations.
+- Manual diarrhea actions use a stable `localStorage`-backed idempotency key per batch/observation/action.
+- Removed unused `DIARRHEA_RATIO` residual values.
+
+## NBJ-DIARRHEA-CLOSURE-R3 — 2026-08-07
+
+- Mild completion uses `diarrhea.individual_intervention_completed` with explicit isolation + one piglet milk-control completion audit fields.
+- Manual-action idempotency keys are deterministic (`diarrhea-manual:<batch>:<feedbackOriginId>:<action>`) and bind `feedbackOriginId`/`observationId`.
+- Cancelled and superseded amendment UI labels/cards are explicit; cancelled moderate card says the plan is cancelled and device program unchanged.
+- Added exact V10 → V11 migration regression preserving two action rows, payloads, replay, cancel CHECK, FK and integrity.
+
+## NBJ-EXECUTION-CONTRACT-P1 — 2026-08-07
+
+### P1-0 Contract Freeze — complete
+
+- Created `agent/docs/execution-contract.md` as the new frozen task contract; removed the old root freeze.
+- Frozen five-layer authority model: `selectedMode`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`.
+- Frozen invariants: mode is operator-selected; creep/diarrhea/blockage cannot change mode; free feeding uses dispense quota; active decision must match selected mode.
+- Frozen runtime safety: refusal/manual_hold, blockage/blocked, probe/blocked, curve cap approval state; severe diarrhea does not auto-hold whole-pen device.
+- Frozen mode-change lifecycle, Schema V12, Observation trust boundary, clean model build, `/version` provenance, UI runtime contract, and regression matrix.
+
+### P1-0.1 Contract Closure — complete
+
+- Split current gate state from final target state; all runtime/implementation/merge gates are CLOSED until implemented.
+- Frozen `controlState` as server-owned persisted monotonic latch with `startDay`; no config/model dual authority.
+- Frozen INV-007 Control Monotonicity and INV-008 No Double Control Reduction.
+- Added Today API layered contract, Legacy Decision Reconciliation, runtime explicit lifecycle, curve-cap approval semantics, strict observation allowlist, manual audit action/severity mapping, exact V11→V12 migration evidence, clean source/model provenance, root `.dockerignore`, and CI contract.
+- Added Supersession Notice and marked conflicting legacy rules in this file; no runtime source or schema changed.
+
+### P1-0.2 Final Contract Seal — complete
+
+- Mode switch execution test now uses `cumulativeActualPowderGramsForBusinessDay`; missing/unknown fails closed, latest-record zero cannot overwrite cumulative actual.
+- Frozen runtime aggregation with independent device/feeding domain latches and precedence `blocked > manual_hold > normal`.
+- Frozen policy compatibility: known legacy only from explicit registry; unknown/future values fail closed with `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Provenance now requires both source SHA and real artifact SHA for Agent/Web; deterministic source→artifact build fixture is part of CI.
+- Removed remaining `effectiveMode` implementation instructions from LangGraph/today plan specs; layered mode state is authoritative.
+
+### EC-P1-1 — complete
+
+- Removed `forcedTimed` from Decision Core; mode now comes from `requestedMode` (Day 0 handled by eligibility contract).
+- Removed generic `diarrhea` exception action from base day decision; diarrhea authority remains `observation-feedback`.
+- Removed `FREE_FEEDING_BLOCKERS` mode-forcing from BatchDecisionService; `milk_control`, refusal, blockage, probe, and curve cap can no longer switch free feeding to timed.
+- Kept `freeFeedingBlockers` as a compatibility field with an empty array; it is no longer a mode selector.
+- Added regressions: free + milk control remains free, free + diarrhea has no base-diarrhea device action, exception signals preserve free mode.
+
+### EC-P1-2 — complete
+
+- Root `feeding-model.js` now clamps the committed control anchor with `Math.min(currentCount, cp.feedTimes)`, so old higher committed anchors cannot increase future control counts.
+- Agent production-model imports the tracked root `feeding-model.js` / `v5lite-model.js` instead of the ignored `agent/container-models` copy.
+- Dockerfile copies root model sources into the build and agent image, keeping the runtime path aligned with the tracked source.
+- Added model parity regression proving a committed `feedTimesAtCommit=10` cannot raise a future count from 9 back to 10.
+
+### EC-P1-3 — complete
+
+- Added `FreeFeedingSetting` and `DeviceSetting.freeDispenseLimit`; `mealCount` is compatibility only.
+- Free decisions now satisfy `dailyPowderGrams = singlePowderGrams × freeDispenseLimit`; direct SOP totals are down-rounded through `single × limit`.
+- Moderate diarrhea in free mode reduces `freeDispenseLimit` by one and preserves all windows and single powder; base limit 1 fails closed with `NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN`.
+- `futureDeliverable` for free mode uses `hasActiveOrFutureBusinessDayWindow` and equals remaining deliverable only while a current business-day window remains; `freeReductionPriority` is no longer read for free mode.
+- Added business-day helper and regressions for active/future windows, completed cross-midnight windows, direct total mapping, quota-only moderate reduction, and no-window manual-only behavior.
+
+### EC-P1-2.1 / EC-P1-3.1 Closure — complete
+
+- Model assets are now generated from tracked root sources into `agent/.generated-models` before check/test/build; the import path is stable in both `src/model` and `dist/model`.
+- Added `prepare-model-assets.mjs`, `dist-model-smoke.mjs`, and `npm run smoke:dist`; Docker build copies generated assets into the agent image.
+- Persisted `controlStartDay` is now replay authority in `feeding-model.js`; `automaticStart` can no longer move an existing latch later.
+- Rewrote the committed-anchor state machine so a committed visible day is not silently pre-decremented; a committed 10 anchor leads to next future count 9, not 7.
+- Free moderate future deliverable is discretized to whole standard dispenses; less than one `singlePowderGrams` remaining fails closed to manual-only.
+- Free moderate proposal reason no longer emits `targetSlot=null`; `freeReductionPriority` is marked deprecated and is not read by the free decision path.
+- Decision Core rejects executable `free_feeding` requests without at least one valid window.
+
+### EC-P1-1.1 / EC-P1-2.2 / EC-P1-3.2 Closure — complete
+
+- Added `evaluateFreeFeedingEligibility()` as a pure eligibility check over frozen stage conditions, operator selection, windows, and exception config schema.
+- `/mode` rejects free-feeding requests before the frozen earliest day with `409 NBJ_FREE_FEEDING_NOT_ELIGIBLE` and leaves `selectedMode` unchanged; no automatic timed fallback.
+- Free SOP quantity authority now caps `freeDispenseLimit` at `min(modelMealCount, SOP mealCount)` for direct/indirect SOP; free SOP settings must satisfy `daily = single × limit` and `daily <= safeSOP target`.
+- Free SOP conflicts such as `perMeal × mealCount > directTotal` fail closed with `NBJ_DECISION_SOP_QUANTITY_CONFLICT`.
+- `feeding-model.js` now rejects non-monotonic committed control history after control start with `NBJ_CONTROL_HISTORY_NON_MONOTONIC`; valid committed history remains authoritative and future counts stay non-increasing.
+
+### EC-P1-3.3 Final Seal — complete
+
+- `SOP mealCount` must now be a positive safe integer; `4.5` and `0.5` fail closed with `NBJ_DECISION_INVALID_SOP_MEAL_COUNT`.
+- `feeding-model.js` performs final INV-007 validation over the complete visible feedTimes: no upward moves, and adjacent days may drop by at most one.
+- `requiresOperatorSelection=false` and missing values no longer add an eligibility blocker; the explicit `/mode` request is itself the operator action.
+- `exceptionBlockers` is schema-validated against the legacy known enum only; unknown values make free eligibility invalid but never force timed mode.
+- Raw SOP conflict policy is fixed: `perMeal × mealCount > directTotal` fails closed before precision can hide the contradiction.
+
+### EC-P1-4 — complete
+
+- Added independent `RuntimeExecutionState` and `resolveRuntimeState()` outside `FeedingDecision`.
+- Runtime uses two domain latches: device (`normal/blocked/probe_contaminated`) and feeding (`normal/refusal`), aggregated with precedence `blocked > manual_hold > normal`.
+- Omitted runtime fields never clear a domain latch; explicit `normal` clears only its own domain; invalid timestamps are quarantined.
+- Observation API validates and normalizes `deviceStatus` and `feedingResponse`; legacy `ok/offline/active/mixed/refusing` are mapped to canonical values.
+- Local API today response now includes `runtimeState` with state, reasons, source observation IDs, and both domain latches.
+
+### EC-P1-5 — complete
+
+- Schema advances to V12: `origin_kind` accepts `mode_change`, and `feeding_decisions_one_active_idx` enforces one active decision per user/batch/business day.
+- Migration preflight rejects duplicate active decisions before creating the unique index; V11→V12 rebuild preserves amendment/action history and verifies counts and payload hashes.
+- `/mode` now fails closed when cumulative actual is unknown (`NBJ_MODE_SWITCH_ACTUAL_UNKNOWN`) or already executed (`NBJ_MODE_SWITCH_AFTER_EXECUTION_BLOCKED`).
+- Open pending/confirmed safety amendments block a new mode switch with `NBJ_MODE_SWITCH_AMENDMENT_PENDING`.
+- Confirmed/active daily plans route mode switches through a `mode_change` amendment; confirm leaves selected/active unchanged, apply atomically updates selectedMode, supersedes old active decision, creates exactly one active decision, advances revision, and writes audit/action history.
+- Pending/no-plan mode switches refresh the pending daily operation plan in the same transaction as the batch update.
+
+### EC-P1-6 — complete
+
+- Observation API now uses a strict allowlist; unknown fields and all plan fields return `400 NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN`.
+- Server writes authoritative snapshot fields at commit: `planPerPigAtCommit`, `planTotalAtCommit`, `feedTimesAtCommit`, `freeDispenseLimitAtCommit`, `modeAtCommit`, `activeDecisionIdAtCommit`, and `policyVersionAtCommit`.
+- Client-supplied `mealCount`, `mealTimes`, `singlePowderGrams`, `freeDispenseLimit`, `deviceMode`, `plannedTotalPowderGrams`, `exceptionActions`, `modelVersion`, `sopVersion`, and `waterState` are rejected rather than trusted.
+- Record public responses expose the server-authored commit snapshot for audit and Agent/local API parity.
+
+### EC-P1-5.1 / EC-P1-6.1 Authority Seal — complete
+
+- `cumulativeActualPowderGramsForBusinessDay` is now scoped to `row.dayIndex === currentDay` in both `/mode` and mode-change apply; D0 actual no longer leaks into D1.
+- Added `getActiveDecisionRecord()` so `today.activeDecisionId` is the real database decision row id, and observation commit snapshots store that id.
+- `planPerPigAtCommit` now uses planned/active server head count, not the observation-supplied `effectiveHeads`; observation heads may change the record but cannot rewrite the planned program snapshot.
+- Added `DECISION_POLICY_VERSION` shared constant and used it for `policyVersionAtCommit`.
+- Added regressions for D1 unknown/zero/executed actual, mode apply after state change, active decision id before/after mode apply, and head-count-independent plan-per-pig snapshot.
+
+### EC-P1-5.2 Execution Evidence Seal — complete
+
+- Added single store authority `getBusinessDayExecutionState()` backed by immutable `daily_observations`, not the replaceable batch record snapshot.
+- Execution state is monotonic: no explicit actual → `unknown`; all explicit actuals are zero → `zero`; any positive explicit actual → `executed`.
+- A later same-day `actualPowderGrams=0` cannot reset `executed` back to `zero`; `/mode` and mode-change apply both use the same store method.
+- Removed duplicate API/store record-scanning helpers so there is one execution-state implementation.
+- Added regressions for `180 → 0` overwrite in mode switch and amendment apply.
+
+### EC-P1-7 — complete
+
+- Today API now returns canonical layered state: `modeState`, `controlState`, `plannedDecision`, `activeDecision`, `runtimeState`, `approvalState`, and `reconciliation`.
+- New active decisions are tagged with `decisionPolicyVersion: execution-contract-v1` in evidence inputs.
+- Legacy active mode mismatch returns `reconciliation.required=true, reason=legacy_mode_mismatch` without mutating history; if the business day has executed, reconciliation is blocked with `execution_already_started`.
+- New-policy active mode mismatch fails closed with `NBJ_ACTIVE_DECISION_MODE_INVARIANT`.
+- `approvalState` becomes `manual_confirmation_required` when curve cap or pending/confirmed amendments exist.
+- Deprecated flat `effectiveMode`/`setting` fields remain for compatibility but are no longer the layered authority.
+
+### EC-P1-7.1 Today Authority Seal — complete
+
+- Added explicit `classifyDecisionPolicyVersion()`: missing/null → legacy, `execution-contract-v1` → current, any other non-empty value → `NBJ_DECISION_POLICY_UNSUPPORTED`.
+- Policy classification now runs before mode matching; future/corrupt policy versions fail closed even when modes match.
+- `approvalState` reads only `plannedDecision.exceptionActions`; active decision curve-cap history cannot lower a planned manual-confirmation state, and amendments are ORed into approval.
+- Observation commit snapshots now read from `activeDecision ?? plannedDecision` canonical setting, not `today.setting` flat compatibility fields.
+- Mode-change proposal construction reads `plannedDecision` explicitly.
+- Added policy registry unit/API regressions and planned approval authority unit regressions.
+
+### EC-P1-7.2 Final Layered Seal — complete
+
+- `classifyDecisionPolicyVersion("")` now fails closed as `unsupported`; only missing/null is known legacy.
+- `decisionForToday()` and `parseObservation()` no longer fall back to the flat `today` object when `plannedDecision` is absent; layered write/approval paths fail closed.
+- Planned decisions now carry `decisionPolicyVersion: execution-contract-v1` in evidence inputs; `policyVersionAtCommit` follows `activeDecision ?? plannedDecision`, so planned/current-active commits record `v1` and legacy-active commits record `null`.
+- Added empty-policy API regression, missing-`plannedDecision` write regression, and policy-version commit snapshot regressions for planned, current-active, and legacy-active authorities.
+
+### EC-P1-8 UI Execution State — complete
+
+- Replaced the single “今日执行” effective badge with four read-only execution blocks: 模式、教槽控奶、今日计划、运行状态.
+- Device summary now reads canonical `activeDecision ?? plannedDecision` through `todayPlanMode()` / `planSetting()`; flat `effectiveMode` / `today.setting` are no longer UI authority.
+- Free-feeding UI shows single powder, `freeDispenseLimit`, daily total, and `自由采食窗口`; it no longer hides single amount or renders timed meal points.
+- Runtime state maps `blocked / manual_hold / normal` and reasons to Chinese UI; control state shows start day and trigger grade.
+- Removed `今日执行：定时定量` and the old `建议单日下粉总量` free-feeding presentation.
+- Added UI contract regressions for layered authority and free-window rendering.
+- `p1-safety-gate` now includes `tests/ui-shell-contract.test.ts`.
+
+### EC-P1-8.1 UI Authority + Free Window Propagation Seal — complete
+
+- Removed all deprecated flat Today fallbacks from UI: free mode no longer uses `mealCount` as `freeDispenseLimit`, `deviceSchedule()` reads only canonical `freeWindows`/`timedMeals`, exceptions come from `plannedDecision.exceptionActions`, and version provenance comes from `planEvidence()`.
+- Added 8-slot propagation regressions: published config keeps 8 enabled windows, new batch freezes 8 windows into `devicePlanSnapshot`, planned decision and API Today return all 8, old batches stay frozen at 1, and SOP migration preview/apply moves 1 → 8.
+- Root cause for the one-window screenshot is the default SOP having only slot 1 enabled and the old batch retaining its frozen snapshot; the 8-slot code path itself was not dropping windows.
+- Root cause for the old UI screenshot is a stale Web artifact; current Web image is built from tracked `agent/ui/liquid-index.html`, and the running HTTP response contains the new UI markers and none of the old markers.
+- `p1-safety-gate` now includes `tests/local-integration/free-window-propagation.test.ts`.
+
+### EC-P1-9 Clean Model Build Provenance — complete
+
+- Added root `.dockerignore` so Docker context never relies on local node_modules, public/container-model copies, generated model folders, databases, or release artifacts.
+- Added `agent/scripts/write-provenance.mjs` to compute source and real artifact SHA-256 for feeding model, V5-Lite, UI, schema version, and decision policy version.
+- Agent `/version` now returns `commit`, `schemaVersion`, `decisionPolicyVersion`, `feedingModelSourceSha256`, `feedingModelArtifactSha256`, `v5LiteModelSourceSha256`, `v5LiteModelArtifactSha256`, and `uiSha256`.
+- Web `/version` now returns JSON with `commit`, model source/artifact SHA, and `uiSha256`; Nginx serves `/version.json` and the Dockerfile copies provenance from the same build stage.
+- Added `agent/scripts/clean-source-gate.mjs` using `git archive HEAD` into a temp directory and rejecting ignored artifacts before accepting the clean build.
+- Added `tests/provenance-contract.test.ts` and wired it into `p1-safety-gate`.
+
+### EC-P1-9.1 Clean Source Line Ending Fix — complete
+
+- Clean `git archive HEAD` verification on Windows exposed CRLF-sensitive hash and Compose tests.
+- Model parity source hashes now normalize CRLF to LF; deployment contract reads normalize CRLF before matching service blocks.
+
+### EC-P1-9.2 Archive Line Ending Normalization — complete
+
+- Added root `.gitattributes` forcing LF for shell scripts, source/config files, templates, and text assets so `git archive HEAD` clean builds do not produce CRLF entrypoints or line-ending drift.
+
+### EC-P1-9.3 Web Model Derivation Seal — complete
+
+- Pinned `terser@5.49.2` as a devDependency and added `prepare-web-model-assets.mjs`, which deterministically minifies authoritative `feeding-model.js` into `agent/.generated-web/feeding-model.min.js`.
+- Docker Web stage now copies only the generated Web artifact; provenance hashes that generated artifact, not the old root min copy.
+- Root `feeding-model.min.js` is synchronized from the same deterministic generation so the desktop bundle does not keep a stale model.
+- Added behavior parity tests proving authoritative and generated Web models agree on persisted control start, `NBJ_CONTROL_HISTORY_NON_MONOTONIC`, and `NBJ_CONTROL_HISTORY_STEP_INVALID`.
+
+### EC-P1-10 CI and Final Verification — complete
+
+- Added `.github/workflows/agent-safety.yml` pinned to Node 24.18.0, running root smoke, Python optimizer tests, `npm ci`, check, full tests, P0/P1 gates, build, clean-source gate, Docker Agent/Web builds, Compose config, and runtime provenance.
+- Added `agent/scripts/ci-runtime-check.mjs` to start Agent/Web containers, verify `/version` commit/schema/policy, compare `/version` artifact hashes against actual image files, and assert live Web UI markers.
+- Added `tests/ci-contract.test.ts` and wired it into `p1-safety-gate`.
+
+### EC-P1-10.1 CI Runtime Raw Hash Alignment — complete
+
+- `ci-runtime-check.mjs` now hashes raw source bytes to match `write-provenance.mjs` and the actual Docker artifact bytes on both Windows working trees and Linux CI checkouts.
+
+Baseline:
+
+```text
+branch: nbj-execution-contract-p1
+HEAD: fadcd68
+merge-base main: 413a4c0
+worktree: clean
+Node: v24.16.0 (exact Node 24.18.0 available via npx)
+npm: 11.13.0
+Python: 3.10.9
+```
+
+EC-P1-1 起按 commit 拆分逐个 Gate 实施；P1-0.2 验收后再进入 EC-P1-1。
+
 约束：不 reset/checkout/清理既有用户改动；每个阶段独立提交；不 push、不 merge、不打 tag；所有安全异常 fail closed。
 
 ## Goal
@@ -93,7 +332,7 @@ volumes or a verified backup clone.
 
 | ID | Defect | Required correction | Fail-closed behavior | Release proof |
 |---|---|---|---|---|
-| `P0-01` | Agent 本地 `currentRun()` 返回 `null`，Agent 与本地 API 读取的批次模式/设备方案可能漂移 | 抽取并共用 `BatchDecisionService`；Agent 必须按批次 revision 读取冻结的 `devicePlanSnapshot`、`selectedMode`、`effectiveMode`、阶段条件和异常阻断 | 找不到当前批次或冻结设备快照时阻断计划与数值建议，不得临时拼装另一套方案 | 同一批次 revision 下，Agent 与本地 API 的模式、设备 hash、餐次、窗口和数量逐项一致 |
+| `P0-01` | Agent 本地 `currentRun()` 返回 `null`，Agent 与本地 API 读取的批次模式/设备方案可能漂移 | 抽取并共用 `BatchDecisionService`；Agent 必须按批次 revision 读取冻结的 `devicePlanSnapshot`、`modeState.selectedMode/plannedMode`、`activeDecision`、`runtimeState`、阶段条件和异常阻断 | 找不到当前批次或冻结设备快照时阻断计划与数值建议，不得临时拼装另一套方案 | 同一批次 revision 下，Agent 与本地 API 的模式、设备 hash、餐次、窗口和数量逐项一致 |
 | `P0-02` | 冻结 SOP 缺失时会回退 `DEFAULT_SOP_TEMPLATE` | 数值决策只接受批次冻结 SOP/version/hash；知识检索也必须限定冻结 digest | 缺失或 digest 不匹配时：数值路径进入 `safe_block`，知识路径返回 `unavailable`；禁止使用最新或默认 SOP | 缺失、错 hash、旧 revision 三组测试均不产生设备数值，且不会读取默认模板 |
 | `P0-03` | 以 `HH:mm` 字符串判断剩余餐次会丢失跨午夜的 `02:00/05:00/08:00` | 所有餐次、排除时段和自由采食窗口统一归一化到 `09:00` 至次日 `09:00` 业务日轴 | 无法归一化、窗口重叠或日期归属不明时拒绝生成计划；控奶不得重排保留餐次 | 在 `23:30` 计算时仍正确保留次日三餐；跨午夜窗口、排除和控奶回归测试通过 |
 | `P0-04` | Agent 最终回答没有程序化数值证据校验 | `build_evidence_plan` 生成必需证据，工具回执形成 `numericWhitelist`，`validate_evidence` 与 `validate_response` 双重校验 | 任一时间、数量、餐次数或设备参数无法映射到同 revision/digest 的确定性回执时拒绝输出 | 对无证据、过期回执、篡改数值和正常数值分别测试；只有正常证据可通过 |
@@ -107,12 +346,29 @@ volumes or a verified backup clone.
 
 ## Locked Product Rules
 
+> **Supersession Notice（2026-08-07）**
+>
+> 对于以下主题，`agent/docs/execution-contract.md` 是唯一权威合同：
+>
+> - feeding mode authority
+> - controlState
+> - free-feeding execution semantics
+> - runtime blockers
+> - active decision consistency
+> - mode change
+> - observation authority
+> - execution/build provenance
+>
+> 本文件更早的 Locked Product Rules / `effectiveMode` / exceptionBlockers / `freeReductionPriority` 描述只作为历史记录；与本合同冲突时不得执行。执行者必须先读 `agent/docs/execution-contract.md`。
+
+## Legacy Locked Product Rules（superseded by execution-contract-v1）
+
 1. 首日有效模式固定为 `timed_quantity`，餐次严格为 `17:00/20:00/23:00/02:00/05:00/08:00`。
-2. 第二日起操作员只选择已有冻结模板；`selectedMode` 与 `effectiveMode` 分离，两模板互不覆盖。
-3. 控奶只关闭冻结优先级指定的餐次，不改变保留餐次的时间和顺序。
+2. `SUPERSEDED BY execution-contract-v1`：第二日起操作员只选择已有冻结模板；不再使用 `effectiveMode` 作为第二实时权威，`selectedMode` 与 `plannedDecision.mode` / `activeDecision.mode` 分层。
+3. `SUPERSEDED BY execution-contract-v1`：控奶不再按“关闭冻结优先级指定餐次”作为通用执行规则；timed mode 使用模型输出 meal count，free mode 只改 `freeDispenseLimit`，不得重排或删除 free window。
 4. 自由采食模板在管理员 SOP 编辑页固定提供8行时间段设置；每行包含启用状态、开始时间、结束时间和可选名称。
 5. 每个自由采食模板必须启用1～8个有效时间段；允许跨午夜，但按09:00至次日09:00业务日归一化后不得重叠。
-6. SOP 发布后，自由采食8行配置、阶段条件、异常阻断、版本和 hash 随新批次冻结；旧批次不受后台后续编辑影响。
+6. SOP 发布后，自由采食8行配置、阶段条件、异常阻断、版本和 hash 随新批次冻结；旧批次不受后台后续编辑影响。`SUPERSEDED BY execution-contract-v1`：异常阻断不得直接改变 mode；runtime blocker 独立为 `manual_hold`/`blocked`，且 omitted 不解除。
 7. 一个批次在一个业务日内只生成一份常规人工操作计划、只允许一次完成确认。
 8. 现场端单独提供“今日操作”栏，汇总当天所有常规人工 SOP 操作；不为每条操作分别提供确认按钮。
 9. 每日一次确认只覆盖常规 SOP 操作。异常处置、第三日弱仔去留、模式变更和设备方案调整继续使用独立审批与审计，不能被日确认替代。
@@ -166,11 +422,11 @@ exception
 
 #### `device_plan_subgraph`
 
-输入必须包含冻结的 SOP、设备方案、批次 revision、`selectedMode` 和 `effectiveMode`。
+输入必须包含冻结的 SOP、设备方案、批次 revision、`modeState.selectedMode/plannedMode`、`activeDecision`、`runtimeState` 和 `controlState`。
 
 - 首日始终生成定时定量六餐：`17:00/20:00/23:00/02:00/05:00/08:00`。
 - 第二日起只读取随批次冻结的定时定量模板或自由采食模板。
-- 异常、控奶或设备限制可把 `effectiveMode` 临时降级为定时定量，但不得覆盖 `selectedMode`，也不得修改任一冻结模板。
+- `SUPERSEDED BY execution-contract-v1`：不再使用 `effectiveMode` 临时降级机制；异常、控奶或设备限制不得改变 `selectedMode`，runtime blocker 独立表达。
 - 所有设备计划和调整结果由确定性核心渲染；模型只解释，不生成数值。
 
 #### `first_day_subgraph`
@@ -186,11 +442,13 @@ exception
 - 控奶仅关闭明确指定或按冻结优先级命中的餐次。
 - 保留餐次的时间、顺序和数值精度不得重排或重算为另一套模板。
 
+> `SUPERSEDED BY execution-contract-v1`：timed mode 的控奶以 protected model 输出的 meal count 为数量权威，不再以“关闭冻结优先级餐次”作为自由采食通用规则；free mode 另见 execution contract。
+
 #### `free_feeding_subgraph`
 
 - 只读取管理员已发布并随批次冻结的8行时间段配置、阶段条件和异常阻断。
 - 配置必须恰有8个 slot，启用数量为 `1..8`；允许跨午夜，但须在 `09:00` 至次日 `09:00` 业务日轴上归一化且不重叠。
-- 任一阶段条件或异常阻断命中时 fail closed：生成阻断证据，并使 `effectiveMode` 使用确定性降级方案；不得改写 `selectedMode` 或自由采食模板。
+- `SUPERSEDED BY execution-contract-v1`：任一阶段条件或异常阻断命中时不得改变 mode；runtime blocker 按 execution contract 独立表达，不得改写 `selectedMode` 或自由采食模板。
 
 #### `exception_subgraph`
 
@@ -254,8 +512,12 @@ interface AgentGraphState {
     batchRevision: number;
     currentDayIndex: number;
     currentDayAge: number;
-    selectedMode: FeedingMode;
-    effectiveMode: FeedingMode;
+    modeState: {
+      selectedMode: FeedingMode;
+      plannedMode: FeedingMode;
+    };
+    activeDecision: FeedingDecision;
+    runtimeState: RuntimeExecutionState;
     sopRef: FrozenSopRef;
     devicePlanRef: FrozenDevicePlanRef;
   };
@@ -397,7 +659,7 @@ interface DailyOperationPlan {
   devicePlanVersion: string;
   devicePlanSha256: string;
   selectedMode: FeedingMode;
-  effectiveMode: FeedingMode;
+  plannedMode: FeedingMode;
   operations: DailyOperationItem[];
   operationsSha256: string;
   status: "pending" | "confirmed";
@@ -457,7 +719,7 @@ Acceptance:
 - [x] Treat the P0-01 shared `BatchDecisionService` as the baseline; complete its canonical snapshot loading and `computeDayDecision` input contract without creating a second path.
 - [x] Make `local-api.ts` and `tools.ts` thin adapters over this service.
 - [x] Preserve local API transaction boundaries and mode-switch audit behavior.
-- [x] Return `selectedMode`, `effectiveMode`, SOP ref, device plan ref and deterministic evidence in one canonical result.
+- [x] Return `modeState.selectedMode / plannedMode`, `activeDecision`, `runtimeState`, SOP ref, device plan ref and deterministic evidence in one canonical result.
 - **Status:** complete
 
 Primary files:

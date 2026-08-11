@@ -4,9 +4,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { AIMessage } from "@langchain/core/messages";
-import { handleLocalApi, type LocalApiDeps } from "../../src/container/local-api.js";
+import {
+  classifyDecisionPolicyVersion,
+  handleLocalApi,
+  parseObservation,
+  plannedApprovalState,
+  type LocalApiDeps,
+} from "../../src/container/local-api.js";
 import { initializeLocalAdmin } from "../../src/container/local-auth.js";
 import { createLocalStore, type SqliteLocalStore } from "../../src/local-db/index.js";
+import type { LocalBatch } from "../../src/shared/local-store-contract.js";
 
 const cleanups: Array<() => void> = [];
 
@@ -47,6 +54,25 @@ function cookieOf(response: Response): string {
 }
 
 describe("local execution API", () => {
+  it("classifies policy versions and reads planned approval authority", () => {
+    expect(classifyDecisionPolicyVersion(undefined)).toBe("legacy");
+    expect(classifyDecisionPolicyVersion(null)).toBe("legacy");
+    expect(classifyDecisionPolicyVersion("")).toBe("unsupported");
+    expect(classifyDecisionPolicyVersion("execution-contract-v1")).toBe("current");
+    expect(classifyDecisionPolicyVersion("future-x")).toBe("unsupported");
+    expect(plannedApprovalState({ exceptionActions: [] })).toBe("ready");
+    expect(plannedApprovalState({
+      exceptionActions: [{ type: "curve_cap" }],
+    })).toBe("manual_confirmation_required");
+  });
+
+  it("fails closed when the layered today response lacks plannedDecision", () => {
+    const today: Record<string, unknown> = { dayIndex: 0, dayAge: 3 };
+    const batch = { data: {} } as LocalBatch;
+    expect(() => parseObservation({ observation: {} }, today, batch))
+      .toThrow("NBJ_PLANNED_DECISION_INVALID");
+  });
+
   it("authenticates locally, creates batches and advances atomically", async () => {
     const { base } = await startApi();
     const login = await request(base, "/api/auth/login", {
@@ -141,12 +167,186 @@ describe("local execution API", () => {
       body: JSON.stringify({
         expectedRevision: 2,
         idempotencyKey: "advance-anchored",
-        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 900, mealCount: 10 },
+        observation: { effectiveHeads: 20, creepGrade: "high", diarrheaGrade: "none", actualPowderGrams: 900 },
       }),
     });
     expect(anchoredAdvance.status).toBe(200);
     const anchoredBody = await anchoredAdvance.json() as { today: { mealCount: number } };
-    expect(anchoredBody.today.mealCount).toBe(9);
+    expect(anchoredBody.today.mealCount).toBe(8);
+  });
+
+  it("exposes explicit runtime state in today and rejects invalid runtime enums", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "运行状态", startAge: 7, endAge: 16, headCount: 20 }),
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json() as {
+      batch: { id: string; revision: number };
+      today: { runtimeState: { state: string } };
+    };
+    expect(createdBody.today.runtimeState.state).toBe("normal");
+
+    const blocked = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "runtime-blocked",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          deviceStatus: "blocked",
+          feedingResponse: "refusal",
+        },
+      }),
+    });
+    expect(blocked.status).toBe(200);
+    const blockedBody = await blocked.json() as {
+      batch: { revision: number };
+      today: { runtimeState: { state: string; reasons: string[] } };
+    };
+    expect(blockedBody.today.runtimeState.state).toBe("blocked");
+    expect(blockedBody.today.runtimeState.reasons).toEqual(
+      expect.arrayContaining(["device_blocked", "feeding_refusal"]),
+    );
+
+    const cleared = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: blockedBody.batch.revision,
+        idempotencyKey: "runtime-cleared",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          deviceStatus: "normal",
+          feedingResponse: "normal",
+        },
+      }),
+    });
+    expect(cleared.status).toBe(200);
+    const clearedBody = await cleared.json() as {
+      batch: { revision: number };
+      today: { runtimeState: { state: string } };
+    };
+    expect(clearedBody.today.runtimeState.state).toBe("normal");
+
+    const invalid = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: clearedBody.batch.revision,
+        idempotencyKey: "runtime-invalid",
+        observation: { deviceStatus: "bogus" },
+      }),
+    });
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toEqual({ code: "NBJ_DEVICE_STATUS_INVALID" });
+  });
+
+  it("rejects forged plan fields and writes server authoritative snapshot", async () => {
+    const { base } = await startApi();
+    const login = await request(base, "/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email: "admin@example.com", password: "correct-horse-battery" }),
+    });
+    const cookie = cookieOf(login);
+    const created = await request(base, "/api/batches", {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({ name: "观察边界", startAge: 7, endAge: 16, headCount: 20 }),
+    });
+    const createdBody = await created.json() as { batch: { id: string; revision: number } };
+    const forged = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "forged-plan-field",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          actualPowderGrams: 0,
+          mealCount: 10,
+        },
+      }),
+    });
+    expect(forged.status).toBe(400);
+    expect(await forged.json()).toEqual({ code: "NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN" });
+
+    const unknownField = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "unknown-observation-field",
+        observation: { effectiveHeads: 20, mystery: true },
+      }),
+    });
+    expect(unknownField.status).toBe(400);
+    expect(await unknownField.json()).toEqual({ code: "NBJ_OBSERVATION_PLAN_FIELD_FORBIDDEN" });
+
+    const allowed = await request(base, `/api/batches/${createdBody.batch.id}/advance`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: createdBody.batch.revision,
+        idempotencyKey: "server-snapshot",
+        observation: {
+          effectiveHeads: 20,
+          creepGrade: "none",
+          diarrheaGrade: "none",
+          actualPowderGrams: 0,
+        },
+      }),
+    });
+    expect(allowed.status).toBe(200);
+    const allowedBody = await allowed.json() as {
+      batch: { revision: number };
+      records: Array<{
+        planPerPigAtCommit: number;
+        planTotalAtCommit: number;
+        feedTimesAtCommit: number;
+        policyVersionAtCommit: string;
+      }>;
+    };
+    expect(allowedBody.records[0]).toMatchObject({
+      planTotalAtCommit: expect.any(Number),
+      feedTimesAtCommit: expect.any(Number),
+      policyVersionAtCommit: "execution-contract-v1",
+    });
+    const headsChanged = await request(base, `/api/batches/${createdBody.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: allowedBody.batch.revision,
+        idempotencyKey: "server-plan-per-pig",
+        observation: { effectiveHeads: 10, actualPowderGrams: 0 },
+      }),
+    });
+    expect(headsChanged.status).toBe(200);
+    const headsChangedBody = await headsChanged.json() as {
+      records: Array<{
+        effectiveHeads: number;
+        planPerPigAtCommit: number;
+        planTotalAtCommit: number;
+      }>;
+    };
+    const latestChangedRecord = headsChangedBody.records.at(-1)!;
+    expect(latestChangedRecord.effectiveHeads).toBe(10);
+    expect(latestChangedRecord.planPerPigAtCommit)
+      .toBe(latestChangedRecord.planTotalAtCommit / 20);
   });
 
   it("keeps the session cookie Secure behind an HTTPS reverse proxy", async () => {

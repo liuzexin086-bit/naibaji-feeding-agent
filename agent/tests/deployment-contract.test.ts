@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const root = resolve(import.meta.dirname, "..");
-const read = (path: string) => readFileSync(resolve(root, path), "utf8");
+const read = (path: string) => readFileSync(resolve(root, path), "utf8").replace(/\r\n/g, "\n");
 const serviceBlock = (compose: string, service: string) => {
   const start = compose.indexOf(`\n  ${service}:`);
   const rest = compose.slice(start + 1);
@@ -20,7 +20,12 @@ describe("Docker Compose deployment contract", () => {
     expect(dockerfile).toContain("FROM node:24.18.0-slim AS agent");
     expect(dockerfile).toContain("FROM nginx:1.29.1-alpine AS web");
     expect(dockerfile).toContain("USER node");
-    expect(dockerfile).toContain("COPY public /usr/share/nginx/html");
+    expect(dockerfile).toContain("COPY admin.html admin.js chart.umd.min.js v5lite-model.js /tmp/naibaji-assets/");
+    expect(dockerfile).toContain("COPY --from=build /app/.generated-web/feeding-model.min.js /tmp/naibaji-assets/feeding-model.min.js");
+    expect(dockerfile).toContain("COPY agent/ui /tmp/naibaji-assets/ui/");
+    expect(dockerfile).toContain('echo "$GIT_COMMIT" > /usr/share/nginx/html/version');
+    expect(compose).toContain("context: ../..");
+    expect(compose).toContain("dockerfile: agent/Dockerfile");
     expect(dockerfile).not.toMatch(/COPY\s+\.\s+/);
   });
 

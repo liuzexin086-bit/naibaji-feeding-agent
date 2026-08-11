@@ -33,6 +33,21 @@ export function remainingBusinessDayTimes(times: string[], observedLocal: string
   return times.filter((time) => businessDayMinute(time) > observed);
 }
 
+/**
+ * True when a free window is active now or will open later within the current
+ * 09:00-to-next-09:00 business-day cycle. A window that has already ended in
+ * this cycle is not considered future, matching the execution contract.
+ */
+export function hasActiveOrFutureBusinessDayWindow(
+  windows: BusinessDayWindow[],
+  observedLocal: string,
+): boolean {
+  const observed = businessDayMinute(observedLocal);
+  return windows.some((window) =>
+    intervalsFor(window).some(({ end }) => observed < end),
+  );
+}
+
 interface Interval {
   start: number;
   end: number;

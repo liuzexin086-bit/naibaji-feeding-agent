@@ -19,7 +19,7 @@ type JsonObject = Record<string, unknown>;
 
 const FIRST_DAY_MEAL_TIMES = ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"];
 const GRADE_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
-const FREE_FEEDING_BLOCKERS = new Set([
+const LEGACY_FREE_FEEDING_EXCEPTION_BLOCKERS = new Set([
   "milk_control",
   "diarrhea",
   "refusal",
@@ -210,47 +210,6 @@ function selectedTimedMealTimes(
   return template.mealTimes.filter((time) => !disabled.has(time)).slice(0, target);
 }
 
-function freeFeedingBlockers(
-  context: FrozenBatchDecisionContext,
-  dayIndex: number,
-  latest: JsonObject | undefined,
-): string[] {
-  if (context.selectedMode !== "free_feeding" || dayIndex === 0) return [];
-  const stage = context.devicePlan.templates.free_feeding.stageConditions;
-  const blockers = new Set<string>();
-  for (const key of Object.keys(stage)) {
-    if (key !== "earliestBatchDay" && key !== "requiresOperatorSelection") {
-      blockers.add("stage_conditions_invalid");
-    }
-  }
-  if (stage.earliestBatchDay !== undefined) {
-    const earliest = stage.earliestBatchDay;
-    if (typeof earliest !== "number" || !Number.isSafeInteger(earliest) || earliest < 1) {
-      blockers.add("stage_earliest_batch_day_invalid");
-    } else if (dayIndex < earliest) {
-      blockers.add("stage_earliest_batch_day");
-    }
-  }
-  if (stage.requiresOperatorSelection !== undefined &&
-      typeof stage.requiresOperatorSelection !== "boolean") {
-    blockers.add("stage_operator_selection_invalid");
-  }
-  for (const blocker of context.devicePlan.templates.free_feeding.exceptionBlockers) {
-    if (!FREE_FEEDING_BLOCKERS.has(blocker)) blockers.add("exception_blocker_invalid");
-  }
-  const configured = new Set(context.devicePlan.templates.free_feeding.exceptionBlockers);
-  const signalBlockers: Array<[string, boolean]> = [
-    ["milk_control", (context.modelInput.controlStartDay ?? -1) >= 0 && dayIndex >= (context.modelInput.controlStartDay ?? -1)],
-    ["refusal", latest?.feedingResponse === "refusal" || latest?.refusal === true],
-    ["blockage", latest?.deviceStatus === "blocked" || latest?.blockage === true],
-    ["probe_contamination", latest?.deviceStatus === "probe_contaminated" || latest?.probeContaminated === true],
-  ];
-  for (const [name, active] of signalBlockers) {
-    if (active && configured.has(name)) blockers.add(name);
-  }
-  return [...blockers].sort();
-}
-
 export function loadFrozenBatchDecisionContext(source: BatchDecisionSource): FrozenBatchDecisionContext {
   if (!source.batchId.trim()) fail("BATCH_ID_MISSING");
   const config = object(source.config, "BATCH_CONFIG_MISSING");
@@ -301,12 +260,7 @@ export function computeFrozenBatchDecision(
   const timedTemplate = context.devicePlan.templates.timed_quantity;
   const latest = context.records.at(-1);
   const controlStartDay = context.modelInput.controlStartDay ?? -1;
-  const initialFreeFeedingBlockers = freeFeedingBlockers(context, dayIndex, latest);
-  const requestedMode = firstDay
-    ? "timed_quantity"
-    : initialFreeFeedingBlockers.length > 0
-      ? "timed_quantity"
-      : context.selectedMode;
+  const requestedMode = firstDay ? "timed_quantity" : context.selectedMode;
   const input: DayDecisionInput = {
     revision,
     batchId: context.batchId,
@@ -349,14 +303,6 @@ export function computeFrozenBatchDecision(
     input.freeWindows = structuredClone(context.devicePlan.templates.free_feeding.windows);
   }
   const decision = computeDayDecision(input);
-  const outputBlockers = new Set(initialFreeFeedingBlockers);
-  if (context.selectedMode === "free_feeding" && dayIndex > 0) {
-    for (const action of decision.exceptionActions) {
-      if (FREE_FEEDING_BLOCKERS.has(action.type) && action.type !== "diarrhea") {
-        outputBlockers.add(action.type);
-      }
-    }
-  }
   return {
     selectedMode: firstDay ? "timed_quantity" : context.selectedMode,
     effectiveMode: decision.setting.mode,
@@ -370,9 +316,52 @@ export function computeFrozenBatchDecision(
       embeddingModel: context.sop.embeddingModel,
     },
     devicePlanRef: { version: context.devicePlan.version, sha256: context.devicePlan.sha256 },
-    freeFeedingBlockers: [...outputBlockers].sort(),
+    /** Compatibility field only; mode is no longer derived from exception blockers. */
+    freeFeedingBlockers: [],
     decision,
   };
+}
+
+export function evaluateFreeFeedingEligibility(
+  context: FrozenBatchDecisionContext,
+  dayIndex = context.currentDayIndex,
+): { eligible: boolean; reasons: string[] } {
+  if (dayIndex === 0) {
+    return { eligible: false, reasons: ["first_day_locked"] };
+  }
+  const free = context.devicePlan.templates.free_feeding;
+  const stage = free.stageConditions ?? {};
+  const reasons: string[] = [];
+  const allowedStageKeys = new Set(["earliestBatchDay", "requiresOperatorSelection"]);
+  for (const key of Object.keys(stage)) {
+    if (!allowedStageKeys.has(key)) reasons.push("stage_conditions_invalid");
+  }
+  const earliest = stage.earliestBatchDay;
+  if (
+    earliest !== undefined &&
+    (typeof earliest !== "number" || !Number.isSafeInteger(earliest) || earliest < 1)
+  ) {
+    reasons.push("stage_earliest_batch_day_invalid");
+  } else if (earliest !== undefined && dayIndex < earliest) {
+    reasons.push("stage_earliest_batch_day");
+  }
+  const operator = stage.requiresOperatorSelection;
+  if (operator !== undefined && typeof operator !== "boolean") {
+    reasons.push("stage_operator_selection_invalid");
+  }
+  if (
+    !Array.isArray(free.exceptionBlockers) ||
+    free.exceptionBlockers.some((blocker) =>
+      typeof blocker !== "string" ||
+      !LEGACY_FREE_FEEDING_EXCEPTION_BLOCKERS.has(blocker)
+    )
+  ) {
+    reasons.push("exception_blockers_invalid");
+  }
+  if (free.windows.length === 0) {
+    reasons.push("free_windows_required");
+  }
+  return { eligible: reasons.length === 0, reasons };
 }
 
 export function computeFrozenBatchCurve(

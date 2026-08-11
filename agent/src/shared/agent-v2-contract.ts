@@ -4,6 +4,20 @@ export type FeedingMode = "timed_quantity" | "free_feeding";
 export type CreepGrade = "none" | "low" | "medium" | "high" | "excellent";
 export type DiarrheaGrade = "none" | "mild" | "moderate" | "severe";
 
+export const DECISION_POLICY_VERSION = "execution-contract-v1";
+
+export type RuntimeStateStatus = "normal" | "manual_hold" | "blocked";
+export type DeviceRuntimeLatch = "normal" | "blocked" | "probe_contaminated";
+export type FeedingRuntimeLatch = "normal" | "refusal";
+
+export interface RuntimeExecutionState {
+  state: RuntimeStateStatus;
+  reasons: string[];
+  sourceObservationIds: string[];
+  deviceLatch: DeviceRuntimeLatch;
+  feedingLatch: FeedingRuntimeLatch;
+}
+
 /** Fixed internal values for the five operator-facing creep grades. */
 export const CREEP_GRADE_VALUES: Readonly<Record<CreepGrade, number>> = {
   none: 0,
@@ -44,6 +58,8 @@ export interface DeviceSetting {
   dailyPowderGrams: number;
   singlePowderGrams: number;
   mealCount: number;
+  /** Canonical free-feeding dispense quota; mealCount is compatibility only. */
+  freeDispenseLimit?: number;
   /** Free-feeding display-only recommendation; it never changes a device program. */
   suggestedDailyPowderGrams?: number;
   suggestedDailyMealCount?: number;
@@ -53,6 +69,13 @@ export interface DeviceSetting {
   source: "sop_direct" | "sop_indirect" | "production_model";
   estimatedAverageWeightKg?: number;
   estimatedEndWeightKg?: number;
+}
+
+export interface FreeFeedingSetting {
+  windows: DeviceWindow[];
+  singlePowderGrams: number;
+  freeDispenseLimit: number;
+  dailyPowderGrams: number;
 }
 
 export interface DecisionEvidence {
@@ -127,17 +150,17 @@ export interface DiarrheaAdjustmentInput {
   observedAt: string;
   grades: DiarrheaGrade[];
   /** Actual powder already dispensed today; never an estimated or planned amount. */
-  cumulativePowderGrams: number;
+  cumulativePowderGrams: number | null;
   /** Frozen SOP timed-meal reductionPriority. Required for timed_quantity. */
   reductionPriority?: string[];
-  /** Frozen SOP free-feeding reductionPriority, keyed by window startLocal. Required for free_feeding. */
+  /** @deprecated Legacy snapshot compatibility only; not read by the free-feeding decision path. */
   freeReductionPriority?: string[];
 }
 
 export type DiarrheaAdjustmentKind =
   | "none"
-  | "proposal"
-  | "preview_only"
+  | "individual_intervention"
+  | "feeding_reduction_proposal"
   | "manual_only";
 
 export interface DiarrheaAdjustmentResult {
@@ -149,9 +172,15 @@ export interface DiarrheaAdjustmentResult {
   targetSlot: string | null;
   targetAlreadyHappened: boolean;
   adjustedProgramTotal: number;
-  cumulativeActual: number;
+  cumulativeActual: number | null;
   remainingDeliverable: number;
   futureDeliverable: number;
+  affectsWholePen: boolean;
+  isolateAffectedPiglets: boolean;
+  affectedPigletMilkControlCount: number;
+  deviceAdjustmentRequired: boolean;
+  requiresHumanConfirmation: boolean;
+  requiresManualDisposition: boolean;
   reason: string;
   evidence: Record<string, unknown>;
 }

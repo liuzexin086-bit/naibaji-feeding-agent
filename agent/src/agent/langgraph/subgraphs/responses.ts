@@ -110,28 +110,31 @@ export function deterministicDiarrheaResponse(
 ): string {
   const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
   const prefix = batchPrefix(summary);
+  if (preview.resultKind === "individual_intervention") {
+    return `${prefix}已记录${gradeLabel}腹泻，按个体处置：标记并隔离腹泻仔猪，病猪控奶一次，其他仔猪继续执行当前饲喂程序。当前设备程序保持不变，不生成设备调整提案。`;
+  }
   if (preview.resultKind === "manual_only") {
-    return `${prefix}已生成${gradeLabel}腹泻人工处置要求：目标槽位 ${preview.targetSlot ?? "未指定"}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，累计实际 ${preview.cumulativePowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。不生成可执行设备提案，需人工处置。`;
+    if (preview.worstGrade === "severe") {
+      return `${prefix}已记录重度腹泻。当前不自动修改奶爸机饲喂程序。请立即隔离明显腹泻仔猪，并检查是否存在水样腹泻、呕吐、精神沉郁、拒食、发热或脱水；同时检查栏舍温度、湿度、饮水、饲料和粪便污染情况。猪腹泻病因较多，仅凭“重度腹泻”无法判断具体疾病，建议结合日龄、粪便性状、传播速度、体温和脱水情况，由现场兽医进一步判断病因后制定治疗方案。`;
+    }
+    const cumulativeText = preview.cumulativePowderGrams === null
+      ? "累计实际未录入"
+      : `累计实际 ${preview.cumulativePowderGrams}g`;
+    return `${prefix}已生成${gradeLabel}腹泻人工处置要求：目标槽位 ${preview.targetSlot ?? "未指定"}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，${cumulativeText}，剩余可交付 ${preview.remainingDeliverable}g。不生成可执行设备提案，需人工处置。`;
   }
-  if (preview.resultKind === "preview_only") {
-    const windows = preview.freeWindows
-      .map((window) => `${window.startLocal}–${window.endLocal}`)
-      .join("、") || "无";
-    const times = preview.timedMeals
-      .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
-      .join("、") || "无";
-    return `${prefix}已生成${gradeLabel}腹泻调整预览：目标槽位 ${preview.targetSlot ?? "未指定"}；剩余窗口 ${preview.freeWindows.length ? windows : "无"}；剩余餐次 ${preview.mealCount ?? 0}：${times}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，累计实际 ${preview.cumulativePowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该预览不会自动应用，需人工处置。`;
-  }
+  const cumulativeText = preview.cumulativePowderGrams === null
+    ? "累计实际未录入"
+    : `累计实际 ${preview.cumulativePowderGrams}g`;
   if (preview.mode === "free_feeding") {
     const windows = preview.freeWindows
       .map((window) => `${window.startLocal}–${window.endLocal}`)
       .join("、") || "无";
-    return `${prefix}已生成${gradeLabel}腹泻调整待确认提案：目标窗口 ${preview.targetSlot ?? "未指定"}；剩余 ${preview.freeWindows.length} 个窗口：${windows}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该提案需人工确认后写入设备。`;
+    return `${prefix}已生成${gradeLabel}腹泻整栏减餐待确认提案：目标窗口 ${preview.targetSlot ?? "未指定"}；剩余 ${preview.freeWindows.length} 个窗口：${windows}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，${cumulativeText}，剩余可交付 ${preview.remainingDeliverable}g。该提案需独立人工确认后应用，不会自动切换模式。`;
   }
   const times = preview.timedMeals
     .map((meal) => `${meal.timeLocal} ${meal.powderGrams}g`)
     .join("、") || "无";
-  return `${prefix}已生成${gradeLabel}腹泻调整待确认提案：目标餐次 ${preview.targetSlot ?? "未指定"}；当前 ${preview.mealCount ?? 0} 餐：${times}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，剩余可交付 ${preview.remainingDeliverable}g。该提案需人工确认后写入设备。`;
+  return `${prefix}已生成${gradeLabel}腹泻整栏减餐待确认提案：目标餐次 ${preview.targetSlot ?? "未指定"}；当前 ${preview.mealCount ?? 0} 餐：${times}；调整后整日程序总量 ${preview.remainingDailyPowderGrams}g，${cumulativeText}，剩余可交付 ${preview.remainingDeliverable}g。该提案需独立人工确认后应用，不会自动切换模式。`;
 }
 
 /** Deterministic response after the latest recorded diarrhea grade returns to none. */

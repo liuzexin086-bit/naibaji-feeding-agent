@@ -276,9 +276,24 @@ function computeControlPlan(plan, records, controlStartDay) {
   const requestedControlStart = Number.isFinite(Number(controlStartDay)) && Number(controlStartDay) >= 0
     ? Math.max(0, Math.min(nDays, Number(controlStartDay)))
     : automaticStart
-  // 旧批次可能冻结在第一次非 none 观察的次日；新规则不允许该旧值
-  // 早于持续教槽实际成立的次日。
-  const resolvedControlStartDay = Math.max(requestedControlStart, automaticStart)
+  // Persisted server-owned startDay is the replay authority. The protected
+  // model may discover the first automatic trigger, but it must not silently
+  // move a persisted latch later when historical observations are revised.
+  const resolvedControlStartDay = requestedControlStart
+
+  // Committed history itself must not violate INV-007. If old or hand-edited
+  // data jumps upward after control has started, fail closed instead of hiding
+  // the contradiction and generating a new executable future program.
+  let previousCommittedCount = null
+  for (let i = resolvedControlStartDay; i < nDays; i++) {
+    const dayAge = plan.days[i].dayAge
+    const committedCount = committedPlans[dayAge]?.feedTimes
+    if (committedCount == null) continue
+    if (previousCommittedCount !== null && committedCount > previousCommittedCount) {
+      throw new Error('NBJ_CONTROL_HISTORY_NON_MONOTONIC')
+    }
+    previousCommittedCount = committedCount
+  }
 
   const creepGradeRolling = []
   let currentCount = 10
@@ -301,16 +316,6 @@ function computeControlPlan(plan, records, controlStartDay) {
       continue
     }
 
-    const stableGrade = sustainedCreepGrade(creepGradeRolling)
-    const mealFloor = CREEP_MEAL_FLOORS[stableGrade]
-    // 循环按日执行，因此每个计划日最多只会减少一次；currentCount 从不回升。
-    if (stableGrade !== 'none' && currentCount > mealFloor) {
-      currentCount -= 1
-    }
-
-    currentCount = Math.min(10, currentCount)
-    feedTimes[i] = currentCount
-
     // 已录天用提交时的计划值（保持当时看到的版本）
     if (committed.has(d.dayAge)) {
       const cp = committedPlans[d.dayAge]
@@ -319,15 +324,26 @@ function computeControlPlan(plan, records, controlStartDay) {
         planTotalControl[i] = cp.total
         feedTimes[i] = Math.max(1, Math.min(10, cp.feedTimes))
         perFeed[i] = Math.round(cp.perPig / feedTimes[i] * 100) / 100
-        // 已保存计划是下一日计算的真实餐次锚点，避免理论曲线在后台
-        // 累计递减后让现场餐次一天跨越两级或更多。
-        currentCount = feedTimes[i]
+        // 已保存计划是下一日计算的真实餐次锚点。提交日的可见餐次不再
+        // 先做理论递减再覆盖，避免历史显示 10 而下一未来日直接掉到 7。
+        // 下一未提交日最多从该锚点再减 1；后续序列仍只减不增。
+        currentCount = Math.max(1, Math.min(10, cp.feedTimes))
       } else {
         // 旧记录没有提交值时的 fallback
         perFeed[i] = Math.round(d.perPigMilkPlan / 10 * 10) / 10
       }
       continue
     }
+
+    const stableGrade = sustainedCreepGrade(creepGradeRolling)
+    const mealFloor = CREEP_MEAL_FLOORS[stableGrade]
+    // 循环按日执行，因此每个未提交计划日最多只会减少一次。
+    if (stableGrade !== 'none' && currentCount > mealFloor) {
+      currentCount -= 1
+    }
+
+    currentCount = Math.min(10, currentCount)
+    feedTimes[i] = currentCount
 
     // 计划头均 = min(原计划, 单次上限 × 配奶次数)
     const perFeedCap = d.dailyCapacity / 10
@@ -337,6 +353,20 @@ function computeControlPlan(plan, records, controlStartDay) {
     planTotalControl[i] = Math.round(finalPerPig * headCount)
     // 单次量 = 计划头均 / 配奶次数（不额外取整，保证乘回去一致）
     perFeed[i] = Math.round(finalPerPig / currentCount * 100) / 100
+  }
+
+  // Final INV-007 validation over the complete visible plan. This catches
+  // committed-to-committed jumps, generated-then-committed re-increases, and
+  // any single-day drop larger than one meal.
+  for (let i = resolvedControlStartDay + 1; i < feedTimes.length; i++) {
+    const previous = feedTimes[i - 1]
+    const current = feedTimes[i]
+    if (current > previous) {
+      throw new Error('NBJ_CONTROL_HISTORY_NON_MONOTONIC')
+    }
+    if (previous - current > 1) {
+      throw new Error('NBJ_CONTROL_HISTORY_STEP_INVALID')
+    }
   }
 
   // 构建控奶后的完整 days（含体重 cascade，含教槽营养）

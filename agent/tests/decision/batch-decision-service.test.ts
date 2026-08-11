@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeFrozenBatchDecision,
   digestFrozenSopSnapshot,
+  evaluateFreeFeedingEligibility,
   loadFrozenBatchDecisionContext,
 } from "../../src/decision/batch-decision-service.js";
 import { defaultFreeFeedingSlots } from "../../src/decision/free-feeding-slots.js";
@@ -101,6 +102,70 @@ describe("BatchDecisionService frozen inputs", () => {
     expect(canonical.selectedMode).toBe("free_feeding");
     expect(canonical.effectiveMode).toBe("free_feeding");
     expect(canonical.freeFeedingBlockers).not.toContain("diarrhea");
+  });
+
+  it("keeps free-feeding mode when milk control is active and never reuses blockers to force timed", () => {
+    const context = loadFrozenBatchDecisionContext({
+      ...source({ controlStartDay: 1 }),
+      records: [{ dayAge: 4, creepGrade: "high", headCount: 20 }],
+    });
+    const canonical = computeFrozenBatchDecision(context);
+    expect(canonical.selectedMode).toBe("free_feeding");
+    expect(canonical.effectiveMode).toBe("free_feeding");
+    expect(canonical.decision.setting.mode).toBe("free_feeding");
+    expect(canonical.decision.setting.freeDispenseLimit)
+      .toBe(canonical.decision.setting.mealCount);
+    expect(canonical.decision.setting.dailyPowderGrams).toBe(
+      canonical.decision.setting.singlePowderGrams *
+        canonical.decision.setting.freeDispenseLimit!,
+    );
+    expect(canonical.freeFeedingBlockers).toEqual([]);
+    expect(canonical.decision.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
+  });
+
+  it("evaluates free-feeding eligibility without changing selected mode", () => {
+    const context = loadFrozenBatchDecisionContext(source());
+    expect(evaluateFreeFeedingEligibility(context)).toEqual({
+      eligible: true,
+      reasons: [],
+    });
+    const early = loadFrozenBatchDecisionContext(source());
+    early.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 3,
+      requiresOperatorSelection: true,
+    };
+    expect(evaluateFreeFeedingEligibility(early)).toEqual({
+      eligible: false,
+      reasons: ["stage_earliest_batch_day"],
+    });
+    const invalidStage = loadFrozenBatchDecisionContext(source());
+    invalidStage.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+      requiresOperatorSelection: "yes" as unknown as boolean,
+    };
+    expect(evaluateFreeFeedingEligibility(invalidStage).eligible).toBe(false);
+  });
+
+  it("does not add an operator-selection blocker for false or missing and validates blocker enum", () => {
+    const explicitFalse = loadFrozenBatchDecisionContext(source());
+    explicitFalse.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+      requiresOperatorSelection: false,
+    };
+    expect(evaluateFreeFeedingEligibility(explicitFalse).eligible).toBe(true);
+
+    const missingOperator = loadFrozenBatchDecisionContext(source());
+    missingOperator.devicePlan.templates.free_feeding.stageConditions = {
+      earliestBatchDay: 1,
+    };
+    expect(evaluateFreeFeedingEligibility(missingOperator).eligible).toBe(true);
+
+    const unknownBlocker = loadFrozenBatchDecisionContext(source());
+    unknownBlocker.devicePlan.templates.free_feeding.exceptionBlockers = ["something_random"];
+    expect(evaluateFreeFeedingEligibility(unknownBlocker)).toEqual({
+      eligible: false,
+      reasons: ["exception_blockers_invalid"],
+    });
   });
 
   it("fails closed for a missing or tampered frozen SOP snapshot", () => {

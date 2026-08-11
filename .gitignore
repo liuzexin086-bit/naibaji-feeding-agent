@@ -13,6 +13,10 @@ release_new/
 agent/dist/
 agent/public/
 agent/container-models/
+agent/.generated-models/
+agent/.generated-web/
+agent/agent-provenance.json
+agent/web-provenance.json
 agent/.wrangler/
 web/
 **/.wrangler/

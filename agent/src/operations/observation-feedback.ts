@@ -36,11 +36,6 @@ type JsonObject = Record<string, unknown>;
 
 const CREEP_ORDER: CreepGrade[] = ["none", "low", "medium", "high", "excellent"];
 const DIARRHEA_ORDER: DiarrheaGrade[] = ["none", "mild", "moderate", "severe"];
-const DIARRHEA_RATIO: Record<Exclude<DiarrheaGrade, "none">, number> = {
-  mild: 0.9,
-  moderate: 0.75,
-  severe: 0.5,
-};
 
 export function sustainedCreepGrade(records: JsonObject[]): CreepGrade {
   const recent = validObservationRecords(records).slice(-3).map((row) => {
@@ -205,6 +200,31 @@ function feedbackOperation(
   };
 }
 
+function auditDiarrheaManualIntervention(
+  store: LocalStore,
+  userId: string,
+  batchId: string,
+  result: FeedbackEngineResult,
+): void {
+  const grade = result.feedbackOrigin.sourceObservation.diarrheaGrade;
+  const action = grade === "severe"
+    ? "diarrhea.emergency_recorded"
+    : "diarrhea.individual_intervention_recorded";
+  store.audit({
+    userId,
+    batchId,
+    action,
+    details: {
+      severity: grade ?? null,
+      isolationRecommended: true,
+      affectedPigletMilkControlCount: grade === "mild" ? 1 : 0,
+      deviceSettingChanged: false,
+      sourceObservationId: result.feedbackOrigin.sourceObservation.recordedAt,
+    },
+    idempotencyKey: `diarrhea-manual:${result.feedbackOrigin.id}`,
+  });
+}
+
 function diarrheaProposal(
   kind: FeedbackOriginKind,
   businessDate: string,
@@ -230,16 +250,16 @@ function diarrheaProposal(
     ],
     manualDispositionRequired: result.manualDispositionRequired,
     proposalDigest: "",
-    resultKind: result.kind === "proposal"
-      ? "proposal"
-      : result.kind === "preview_only"
-        ? "preview_only"
+    resultKind: result.kind === "feeding_reduction_proposal"
+      ? "feeding_reduction_proposal"
+      : result.kind === "individual_intervention"
+        ? "individual_intervention"
         : "manual_only",
     adjustedProgramTotal: result.adjustedProgramTotal,
     remainingDeliverable: result.remainingDeliverable,
     ...(result.targetSlot ? { targetSlot: result.targetSlot } : {}),
     ...(result.targetAlreadyHappened ? { targetAlreadyHappened: true } : {}),
-    ...(result.cumulativeActual >= 0 ? { cumulativePowderGrams: result.cumulativeActual } : {}),
+    ...(result.cumulativeActual !== null ? { cumulativePowderGrams: result.cumulativeActual } : {}),
   };
   proposal.proposalDigest = digestFeedbackProposal(proposal);
   return proposal;
@@ -336,7 +356,7 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
     const preview = previewDiarrheaAdjustment({
       decision: input.decision,
       grades: [diarrheaGrade],
-      cumulativePowderGrams: cumulativePowderGrams ?? 0,
+      cumulativePowderGrams: cumulativePowderGrams,
       observedAt: String(sourceRecord.recordedAt ?? new Date().toISOString()),
       reductionPriority: input.reductionPriority,
       freeReductionPriority: input.freeReductionPriority,
@@ -347,20 +367,27 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
       diarrheaGrade,
       preview,
     );
-    const originStatus = preview.kind === "proposal" ? "proposed" : "manual";
-    const resultLabel = preview.kind === "proposal"
-      ? "生成待确认设备提案"
-      : preview.kind === "preview_only"
-        ? "仅生成预览，不自动应用"
+    const originStatus = preview.kind === "feeding_reduction_proposal" ? "proposed" : "manual";
+    const resultLabel = preview.kind === "individual_intervention"
+      ? "生成个体处置建议；整栏设备保持不变"
+      : preview.kind === "feeding_reduction_proposal"
+        ? "生成待确认整栏减餐提案"
         : "转人工处置，不生成可执行设备方案";
-    const operationTitle = preview.kind === "proposal"
-      ? `腹泻处置确认（${gradeLabel}）`
-      : preview.kind === "preview_only"
-        ? `腹泻人工处置（${gradeLabel}）`
-        : `腹泻紧急人工处置（${gradeLabel}）`;
-    const operationNote = preview.kind === "proposal"
-      ? "按冻结 SOP 目标槽位减少一次配奶/自由采食窗口；未确认前设备保持不变。"
-      : "不生成可执行设备方案；需现场负责人人工处置并留痕。";
+    const operationCode = preview.kind === "individual_intervention"
+      ? "feedback_diarrhea_intervention"
+      : "feedback_diarrhea_confirm";
+    const operationTitle = preview.kind === "individual_intervention"
+      ? `腹泻个体干预（${gradeLabel}）`
+      : preview.kind === "feeding_reduction_proposal"
+        ? `腹泻整栏减餐确认（${gradeLabel}）`
+        : diarrheaGrade === "severe"
+          ? `腹泻紧急人工处置（${gradeLabel}）`
+          : `腹泻人工处置（${gradeLabel}）`;
+    const operationNote = preview.kind === "individual_intervention"
+      ? "标记并隔离腹泻仔猪，病猪控奶一次；其他仔猪继续执行原饲喂程序，整栏设备保持不变。"
+      : preview.kind === "feeding_reduction_proposal"
+        ? "按冻结 SOP 目标槽位整栏减少一次采食；未确认前设备保持不变。"
+        : "不生成可执行设备方案；需现场负责人/兽医人工处置并留痕。";
     const origin: FeedbackOrigin = {
       ...originBase,
       status: originStatus,
@@ -370,7 +397,7 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
     const operation = feedbackOperation(
       origin,
       proposal,
-      "feedback_diarrhea_confirm",
+      operationCode,
       operationTitle,
       operationNote,
       ["diarrheaGrade", "actualPowderGrams"],
@@ -534,10 +561,33 @@ export function materializeObservationFeedbackPlan(input: {
       ),
     });
   }
-  const operations = mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
+  const isDiarrhea = result?.kind === "diarrhea";
+  const diarrheaDeviceAmendment = isDiarrhea === true && result?.proposedSetting !== null;
+  const diarrheaManual = isDiarrhea === true && result?.proposedSetting === null;
+
   if (existing?.status === "confirmed") {
     if (!result?.operations.length) {
       return { plan: existing, feedback: null };
+    }
+    if (diarrheaManual) {
+      input.store.supersedeDailyOperationAmendments({
+        userId: input.userId,
+        batchId: batch.batchId,
+        businessDate: baseInput.businessDate,
+        originKind: "diarrhea",
+        reason: "newer_observation",
+        sourceObservationId: String(
+          input.observation?.observationId ??
+          result.feedbackOrigin.sourceObservation.recordedAt,
+        ),
+      });
+      auditDiarrheaManualIntervention(
+        input.store,
+        input.userId,
+        batch.batchId,
+        result,
+      );
+      return { plan: existing, feedback: result };
     }
     const confirmation = input.store.getDailyOperationConfirmation(
       input.userId,
@@ -589,13 +639,77 @@ export function materializeObservationFeedbackPlan(input: {
       amendment: amendmentResult.amendment,
     };
   }
+  const planOperations = diarrheaDeviceAmendment || diarrheaManual
+    ? baseOperations
+    : mergeFeedbackOperations(baseOperations, existing?.operations ?? [], result);
   const plan = input.store.ensureDailyOperationPlan({
     ...baseInput,
-    operations,
-    operationsSha256: digestDailyOperationItems(operations),
-    proposedSetting: result?.proposedSetting ?? null,
-    feedbackOrigin: result?.feedbackOrigin ?? null,
+    operations: planOperations,
+    operationsSha256: digestDailyOperationItems(planOperations),
+    proposedSetting: isDiarrhea ? null : (result?.proposedSetting ?? null),
+    feedbackOrigin: isDiarrhea ? null : (result?.feedbackOrigin ?? null),
   });
+  if (diarrheaDeviceAmendment) {
+    const severity = result.feedbackOrigin.sourceObservation.diarrheaGrade ?? null;
+    if (severity !== null && severity !== "mild" && severity !== "moderate" && severity !== "severe") {
+      throw new Error("NBJ_AMENDMENT_SEVERITY_INVALID");
+    }
+    const priority = severity === "severe"
+      ? "critical"
+      : severity === "moderate"
+        ? "warning"
+        : "routine";
+    const amendmentResult = input.store.ensureDailyOperationAmendment({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      basePlanId: plan.id,
+      baseConfirmationId: null,
+      originId: result.feedbackOrigin.id,
+      originKind: result.kind,
+      severity,
+      priority,
+      operations: result.operations,
+      proposal: result.proposedSetting,
+      basedOnBatchRevision: batch.revision,
+      idempotencyKey: `daily-operation-amendment:${result.feedbackOrigin.id}`,
+    });
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: result.kind,
+      excludeAmendmentId: amendmentResult.amendment.id,
+      reason: "newer_observation",
+      sourceObservationId: String(input.observation?.observationId ?? ""),
+      replacementAmendmentId: amendmentResult.amendment.id,
+    });
+    return {
+      plan,
+      feedback: result,
+      amendment: amendmentResult.amendment,
+    };
+  }
+  if (diarrheaManual) {
+    input.store.supersedeDailyOperationAmendments({
+      userId: input.userId,
+      batchId: batch.batchId,
+      businessDate: baseInput.businessDate,
+      originKind: "diarrhea",
+      reason: "newer_observation",
+      sourceObservationId: String(
+        input.observation?.observationId ??
+        result.feedbackOrigin.sourceObservation.recordedAt,
+      ),
+    });
+    auditDiarrheaManualIntervention(
+      input.store,
+      input.userId,
+      batch.batchId,
+      result,
+    );
+    return { plan, feedback: result };
+  }
   return {
     plan,
     feedback: result?.operations.length ? result : null,

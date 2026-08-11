@@ -27,6 +27,8 @@ function baseInput(overrides: Partial<DayDecisionInput> = {}): DayDecisionInput 
   };
 }
 
+const FREE_WINDOW = [{ startLocal: "09:00", endLocal: "17:00" }];
+
 describe("deterministic day decision", () => {
   it("uses direct SOP total before indirect SOP and the production model", () => {
     const decision = computeDayDecision(baseInput({
@@ -139,7 +141,7 @@ describe("deterministic day decision", () => {
     expect(decision.setting.timedMeals.reduce((sum, meal) => sum + meal.powderGrams, 0)).toBe(211);
   });
 
-  it("limits free feeding to eight windows and forces timed only for control, not diarrhea", () => {
+  it("limits free feeding to eight windows and preserves mode for control and diarrhea", () => {
     const windows = Array.from({ length: 8 }, (_, index) => ({
       startLocal: `${String(index).padStart(2, "0")}:00`,
       endLocal: `${String(index).padStart(2, "0")}:30`,
@@ -150,10 +152,20 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       freeWindows: [...windows, { startLocal: "09:00", endLocal: "09:30" }],
     }))).toThrow("NBJ_DECISION_FREE_WINDOWS_LIMIT");
-    expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", milkControlActive: true })).setting.mode)
-      .toBe("timed_quantity");
-    expect(computeDayDecision(baseInput({ requestedMode: "free_feeding", diarrheaGrades: ["mild"] })).setting.mode)
-      .toBe("free_feeding");
+    const controlled = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      milkControlActive: true,
+      freeWindows: FREE_WINDOW,
+    }));
+    expect(controlled.setting.mode).toBe("free_feeding");
+    expect(controlled.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
+    const diarrheal = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      diarrheaGrades: ["mild"],
+      freeWindows: FREE_WINDOW,
+    }));
+    expect(diarrheal.setting.mode).toBe("free_feeding");
+    expect(diarrheal.exceptionActions.map((action) => action.type)).not.toContain("diarrhea");
   });
 
   it("normalizes free-feeding windows on the 09:00 business-day axis", () => {
@@ -179,8 +191,9 @@ describe("deterministic day decision", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       exceptionSignals: { refusal: true, blockage: true, probeContaminated: true },
+      freeWindows: FREE_WINDOW,
     }));
-    expect(decision.setting.mode).toBe("timed_quantity");
+    expect(decision.setting.mode).toBe("free_feeding");
     expect(decision.exceptionActions.map((action) => action.type)).toEqual([
       "refusal",
       "blockage",
@@ -195,30 +208,87 @@ describe("deterministic day decision", () => {
       requestedMode: "free_feeding",
       precisionGrams: 3,
       sop: { powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
     }));
     expect(divided.setting).toMatchObject({
       mode: "free_feeding",
-      dailyPowderGrams: 99,
+      dailyPowderGrams: 96,
       singlePowderGrams: 24,
       mealCount: 4,
-      suggestedDailyPowderGrams: 684,
-      suggestedDailyMealCount: 12,
+      freeDispenseLimit: 4,
+      suggestedDailyPowderGrams: 96,
+      suggestedDailyMealCount: 4,
       timedMeals: [],
     });
 
-    const modelSingle = computeDayDecision(baseInput({ requestedMode: "free_feeding" }));
+    const modelSingle = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: FREE_WINDOW,
+    }));
     expect(modelSingle.setting.singlePowderGrams).toBe(70);
     expect(modelSingle.setting.dailyPowderGrams)
       .toBe(modelSingle.setting.singlePowderGrams * modelSingle.setting.mealCount);
     expect(modelSingle.setting).toMatchObject({
-      suggestedDailyPowderGrams: 696,
-      suggestedDailyMealCount: 12,
+      mealCount: 10,
+      freeDispenseLimit: 10,
+      suggestedDailyPowderGrams: 700,
+      suggestedDailyMealCount: 10,
     });
+  });
+
+  it("maps a free-feeding direct SOP total through single × dispense limit", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 7,
+      sop: { directTotalPowderGrams: 1234, mealCount: 4 },
+      freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+    }));
+    expect(decision.setting.source).toBe("sop_direct");
+    expect(decision.setting.freeDispenseLimit).toBe(4);
+    expect(decision.setting.singlePowderGrams).toBe(308);
+    expect(decision.setting.dailyPowderGrams).toBe(1232);
+    expect(decision.setting.dailyPowderGrams).toBe(
+      decision.setting.singlePowderGrams * decision.setting.mealCount,
+    );
+    expect(decision.setting.dailyPowderGrams).toBeLessThanOrEqual(1234);
+    expect(decision.setting.freeWindows).toEqual([{ startLocal: "09:00", endLocal: "17:00" }]);
+  });
+
+  it("fails closed for executable free-feeding without at least one window", () => {
+    expect(() => computeDayDecision(baseInput({ requestedMode: "free_feeding" })))
+      .toThrow("NBJ_DECISION_FREE_WINDOWS_REQUIRED");
+  });
+
+  it("fails closed when free SOP per-meal program would exceed a direct total", () => {
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 1,
+      sop: { directTotalPowderGrams: 90, powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
+    }))).toThrow("NBJ_DECISION_SOP_QUANTITY_CONFLICT");
+  });
+
+  it("rejects raw SOP per-meal conflicts before precision can hide them", () => {
+    expect(() => computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      precisionGrams: 3,
+      sop: { directTotalPowderGrams: 99, powderGramsPerMeal: 25, mealCount: 4 },
+      freeWindows: FREE_WINDOW,
+    }))).toThrow("NBJ_DECISION_SOP_QUANTITY_CONFLICT");
+  });
+
+  it("requires SOP mealCount to be a positive safe integer", () => {
+    expect(() => computeDayDecision(baseInput({
+      sop: { powderGramsPerMeal: 25, mealCount: 4.5 },
+    }))).toThrow("NBJ_DECISION_INVALID_SOP_MEAL_COUNT");
+    expect(() => computeDayDecision(baseInput({
+      sop: { powderGramsPerMeal: 25, mealCount: 0.5 },
+    }))).toThrow("NBJ_DECISION_INVALID_SOP_MEAL_COUNT");
   });
 });
 
 describe("diarrhea adjustment preview", () => {
-  it("generates a pending proposal for mild and a preview-only result for moderate", () => {
+  it("returns individual intervention for mild and never modifies the whole-pen program", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -231,19 +301,24 @@ describe("diarrhea adjustment preview", () => {
       cumulativePowderGrams: 100,
       reductionPriority: ["18:00", "23:00"],
     });
-    expect(mild.kind).toBe("proposal");
-    expect(mild.proposal).not.toBeNull();
-    expect(mild.decision?.status).toBe("draft");
-    expect(mild.decision?.setting.mode).toBe("timed_quantity");
-    expect(mild.decision?.setting.dailyPowderGrams).toBe(450);
-    expect(mild.decision?.setting.timedMeals).toEqual([
-      { timeLocal: "06:00", powderGrams: 150 },
-      { timeLocal: "12:00", powderGrams: 150 },
-      { timeLocal: "23:00", powderGrams: 150 },
-    ]);
-    expect(mild.remainingDeliverable).toBe(350);
-    expect(mild.decision?.evidence.reasons.join(" ")).toContain("待确认设备提案");
+    expect(mild.kind).toBe("individual_intervention");
+    expect(mild.proposal).toBeNull();
+    expect(mild.decision).toBeNull();
+    expect(mild.affectsWholePen).toBe(false);
+    expect(mild.isolateAffectedPiglets).toBe(true);
+    expect(mild.affectedPigletMilkControlCount).toBe(1);
+    expect(mild.deviceAdjustmentRequired).toBe(false);
+    expect(mild.requiresHumanConfirmation).toBe(false);
+    expect(mild.requiresManualDisposition).toBe(true);
+    expect(mild.adjustedProgramTotal).toBe(decision.setting.dailyPowderGrams);
+  });
 
+  it("returns a feeding reduction proposal for moderate while preserving mode", () => {
+    const decision = computeDayDecision(baseInput({
+      sop: { directTotalPowderGrams: 600, mealCount: 4 },
+      timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
+      requestedStatus: "active",
+    }));
     const moderate = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
@@ -251,13 +326,22 @@ describe("diarrhea adjustment preview", () => {
       cumulativePowderGrams: 100,
       reductionPriority: ["18:00", "23:00"],
     });
-    expect(moderate.kind).toBe("preview_only");
-    expect(moderate.proposal).toBeNull();
-    expect(moderate.manualDispositionRequired).toBe(true);
+    expect(moderate.kind).toBe("feeding_reduction_proposal");
+    expect(moderate.proposal).not.toBeNull();
+    expect(moderate.manualDispositionRequired).toBe(false);
+    expect(moderate.requiresHumanConfirmation).toBe(true);
+    expect(moderate.affectsWholePen).toBe(true);
+    expect(moderate.deviceAdjustmentRequired).toBe(true);
+    expect(moderate.decision?.setting.mode).toBe("timed_quantity");
     expect(moderate.decision?.setting.dailyPowderGrams).toBe(450);
+    expect(moderate.decision?.setting.timedMeals).toEqual([
+      { timeLocal: "06:00", powderGrams: 150 },
+      { timeLocal: "12:00", powderGrams: 150 },
+      { timeLocal: "23:00", powderGrams: 150 },
+    ]);
   });
 
-  it("returns manual-only for severe with no device proposal", () => {
+  it("returns manual emergency for severe with no device proposal and unchanged program", () => {
     const decision = computeDayDecision(baseInput());
     const preview = previewDiarrheaAdjustment({
       decision,
@@ -270,13 +354,31 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.decision).toBeNull();
     expect(preview.proposal).toBeNull();
     expect(preview.manualDispositionRequired).toBe(true);
-    expect(preview.adjustedProgramTotal).not.toBe(decision.setting.dailyPowderGrams);
+    expect(preview.affectsWholePen).toBe(false);
+    expect(preview.isolateAffectedPiglets).toBe(true);
+    expect(preview.deviceAdjustmentRequired).toBe(false);
+    expect(preview.adjustedProgramTotal).toBe(decision.setting.dailyPowderGrams);
     expect(preview.remainingDeliverable).toBe(
-      Math.max(0, preview.adjustedProgramTotal - 500),
+      Math.max(0, decision.setting.dailyPowderGrams - 500),
     );
   });
 
-  it("does not replace another meal when the frozen target slot has already passed", () => {
+  it("returns manual-only for moderate when cumulative powder is missing", () => {
+    const decision = computeDayDecision(baseInput());
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T09:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: null,
+      reductionPriority: ["12:00"],
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.requiresManualDisposition).toBe(true);
+    expect(preview.reason).toContain("请补录");
+  });
+
+  it("does not replace another meal for moderate when the frozen target slot has already passed", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 6 },
       timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
@@ -284,7 +386,7 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T23:30:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 0,
       reductionPriority: ["20:00"],
     });
@@ -294,7 +396,7 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.proposal).toBeNull();
   });
 
-  it("returns manual-only when cumulative powder exceeds the adjusted program total", () => {
+  it("returns manual-only for moderate when cumulative powder exceeds the adjusted program total", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -302,7 +404,7 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 500,
       reductionPriority: ["18:00", "23:00"],
     });
@@ -311,7 +413,7 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.manualDispositionRequired).toBe(true);
   });
 
-  it("returns manual-only when cumulative powder equals the adjusted program total", () => {
+  it("returns manual-only for moderate when cumulative powder equals the adjusted program total", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -319,7 +421,7 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 450,
       reductionPriority: ["18:00", "23:00"],
     });
@@ -328,7 +430,7 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.remainingDeliverable).toBe(0);
   });
 
-  it("returns manual-only when future meal powder exceeds remaining deliverable", () => {
+  it("returns manual-only for moderate when future meal powder exceeds remaining deliverable", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -336,7 +438,7 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 400,
       reductionPriority: ["18:00", "23:00"],
     });
@@ -346,7 +448,7 @@ describe("diarrhea adjustment preview", () => {
     expect(preview.remainingDeliverable).toBe(50);
   });
 
-  it("fails closed when the frozen reduction slot is missing", () => {
+  it("fails closed for moderate when the frozen reduction slot is missing", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 4 },
       timedMealTimes: ["06:00", "12:00", "18:00", "23:00"],
@@ -354,19 +456,19 @@ describe("diarrhea adjustment preview", () => {
     expect(() => previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 0,
     })).toThrow("NBJ_DECISION_DIARRHEA_REDUCTION_SLOT_REQUIRED");
     expect(() => previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 0,
       reductionPriority: ["07:00"],
     })).toThrow("NBJ_DECISION_DIARRHEA_REDUCTION_SLOT_REQUIRED");
   });
 
-  it("uses frozen priority on the 09:00 business-day axis across midnight", () => {
+  it("uses frozen priority for moderate on the 09:00 business-day axis across midnight", () => {
     const decision = computeDayDecision(baseInput({
       sop: { directTotalPowderGrams: 600, mealCount: 6 },
       timedMealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
@@ -374,11 +476,11 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T23:30:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 0,
       reductionPriority: ["02:00", "05:00", "08:00"],
     });
-    expect(preview.kind).toBe("proposal");
+    expect(preview.kind).toBe("feeding_reduction_proposal");
     expect(preview.targetSlot).toBe("02:00");
     expect(preview.targetAlreadyHappened).toBe(false);
     expect(preview.decision?.setting.timedMeals.map((meal) => meal.timeLocal))
@@ -387,7 +489,7 @@ describe("diarrhea adjustment preview", () => {
       .toBe(500);
   });
 
-  it("removes a frozen free-feeding window without inventing a default slot", () => {
+  it("keeps free-feeding windows for moderate and reduces only the dispense quota", () => {
     const decision = computeDayDecision(baseInput({
       requestedMode: "free_feeding",
       freeWindows: [
@@ -399,15 +501,82 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T12:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 0,
-      freeReductionPriority: ["15:00"],
     });
-    expect(preview.kind).toBe("proposal");
+    expect(preview.kind).toBe("feeding_reduction_proposal");
     expect(preview.decision?.setting.mode).toBe("free_feeding");
     expect(preview.decision?.setting.freeWindows.map((window) => window.startLocal))
-      .toEqual(["06:00", "09:00"]);
+      .toEqual(["06:00", "09:00", "15:00"]);
     expect(preview.decision?.setting.mealCount).toBe(decision.setting.mealCount - 1);
+    expect(preview.decision?.setting.freeDispenseLimit)
+      .toBe(decision.setting.freeDispenseLimit! - 1);
+    expect(preview.targetSlot).toBeNull();
+    expect(preview.decision?.setting.dailyPowderGrams)
+      .toBe(preview.decision!.setting.singlePowderGrams * preview.decision!.setting.mealCount);
+  });
+
+  it("fails closed for moderate free-feeding when the base dispense limit is already one", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "09:00", endLocal: "17:00" }],
+    }));
+    decision.setting.freeDispenseLimit = 1;
+    decision.setting.mealCount = 1;
+    decision.setting.dailyPowderGrams = decision.setting.singlePowderGrams;
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.evidence).toMatchObject({
+      code: "NBJ_DIARRHEA_FREE_DISPENSE_LIMIT_MIN",
+    });
+  });
+
+  it("returns manual-only for moderate free-feeding when the only window has passed", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: [{ startLocal: "23:00", endLocal: "02:00" }],
+    }));
+    const preview = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T03:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 0,
+    });
+    expect(preview.kind).toBe("manual_only");
+    expect(preview.proposal).toBeNull();
+    expect(preview.futureDeliverable).toBe(0);
+  });
+
+  it("discretizes free moderate future deliverable to whole standard dispenses", () => {
+    const decision = computeDayDecision(baseInput({
+      requestedMode: "free_feeding",
+      freeWindows: FREE_WINDOW,
+    }));
+    const notEnoughForOne = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 600,
+    });
+    expect(notEnoughForOne.kind).toBe("manual_only");
+    expect(notEnoughForOne.proposal).toBeNull();
+    expect(notEnoughForOne.futureDeliverable).toBe(0);
+
+    const exactlyOne = previewDiarrheaAdjustment({
+      decision,
+      observedAt: "2026-07-31T12:00:00+08:00",
+      grades: ["moderate"],
+      cumulativePowderGrams: 560,
+    });
+    expect(exactlyOne.kind).toBe("feeding_reduction_proposal");
+    expect(exactlyOne.futureDeliverable).toBe(decision.setting.singlePowderGrams);
+    expect(exactlyOne.reason).not.toContain("null");
   });
 
   it("returns deterministic cumulative facts without target ratio", () => {
@@ -418,11 +587,11 @@ describe("diarrhea adjustment preview", () => {
     const preview = previewDiarrheaAdjustment({
       decision,
       observedAt: "2026-07-31T13:00:00+08:00",
-      grades: ["mild"],
+      grades: ["moderate"],
       cumulativePowderGrams: 120,
       reductionPriority: ["14:00", "18:00", "22:00"],
     });
-    expect(preview.kind).toBe("proposal");
+    expect(preview.kind).toBe("feeding_reduction_proposal");
     expect(preview.targetSlot).toBe("14:00");
     expect(preview.decision?.setting.timedMeals.map((meal) => meal.timeLocal))
       .toEqual(["10:00", "18:00", "22:00"]);

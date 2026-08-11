@@ -10,6 +10,7 @@ import {
   type LocalStore,
 } from "../../src/local-db/index.js";
 import { digestFrozenSopSnapshot } from "../../src/decision/batch-decision-service.js";
+import { DECISION_POLICY_VERSION } from "../../src/shared/agent-v2-contract.js";
 import { loadFrozenBatchDecisionContext } from "../../src/decision/batch-decision-service.js";
 import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
 
@@ -246,7 +247,7 @@ describe("SQLite local store", () => {
     const legacy = new DatabaseSync(filename);
     legacy.exec(`
       DROP TABLE daily_operation_amendments;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-06T00:00:00.000Z');
     `);
     legacy.close();
@@ -261,14 +262,14 @@ describe("SQLite local store", () => {
     expect(counts("daily_operation_plans")).toBe(1);
     expect(counts("daily_operation_confirmations")).toBe(1);
     expect(counts("audit_events")).toBe(1);
-    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 10").get())
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations WHERE version = 12").get())
       .toEqual({ count: 1 });
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
   });
 
-  it("rebuilds v8 amendment tables and restores their indexes during migration to 10", () => {
+  it("rebuilds v8 amendment tables and restores their indexes during migration to 11", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -474,7 +475,7 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
     legacy.close();
@@ -500,13 +501,13 @@ describe("SQLite local store", () => {
       .map((row) => String(row.name));
     expect(indexes).toContain("daily_operation_amendments_batch_date_idx");
     expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
-      .toBe(10);
+      .toBe(12);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
   });
 
-  it("preserves v9 amendment action history and replay after migration to v10", () => {
+  it("preserves v9 amendment action history and replay after migration to v11", () => {
     const { filename, store } = fileStore();
     store.createBatch({
       userId: "user-a",
@@ -539,7 +540,7 @@ describe("SQLite local store", () => {
       idempotencyKey: "confirm-v9-actions-base",
     }).confirmation;
     const proposal = {
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: plan.businessDate,
       mode: "timed_quantity" as const,
       dayAge: 4,
@@ -641,7 +642,7 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 10;
+      DELETE FROM schema_migrations WHERE version = 11;
       INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
     legacy.close();
@@ -698,9 +699,449 @@ describe("SQLite local store", () => {
     const actionIndexes = database.prepare("PRAGMA index_list('daily_operation_amendment_actions')").all()
       .map((row) => String(row.name));
     expect(actionIndexes).toContain("daily_operation_amendment_actions_amendment_idx");
+    const actionTableSql = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+    `).get() as { sql: string };
+    expect(actionTableSql.sql).toContain("'cancel'");
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
+    upgraded.close();
+  });
+
+  it("migrates an exact v10 action table to v11 preserving confirm/apply replay", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      revision: 2,
+      data: { config: {}, records: [] },
+    });
+    const operations = dailyOperations();
+    const plan = store.ensureDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      businessDate: "2026-08-07",
+      basedOnBatchRevision: 2,
+      sopTemplateId: "sop-v10-actions",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v10-actions",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity",
+      effectiveMode: "timed_quantity",
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+    });
+    const confirmation = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-v10-actions-base",
+    }).confirmation;
+    const proposal = {
+      kind: "diarrhea" as const,
+      businessDate: plan.businessDate,
+      mode: "timed_quantity" as const,
+      dayAge: 4,
+      dailyPowderGrams: 500,
+      singlePowderGrams: 50,
+      mealCount: 10,
+      timedMeals: [{ timeLocal: "10:00", powderGrams: 50 }],
+      freeWindows: [],
+      precisionGrams: 1,
+      source: "sop_indirect" as const,
+      rationale: ["v10 migration fixture"],
+      manualDispositionRequired: false,
+      proposalDigest: "",
+    };
+    const created = store.ensureDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      businessDate: plan.businessDate,
+      basePlanId: plan.id,
+      baseConfirmationId: confirmation.id,
+      originId: "origin-v10-actions",
+      originKind: "diarrhea",
+      severity: "mild",
+      priority: "routine",
+      operations,
+      proposal,
+      basedOnBatchRevision: 2,
+      idempotencyKey: "amendment-v10-actions",
+    });
+    const amendment = created.amendment;
+    store.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      amendmentId: amendment.id,
+      action: "confirm",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "confirm-v10-actions",
+    });
+    const applied = store.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      amendmentId: amendment.id,
+      action: "apply",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "apply-v10-actions",
+    });
+    store.close();
+
+    const beforeRead = new DatabaseSync(filename, { readOnly: true });
+    const beforeRows = beforeRead.prepare(`
+      SELECT action, response_json FROM daily_operation_amendment_actions
+      ORDER BY action, created_at, id
+    `).all() as Array<{ action: string; response_json: string }>;
+    beforeRead.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec("PRAGMA foreign_keys = OFF;");
+    legacy.exec(`
+      ALTER TABLE daily_operation_amendment_actions RENAME TO daily_operation_amendment_actions_v10_old;
+      CREATE TABLE daily_operation_amendment_actions (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        amendment_id TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('confirm', 'reject', 'apply')),
+        idempotency_key TEXT NOT NULL,
+        expected_batch_revision INTEGER NOT NULL CHECK (expected_batch_revision >= 0),
+        expected_amendment_sha256 TEXT NOT NULL,
+        resulting_status TEXT NOT NULL,
+        decision_id TEXT,
+        response_json TEXT NOT NULL CHECK (json_valid(response_json)),
+        created_at TEXT NOT NULL,
+        UNIQUE (user_id, idempotency_key),
+        FOREIGN KEY (user_id, batch_id) REFERENCES batches(user_id, id) ON DELETE CASCADE,
+        FOREIGN KEY (amendment_id) REFERENCES daily_operation_amendments(id) ON DELETE CASCADE
+      ) STRICT;
+      INSERT INTO daily_operation_amendment_actions (
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      )
+      SELECT
+        id, user_id, batch_id, amendment_id, action, idempotency_key,
+        expected_batch_revision, expected_amendment_sha256, resulting_status,
+        decision_id, response_json, created_at
+      FROM daily_operation_amendment_actions_v10_old;
+      DROP TABLE daily_operation_amendment_actions_v10_old;
+      DELETE FROM schema_migrations WHERE version = 11;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (10, '2026-08-07T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    const confirmReplay = upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      amendmentId: amendment.id,
+      action: "confirm",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "confirm-v10-actions",
+    });
+    expect(confirmReplay.replayed).toBe(true);
+    const applyReplay = upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v10-actions",
+      amendmentId: amendment.id,
+      action: "apply",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: amendment.amendmentSha256,
+      idempotencyKey: "apply-v10-actions",
+    });
+    expect(applyReplay.replayed).toBe(true);
+    expect(applyReplay.amendment.decisionId).toBe(applied.amendment.decisionId);
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    expect(database.prepare("SELECT count(*) AS count FROM daily_operation_amendment_actions").get())
+      .toEqual({ count: 2 });
+    const afterRows = database.prepare(`
+      SELECT action, response_json FROM daily_operation_amendment_actions
+      ORDER BY action, created_at, id
+    `).all() as Array<{ action: string; response_json: string }>;
+    expect(afterRows).toEqual(beforeRows);
+    const actionTableSql = database.prepare(`
+      SELECT sql FROM sqlite_master
+      WHERE type = 'table' AND name = 'daily_operation_amendment_actions'
+    `).get() as { sql: string };
+    expect(actionTableSql.sql).toContain("'cancel'");
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
+      .toBe(12);
+    database.close();
+    upgraded.close();
+  });
+
+  it("migrates an exact v11 amendment contract to v12 preserving mode_change, actions, and one-active unique", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      revision: 2,
+      data: { config: {}, records: [] },
+    });
+    const operations = dailyOperations();
+    const plan = store.ensureDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      businessDate: "2026-08-08",
+      basedOnBatchRevision: 2,
+      sopTemplateId: "sop-v11-actions",
+      sopSourceSha256: "A".repeat(64),
+      devicePlanVersion: "device-v11-actions",
+      devicePlanSha256: "B".repeat(64),
+      selectedMode: "timed_quantity",
+      effectiveMode: "timed_quantity",
+      operations,
+      operationsSha256: dailyOperationsSha256(operations),
+    });
+    const confirmation = store.confirmDailyOperationPlan({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      businessDate: plan.businessDate,
+      planId: plan.id,
+      operationsSha256: plan.operationsSha256,
+      confirmedBy: "user-a",
+      idempotencyKey: "confirm-v11-actions-base",
+    }).confirmation;
+    const proposal = {
+      kind: "diarrhea" as const,
+      businessDate: plan.businessDate,
+      mode: "timed_quantity" as const,
+      dayAge: 4,
+      dailyPowderGrams: 500,
+      singlePowderGrams: 50,
+      mealCount: 10,
+      timedMeals: [{ timeLocal: "10:00", powderGrams: 50 }],
+      freeWindows: [],
+      precisionGrams: 1,
+      source: "sop_indirect" as const,
+      rationale: ["v11 migration fixture"],
+      manualDispositionRequired: false,
+      proposalDigest: "",
+    };
+    const ensure = (originId: string, originKind: "diarrhea" | "creep_control", idempotencyKey: string) =>
+      store.ensureDailyOperationAmendment({
+        userId: "user-a",
+        batchId: "batch-v11-actions",
+        businessDate: plan.businessDate,
+        basePlanId: plan.id,
+        baseConfirmationId: confirmation.id,
+        originId,
+        originKind,
+        severity: originKind === "diarrhea" ? "moderate" : null,
+        priority: originKind === "diarrhea" ? "warning" : "routine",
+        operations,
+        proposal,
+        basedOnBatchRevision: 2,
+        idempotencyKey,
+      }).amendment;
+    const decide = (amendmentId: string, action: "confirm" | "reject" | "apply" | "cancel", key: string) =>
+      store.decideDailyOperationAmendment({
+        userId: "user-a",
+        batchId: "batch-v11-actions",
+        amendmentId,
+        action,
+        decidedBy: "user-a",
+        expectedRevision: 2,
+        expectedAmendmentSha256: store.getDailyOperationAmendment("user-a", "batch-v11-actions", amendmentId)!.amendmentSha256,
+        idempotencyKey: key,
+      });
+    const pending = ensure("v11-pending", "diarrhea", "v11-pending-key");
+    const confirmed = ensure("v11-confirmed", "diarrhea", "v11-confirmed-key");
+    decide(confirmed.id, "confirm", "v11-confirm-key");
+    const applied = ensure("v11-applied", "diarrhea", "v11-applied-key");
+    decide(applied.id, "confirm", "v11-apply-confirm-key");
+    const appliedResult = decide(applied.id, "apply", "v11-apply-key");
+    const rejected = ensure("v11-rejected", "diarrhea", "v11-rejected-key");
+    decide(rejected.id, "reject", "v11-reject-key");
+    const cancelled = ensure("v11-cancelled", "diarrhea", "v11-cancelled-key");
+    decide(cancelled.id, "confirm", "v11-cancel-confirm-key");
+    decide(cancelled.id, "cancel", "v11-cancel-key");
+    const superseded = ensure("v11-superseded", "creep_control", "v11-superseded-key");
+    store.supersedeDailyOperationAmendments({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      businessDate: plan.businessDate,
+      originKind: "creep_control",
+      reason: "newer_observation",
+      sourceObservationId: "obs-v11-superseded",
+    });
+    store.close();
+
+    const beforeRead = new DatabaseSync(filename, { readOnly: true });
+    const amendmentCountBefore = Number(
+      (beforeRead.prepare("SELECT count(*) AS count FROM daily_operation_amendments").get() as { count: number }).count,
+    );
+    const actionCountBefore = Number(
+      (beforeRead.prepare("SELECT count(*) AS count FROM daily_operation_amendment_actions").get() as { count: number }).count,
+    );
+    beforeRead.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec("PRAGMA foreign_keys = OFF;");
+    legacy.exec(`
+      ALTER TABLE daily_operation_amendments RENAME TO daily_operation_amendments_v11_old;
+      CREATE TABLE daily_operation_amendments (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        batch_id TEXT NOT NULL,
+        business_date TEXT NOT NULL,
+        base_plan_id TEXT NOT NULL,
+        base_confirmation_id TEXT,
+        origin_id TEXT NOT NULL,
+        origin_kind TEXT NOT NULL CHECK (origin_kind IN ('diarrhea', 'creep_control')),
+        severity TEXT CHECK (severity IS NULL OR severity IN ('mild', 'moderate', 'severe')),
+        priority TEXT NOT NULL DEFAULT 'routine' CHECK (priority IN ('routine', 'warning', 'critical')),
+        status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'rejected', 'applied', 'superseded', 'cancelled')),
+        operations_json TEXT NOT NULL CHECK (json_valid(operations_json)),
+        proposal_json TEXT CHECK (proposal_json IS NULL OR json_valid(proposal_json)),
+        decision_id TEXT,
+        amendment_sha256 TEXT NOT NULL,
+        based_on_batch_revision INTEGER NOT NULL CHECK (based_on_batch_revision >= 0),
+        idempotency_key TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        decided_at TEXT,
+        decided_by TEXT,
+        UNIQUE (user_id, origin_id),
+        UNIQUE (user_id, idempotency_key)
+      ) STRICT;
+      INSERT INTO daily_operation_amendments (
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, priority, status, operations_json,
+        proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+        idempotency_key, created_at, decided_at, decided_by
+      )
+      SELECT
+        id, user_id, batch_id, business_date, base_plan_id, base_confirmation_id,
+        origin_id, origin_kind, severity, priority, status, operations_json,
+        proposal_json, decision_id, amendment_sha256, based_on_batch_revision,
+        idempotency_key, created_at, decided_at, decided_by
+      FROM daily_operation_amendments_v11_old;
+      DROP TABLE daily_operation_amendments_v11_old;
+      DELETE FROM schema_migrations WHERE version = 12;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (11, '2026-08-08T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    expect(upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      amendmentId: confirmed.id,
+      action: "confirm",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: confirmed.amendmentSha256,
+      idempotencyKey: "v11-confirm-key",
+    }).replayed).toBe(true);
+    expect(upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      amendmentId: applied.id,
+      action: "apply",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: applied.amendmentSha256,
+      idempotencyKey: "v11-apply-key",
+    }).amendment.decisionId).toBe(appliedResult.amendment.decisionId);
+    expect(upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      amendmentId: rejected.id,
+      action: "reject",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: rejected.amendmentSha256,
+      idempotencyKey: "v11-reject-key",
+    }).replayed).toBe(true);
+    expect(upgraded.decideDailyOperationAmendment({
+      userId: "user-a",
+      batchId: "batch-v11-actions",
+      amendmentId: cancelled.id,
+      action: "cancel",
+      decidedBy: "user-a",
+      expectedRevision: 2,
+      expectedAmendmentSha256: cancelled.amendmentSha256,
+      idempotencyKey: "v11-cancel-key",
+    }).replayed).toBe(true);
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    expect(Number((database.prepare("SELECT count(*) AS count FROM daily_operation_amendments").get() as { count: number }).count))
+      .toBe(amendmentCountBefore);
+    expect(Number((database.prepare("SELECT count(*) AS count FROM daily_operation_amendment_actions").get() as { count: number }).count))
+      .toBe(actionCountBefore);
+    const amendmentSql = database.prepare(`
+      SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'daily_operation_amendments'
+    `).get() as { sql: string };
+    expect(amendmentSql.sql).toContain("mode_change");
+    const indexes = (database.prepare("PRAGMA index_list(feeding_decisions)").all() as Array<{ name: string }>)
+      .map((row) => row.name);
+    expect(indexes).toContain("feeding_decisions_one_active_idx");
+    expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(12);
+    database.close();
+    upgraded.close();
+  });
+
+  it("fails V12 migration when duplicate active decisions already exist", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "batch-dup-active",
+      revision: 1,
+      data: { config: {}, records: [] },
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    legacy.exec("DROP INDEX IF EXISTS feeding_decisions_one_active_idx;");
+    const first = decision("batch-dup-active", 1);
+    const second = decision("batch-dup-active", 2);
+    const insert = legacy.prepare(`
+      INSERT INTO feeding_decisions (
+        user_id, id, batch_id, session_id, revision, date_local,
+        sop_version, model_version, calculation_date, device_setting_json,
+        evidence_json, decision_json, status, idempotency_key, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', NULL, ?, ?)
+    `);
+    insert.run(
+      "user-a", "active-1", "batch-dup-active", null, first.revision, first.dateLocal,
+      first.evidence.sopVersion, first.evidence.modelVersion, first.evidence.calculationDate,
+      JSON.stringify(first.setting), JSON.stringify(first.evidence), JSON.stringify(first),
+      "2026-08-08T00:00:00Z", "2026-08-08T00:00:00Z",
+    );
+    insert.run(
+      "user-a", "active-2", "batch-dup-active", null, second.revision, second.dateLocal,
+      second.evidence.sopVersion, second.evidence.modelVersion, second.evidence.calculationDate,
+      JSON.stringify(second.setting), JSON.stringify(second.evidence), JSON.stringify(second),
+      "2026-08-08T00:00:00Z", "2026-08-08T00:00:00Z",
+    );
+    legacy.exec(`
+      DELETE FROM schema_migrations WHERE version = 12;
+      INSERT INTO schema_migrations (version, applied_at) VALUES (11, '2026-08-08T00:00:00Z');
+    `);
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    expect(() => upgraded.migrate()).toThrow("duplicate active decisions");
     upgraded.close();
   });
 
@@ -796,7 +1237,16 @@ describe("SQLite local store", () => {
 
     const expected = decision("batch-1", 7);
     store.saveDecision({ userId: "user-a", decision: expected, idempotencyKey: "decision-7" });
-    expect(store.getActiveDecision("user-a", "batch-1", "2026-07-31")).toEqual(expected);
+    expect(store.getActiveDecision("user-a", "batch-1", "2026-07-31")).toEqual({
+      ...expected,
+      evidence: {
+        ...expected.evidence,
+        inputs: {
+          ...expected.evidence.inputs,
+          decisionPolicyVersion: DECISION_POLICY_VERSION,
+        },
+      },
+    });
     expect(store.getActiveDecision("user-b", "batch-1", "2026-07-31")).toBeNull();
     store.close();
   });
@@ -966,7 +1416,7 @@ describe("SQLite local store", () => {
     );
     seed.close();
     const proposal = {
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: "2026-08-04",
       mode: "timed_quantity" as const,
       dayAge: 4,
@@ -977,34 +1427,33 @@ describe("SQLite local store", () => {
       freeWindows: [],
       precisionGrams: 1,
       source: "sop_indirect" as const,
-      rationale: ["腹泻调整"],
+      rationale: ["教槽控奶"],
       manualDispositionRequired: false,
       proposalDigest: "A".repeat(64),
       cumulativePowderGrams: 120,
     };
     const feedbackOrigin = {
       id: "origin-1",
-      kind: "diarrhea" as const,
+      kind: "creep_control" as const,
       businessDate: "2026-08-04",
       status: "proposed" as const,
       sourceObservation: {
         recordedAt: "2026-08-04T09:00:00.000Z",
-        diarrheaGrade: "mild" as const,
-        actualPowderGrams: 120,
+        creepGrade: "high" as const,
       },
-      reason: "已录入轻度腹泻",
+      reason: "教槽持续采食，启动控奶",
       proposal,
       createdAt: "2026-08-04T09:00:00.000Z",
     };
     const operations = [{
       ...dailyOperations()[0],
-      code: "feedback_diarrhea_confirm",
-      title: "腹泻处置确认（轻度）",
+      code: "feedback_creep_control_confirm",
+      title: "教槽持续采食控奶启动确认",
       dueWindow: { startLocal: "09:00", endLocal: "09:00", endDayOffset: 1 },
       sopSection: "现场反馈.腹泻",
       feedbackRef: {
         originId: "origin-1",
-        kind: "diarrhea" as const,
+        kind: "creep_control" as const,
         proposalDigest: proposal.proposalDigest,
         requiresDeviceConfirmation: true,
       },
@@ -1030,7 +1479,7 @@ describe("SQLite local store", () => {
     expect(plan.feedbackOrigin).toEqual(feedbackOrigin);
     expect(plan.operations[0]?.feedbackRef).toMatchObject({
       originId: "origin-1",
-      kind: "diarrhea",
+      kind: "creep_control",
       requiresDeviceConfirmation: true,
     });
 
@@ -1121,7 +1570,7 @@ describe("SQLite local store", () => {
     ]));
     expect(amendmentTables).toHaveLength(1);
     expect(actionTables).toHaveLength(1);
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(10);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(12);
     database.close();
     upgraded.close();
   });

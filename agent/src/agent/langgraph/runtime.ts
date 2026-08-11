@@ -266,10 +266,10 @@ function narrationContextText(state: AgentGraphState): string {
   if (state.diarrheaPreview) {
     const preview = state.diarrheaPreview;
     const gradeLabel = { mild: "轻度", moderate: "中度", severe: "重度" }[preview.worstGrade];
-    const kindLabel = preview.resultKind === "proposal"
-      ? "待确认提案"
-      : preview.resultKind === "preview_only"
-        ? "仅预览"
+    const kindLabel = preview.resultKind === "individual_intervention"
+      ? "个体干预"
+      : preview.resultKind === "feeding_reduction_proposal"
+        ? "待确认整栏减餐"
         : "人工处置";
     const remaining = preview.mode === "free_feeding"
       ? `剩余窗口：${preview.freeWindows.map((window) => `${window.startLocal}–${window.endLocal}`).join("、") || "无"}`
@@ -278,10 +278,10 @@ function narrationContextText(state: AgentGraphState): string {
       ? "本次观察"
       : preview.cumulativeSource === "request"
         ? "请求参数"
-        : preview.cumulativeSource === "latest_record"
+      : preview.cumulativeSource === "latest_record"
           ? "最近记录"
-          : "未录入按0估算";
-    parts.push(`腹泻调整（${kindLabel}）：${gradeLabel}；目标槽位${preview.targetSlot ?? "未指定"}；${remaining}；调整后整日程序总量${preview.remainingDailyPowderGrams}g；累计实际下粉${preview.cumulativePowderGrams}g（${sourceLabel}）；剩余可交付${preview.remainingDeliverable}g。`);
+          : "未录入，不估算";
+    parts.push(`腹泻调整（${kindLabel}）：${gradeLabel}；目标槽位${preview.targetSlot ?? "未指定"}；${remaining}；调整后整日程序总量${preview.remainingDailyPowderGrams}g；累计实际下粉${preview.cumulativePowderGrams ?? "未录入"}g（${sourceLabel}）；剩余可交付${preview.remainingDeliverable}g。`);
   }
   parts.push("以上数字均已通过确定性证据校验。");
   return parts.join("\n");
@@ -356,7 +356,7 @@ function narrationWhitelist(state: AgentGraphState): number[] {
       preview.cumulativePowderGrams,
       preview.remainingDeliverable,
     ]) {
-      if (value !== undefined) values.add(value);
+      if (value !== undefined && value !== null) values.add(value);
     }
     if (preview.targetSlot) {
       for (const value of responseNumbers(preview.targetSlot)) values.add(value);
@@ -461,7 +461,9 @@ function protectedFacts(state: AgentGraphState): DeterministicFact[] {
     facts.push({ field: "diarrheaResultKind", value: preview.resultKind, ...refs });
     if (preview.targetSlot) facts.push({ field: "diarrheaTargetSlot", value: preview.targetSlot, unit: "HH:mm", ...refs });
     facts.push({ field: "adjustedProgramTotal", value: preview.remainingDailyPowderGrams, unit: "g", ...refs });
-    facts.push({ field: "cumulativeActual", value: preview.cumulativePowderGrams, unit: "g", ...refs });
+    if (preview.cumulativePowderGrams !== null) {
+      facts.push({ field: "cumulativeActual", value: preview.cumulativePowderGrams, unit: "g", ...refs });
+    }
     facts.push({ field: "remainingDeliverable", value: preview.remainingDeliverable, unit: "g", ...refs });
   }
   return facts;
@@ -764,10 +766,10 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
   const worstGrade = String(data?.worstGrade ?? "");
   const resultKind = String(data?.status ?? "");
   if (!["mild", "moderate", "severe"].includes(worstGrade) ||
-      !["proposal", "preview_only", "manual_only"].includes(resultKind)) {
+      !["individual_intervention", "feeding_reduction_proposal", "manual_only"].includes(resultKind)) {
     return undefined;
   }
-  const mode = deviceOperation?.mode === "free_feeding" || setting?.mode === "free_feeding"
+  const mode = data?.mode === "free_feeding" || deviceOperation?.mode === "free_feeding" || setting?.mode === "free_feeding"
     ? "free_feeding"
     : "timed_quantity";
   const timedMeals: DiarrheaPreviewSummary["timedMeals"] = [];
@@ -798,17 +800,20 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
     finite(deviceOperation?.singlePowderGrams) ??
     finite(setting?.singlePowderGrams);
   const mealCount = finite(deviceOperation?.mealCount) ?? finite(setting?.mealCount);
-  const cumulativePowderGrams = finite(data?.cumulativePowderGrams) ?? 0;
+  const cumulativePowderGrams = data?.cumulativePowderGrams == null
+    ? null
+    : finite(data.cumulativePowderGrams) ?? null;
   const remainingDeliverable = finite(data?.remainingDeliverable) ?? 0;
   const targetSlot = typeof data?.targetSlot === "string" && data.targetSlot
     ? data.targetSlot
     : undefined;
-  const cumulativeSource = String(data?.cumulativeSource ?? "");
-  if (remainingDailyPowderGrams === undefined) return undefined;
-  return {
+    const cumulativeSource = String(data?.cumulativeSource ?? "");
+    if (remainingDailyPowderGrams === undefined) return undefined;
+    return {
     worstGrade: worstGrade as DiarrheaPreviewSummary["worstGrade"],
     resultKind: resultKind as DiarrheaPreviewSummary["resultKind"],
-    ...(resultKind === "proposal" ? { mode } : {}),
+    ...(resultKind === "feeding_reduction_proposal" ? { mode } : {}),
+    ...(resultKind === "individual_intervention" ? { mode } : {}),
     remainingDailyPowderGrams,
     ...(singlePowderGrams !== undefined ? { singlePowderGrams } : {}),
     ...(mealCount !== undefined ? { mealCount } : {}),
@@ -818,13 +823,19 @@ function diarrheaPreviewFromToolResult(result: unknown): DiarrheaPreviewSummary 
       deviceOperation?.manualDispositionRequired === true ||
       data?.manualDispositionRequired === true,
     cumulativePowderGrams,
-    cumulativeSource: (["observation", "request", "latest_record", "assumed_zero"] as const)
+    cumulativeSource: (["observation", "request", "latest_record", "missing"] as const)
       .includes(cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"])
       ? cumulativeSource as DiarrheaPreviewSummary["cumulativeSource"]
       : "observation",
     remainingDeliverable,
     ...(targetSlot ? { targetSlot } : {}),
     ...(data?.targetAlreadyHappened === true ? { targetAlreadyHappened: true } : {}),
+    affectsWholePen: data?.affectsWholePen === true,
+    isolateAffectedPiglets: data?.isolateAffectedPiglets === true,
+    affectedPigletMilkControlCount: finite(data?.affectedPigletMilkControlCount) ?? 0,
+    deviceAdjustmentRequired: data?.deviceAdjustmentRequired === true,
+    requiresHumanConfirmation: data?.requiresHumanConfirmation === true,
+    requiresManualDisposition: data?.requiresManualDisposition === true,
   };
 }
 

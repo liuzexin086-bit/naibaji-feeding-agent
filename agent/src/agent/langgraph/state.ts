@@ -79,7 +79,7 @@ export interface KnowledgeResultRef {
 
 export interface DiarrheaPreviewSummary {
   worstGrade: "mild" | "moderate" | "severe";
-  resultKind: "proposal" | "preview_only" | "manual_only";
+  resultKind: "individual_intervention" | "feeding_reduction_proposal" | "manual_only";
   mode?: FeedingMode;
   remainingDailyPowderGrams: number;
   singlePowderGrams?: number;
@@ -87,11 +87,17 @@ export interface DiarrheaPreviewSummary {
   timedMeals: Array<{ timeLocal: string; powderGrams: number }>;
   freeWindows: Array<{ startLocal: string; endLocal: string }>;
   manualDispositionRequired: boolean;
-  cumulativePowderGrams: number;
-  cumulativeSource: "observation" | "request" | "latest_record" | "assumed_zero";
+  cumulativePowderGrams: number | null;
+  cumulativeSource: "observation" | "request" | "latest_record" | "missing";
   remainingDeliverable: number;
   targetSlot?: string;
   targetAlreadyHappened?: boolean;
+  affectsWholePen: boolean;
+  isolateAffectedPiglets: boolean;
+  affectedPigletMilkControlCount: number;
+  deviceAdjustmentRequired: boolean;
+  requiresHumanConfirmation: boolean;
+  requiresManualDisposition: boolean;
 }
 
 export interface DeterministicFact {

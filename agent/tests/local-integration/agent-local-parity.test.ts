@@ -100,16 +100,26 @@ describe("Agent and local API frozen-decision parity", () => {
       body: JSON.stringify({
         expectedRevision: 0,
         idempotencyKey: "p0-parity-advance",
-        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none" },
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
       }),
     });
     expect(advanced.status).toBe(200);
+    const dayActual = await request(base, `/api/batches/${created.batch.id}/records`, {
+      method: "POST",
+      headers: { cookie },
+      body: JSON.stringify({
+        expectedRevision: 1,
+        idempotencyKey: "p0-parity-day-actual",
+        observation: { effectiveHeads: 20, creepGrade: "none", diarrheaGrade: "none", actualPowderGrams: 0 },
+      }),
+    });
+    expect(dayActual.status).toBe(200);
     const switched = await request(base, `/api/batches/${created.batch.id}/mode`, {
       method: "POST",
       headers: { cookie },
       body: JSON.stringify({
         mode: "free_feeding",
-        expectedRevision: 1,
+        expectedRevision: 2,
         idempotencyKey: "p0-parity-free",
       }),
     });
