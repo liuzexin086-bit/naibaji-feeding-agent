@@ -1,8 +1,14 @@
 # NBJ-ARCH-P2 Authority Map
 
-Status: `REVIEW 0 PASS — checkpoint uncommitted`
+Status: `REVIEW 0 — CHANGES REQUIRED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+
+Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Remote branch: `nbj-arch-p2`
 
 ## Authority vocabulary
 
@@ -19,11 +25,12 @@ Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 | User identity and role | Local SQLite users/sessions; Supabase Auth; legacy UI session state | SQLite identity records behind Agent API auth | Auth Application Service | Supabase identity is migration/archive input only | UI-to-Supabase Auth; direct DB access |
 | Batch identity/lifecycle | JSON snapshots; Supabase batches; SQLite batches | Domain `Batch` persisted by SQLite Batch Repository | Batch Application Services | JSON/Supabase are one-way migration sources | UI/Agent direct writes; bidirectional sync |
 | Selected feeding mode | Batch/decision fields and compatibility projections | Server-side Batch/Operation mode state in SQLite | Explicit mode-change Application Service | Compatibility projection is read-only | Exception, LLM, UI, or old `effectiveMode` field selecting mode |
-| Creep/control runtime state | Persisted observations plus derived runtime/decision fields | Append-only observations + deterministic Domain runtime-state transition persisted in SQLite | Record Observation/Control services | Recomputed projections are derived | Re-inferring authority from latest observation on every read |
+| `CreepControlState` | Persisted observations plus derived runtime/decision fields | Server-owned state `{ status, startDay, triggerGrade, policyVersion }` persisted in SQLite | Control Transition Service | Observations are transition inputs, not a substitute for the persisted state | Recomputing `startDay` from the latest observation; UI/Agent/model mutation |
+| `RuntimeExecutionState` / runtime latches | Persisted observations plus derived runtime/decision fields | Explicit authoritative observations plus deterministic latch transitions persisted in SQLite | Observation / Runtime State Service | Read projections may derive from the persisted transition result | Treating omitted observation as normal; clearing a latch from another domain; latest-observation recomputation on read |
 | Daily record | JSON/Supabase snapshot records; SQLite observation payloads | Explicit Domain daily-record/observation contracts in SQLite | Record Observation service | Legacy records imported with source IDs and quarantine | UI recalculation or silent field loss |
 | Observation | Optional fields in SQLite `daily_observations`; legacy snapshot fields | Domain `Observation`, including observed vs not-observed state, in SQLite | Record Observation service | Legacy ambiguity is quarantined or explicitly mapped | Missing value coerced to normal/none |
 | Feeding decision | SQLite `feeding_decisions`; Supabase Agent/tool branches; legacy recommendations | Domain `FeedingDecision` in SQLite with frozen model/SOP evidence | Decision Application Service | Legacy decisions are immutable audit/import records | LLM, UI, Supabase, or JSON as decision authority |
-| Planned vs active decision | Planned/active/flat compatibility fields | Planned decision from frozen context; active decision only from explicit apply transaction in SQLite | Decision/Application services | UI may project `activeDecision ?? plannedDecision` | Treating planned or flat setting as applied authority |
+| Planned vs active decision | Planned/active/flat compatibility fields | `plannedDecision` and `activeDecision` remain separate; `activeDecision` exists only after an explicit apply transaction in SQLite | Decision/Application services | Any current, active, applied, device-setting, `执行中`, or `今日已应用` field derives only from `activeDecision`; without it the field is `null` or `not_applied` | Falling back from `activeDecision` to `plannedDecision`; treating planned or flat setting as applied authority |
 | Daily operation plan | SQLite operation plan/confirmation tables | Domain `DailyOperationPlan` in SQLite | Preview/Confirm Plan services | Existing records migrate without rewriting confirmation history | API handler or Agent direct persistence |
 | Operation amendment/override | SQLite amendments/action ledger | Domain `OperationAmendment` / `DeviceOverride` in SQLite | Amendment services with explicit confirmation | Existing digests and history preserved | Rewriting a confirmed base plan |
 | Device plan | Decision/operation JSON embedded in SQLite; legacy recommendation execution | Domain `DevicePlan` in SQLite, versioned and separately confirmable | Device Plan services | External device adapter is a consumer only | Agent/LLM direct device write or automatic control |
@@ -31,7 +38,7 @@ Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 | Business-day actual/execution total | Immutable observations and execution-state calculations; legacy snapshots | Deterministic business-day execution service over authoritative SQLite events | Record Feedback/Execution services | Cached summaries are derived | Latest zero, client aggregate, or snapshot overwriting history |
 | Agent session/message | SQLite local sessions/messages; Supabase message store branch; LangGraph checkpoints | SQLite Agent Repository for durable conversation evidence | Agent Application Service | Checkpoints are operational state, not business authority | Supabase production message writes |
 | Audit event | SQLite audit tables; legacy JSON/Supabase logs | Append-only SQLite audit repository | Application Services only | Legacy audit imported or archived, never rewritten | UI/Agent fabricating audit facts |
-| UI decision projection | Legacy pages calculate/read mixed fields; new UI reads Agent API | Read-only API projection of active decision, otherwise planned decision | Application query service | View models are disposable | UI feeding arithmetic or old flat fields as authority |
+| UI decision projection | Legacy pages calculate/read mixed fields; new UI reads Agent API | Read-only API projection that keeps applied state separate from preview state | Application query service | Optional preview may use `previewDecision` with `previewSource: "planned"` and `isApplied: false`; view models are disposable | Labeling a preview as current/active/applied; UI feeding arithmetic or old flat fields as authority |
 | Feeding Model rules | Root `feeding-model.js`, generated/minified artifact, V5 file, legacy backend wrappers, Python model | `packages/feeding-model` single TypeScript source + schema/version/golden vectors | Reviewed model release process | `dist`/Web/CJS are derived; Python and wrappers are experimental/legacy | Independently edited min/CJS/Python/legacy copies |
 | Feeding Model publication identity | Version string plus source/artifact hashes in runtime provenance | Versioned model publication manifest under `packages/feeding-model` | Model release process | Container/Web artifacts cite same source digest | Unversioned model load or digest mismatch |
 | SOP business rules/publication | Default TS template/engine; versioned Markdown docs; SQLite templates/publication; Supabase templates | `packages/sop` publication contract; active `published` identity/digest persisted in SQLite | SOP publication Application Service | Chroma index and rendered docs are derived | Draft/latest template used by production decision |

@@ -1,8 +1,14 @@
 # NBJ-ARCH-P2 Compatibility and Behavior-Freeze Contract
 
-Status: `REVIEW 0 PASS — checkpoint uncommitted`
+Status: `REVIEW 0 — CHANGES REQUIRED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+
+Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Remote branch: `nbj-arch-p2`
 
 ## 1. Compatibility rule
 
@@ -16,7 +22,10 @@ Passing typecheck or unit tests is insufficient. Compatibility is evaluated at c
 |---|---|
 | Feeding Model | Same accepted input domain, units, rounding, caps, control-start behavior, output fields, model version/digest, and deterministic result. |
 | Feeding Decision | Same selected/effective mode, powder amounts, meal/window schedule, evidence, fail-closed conditions, policy classification, and revision behavior. |
+| Decision application | Planned and active decisions remain separate. Current/active/applied/device-setting fields derive only from `activeDecision`; absent active state is `null` or `not_applied`. A planned preview is explicitly `previewDecision`, `previewSource: "planned"`, `isApplied: false`. |
 | Observation | Omitted/not-observed remains distinct from explicit normal/`none`; recorded value and timestamp provenance are preserved. |
+| Creep control | Persisted server-owned `CreepControlState { status, startDay, triggerGrade, policyVersion }` changes only through the Control Transition Service; `startDay` is never recomputed from the latest observation. |
+| Runtime execution/latches | Explicit authoritative observations drive deterministic latch transitions through the Observation / Runtime State Service; omission is not normal and one domain cannot clear another domain's latch. |
 | Diarrhea handling | Same severity contract, individual/manual/proposal classification, priority, explicit-none closure, and non-automatic application. |
 | Daily Operation Plan | Same business date, frozen SOP/model refs, operations digest, one complete confirmation contract, and confirmed-plan immutability. |
 | Amendment | Same origin uniqueness, digest, revision binding, confirmation/application state machine, audit, and idempotency. |

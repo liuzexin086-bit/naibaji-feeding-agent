@@ -1,10 +1,18 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `REVIEW 0 PASS — checkpoint uncommitted`
+Status: `REVIEW 0 — CHANGES REQUIRED`
+
+Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+
+Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Remote branch: `nbj-arch-p2`
 
 Captured: 2026-08-11
 
-Hash semantics: lowercase SHA-256 of Git blob bytes unless stated otherwise.
+Hash semantics: lowercase SHA-256 over raw committed file content bytes (as returned by `git show <ref>:<path>`), unless otherwise stated. These are not Git object IDs.
 
 ## 1. Immutable Git baseline
 
@@ -16,12 +24,14 @@ Hash semantics: lowercase SHA-256 of Git blob bytes unless stated otherwise.
 | Git tree | `fb345a916960a18e41fd4f93bd2f30cb182726e6` | `git rev-parse 'HEAD^{tree}'` |
 | P1 annotated tag | `nbj-execution-contract-p1-baseline-20260811` | Tag peels to the same commit/tree |
 | Annotated tag object | `0777f9b0d199ffa962796e4a234ec5ee11d3d452` (`tag`) | `git rev-parse <tag>` plus `git cat-file -t` |
-| P2 working branch | local `nbj-arch-p2` from `76187e1` | Branch created only after commit/tree equality check |
+| P2 remote branch | `nbj-arch-p2` | Remote review candidate is reachable from the named branch |
+| P2-0 review candidate/checkpoint | `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` | `git rev-parse fead997^{commit}` |
+| P2-0 checkpoint parent | `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` | `git rev-parse fead997^` |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
 
-P2-0 worktree policy permits only the four `docs/p2/` evidence documents before checkpoint review. At capture time there were no staged files and no runtime, schema, CI, lock, UI, model, or data changes.
+Checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` contains the four original `docs/p2/` contract documents and no runtime, schema, CI, lock, UI, model, or data changes. P2-0.1 is limited to correcting those documents and adding the independent Review 0 receipt.
 
 ## 2. Toolchain and dependency seal
 
@@ -94,7 +104,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Finding | Severity for P2-0 | Disposition |
 |---|---|---|
 | Agent development dependency audit reports 1 high + 1 critical; production-pruned image reports 0 | Non-blocking carryover | Enter P2 security/supply-chain review; do not rewrite P1 baseline. |
-| Main pushes do not match the workflow's current branch filter | Non-blocking carryover | P2 CI must cover target main/P2 branches before closure. |
+| `P2-001`: current workflow has no push trigger/run for `nbj-arch-p2` | Non-blocking for P2-0 docs; blocking before P2-1 source changes | Before any P2-1 runtime or Domain change, CI must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. Do not change CI in P2-0.1. |
 | Root CI smoke validates the legacy JSON backend | Architecture debt | Convert to migration/legacy fixture coverage before production-path removal. |
 | Supabase remains a compiled Agent backend and direct legacy UI path | Architecture debt | P2-5/P2-11 removal Gate. |
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
@@ -106,7 +116,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 
 ## 7. Evidence reproduction rules
 
-- Git artifact hashes must use committed blob bytes, not a CRLF-transformed Windows worktree.
+- Git artifact hashes must use raw committed file content bytes returned by `git show <ref>:<path>`, not a CRLF-transformed Windows worktree and not a Git object ID.
 - Runtime provenance must bind commit, schema, decision policy, source hashes, generated artifact hashes, and UI hash.
 - Database/SOP evidence must be captured from a read-only copy and include source SHA-256; secrets must never enter this manifest.
 - Generated files and ignored local workspaces are evidence only when recreated from the committed baseline by a documented command.

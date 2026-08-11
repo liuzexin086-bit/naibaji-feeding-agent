@@ -1,8 +1,14 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `REVIEW 0 PASS — checkpoint uncommitted`
+Status: `REVIEW 0 — CHANGES REQUIRED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+
+Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+
+Remote branch: `nbj-arch-p2`
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -183,18 +189,18 @@ Until then, `Architecture Unification Gate` is CLOSED.
 
 ## 11. Review 0 decision
 
-Independent Review 0 completed on 2026-08-11 after correcting canonical P0 identifiers and registering the chat explicit-none finding.
+Independent Review 0 examined checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` against baseline `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` on remote branch `nbj-arch-p2`. The verdict is `REQUEST CHANGES`; the full receipt is [nbj-arch-p2-review-0.md](./nbj-arch-p2-review-0.md).
 
 ```text
 P0-01..P0-04 Baseline Gates: OPEN / PASS
-P2-0 Review 0: PASS
-P2-0 Contract Gate: OPEN
+P2-0 Review 0: REQUEST CHANGES
+P2-0 Contract Gate: CLOSED
 
 P2-PRE-03: BLOCKED
 P2-F-001: OPEN BLOCKER
 P2-ED-001: REGISTERED / IMPLEMENTATION PENDING
 
-P2 Structural Implementation Authorization: OPEN, structural-only
+P2-1 Structural Implementation Authorization: CLOSED
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -203,4 +209,6 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
-The next implementation action still requires an explicit work authorization. This uncommitted P2-0 worktree is not an immutable checkpoint until it is reviewed by the user and committed.
+P2-0.1 may correct the Review 0 documentation findings only. It does not open the Contract Gate and cannot self-certify Review 0. A later independent review of the corrected checkpoint is required before P2-1 authorization can open.
+
+Before any P2-1 runtime or Domain change, CI triggers must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. The current workflow has no push run for `nbj-arch-p2`; this is finding `P2-001` and is intentionally not changed by this docs-only checkpoint.
