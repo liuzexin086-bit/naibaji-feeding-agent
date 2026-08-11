@@ -1,12 +1,14 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `REVIEW 0 — CHANGES REQUIRED`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
-Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+Historical Review 0 checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` — `REQUEST CHANGES`
 
-Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `PASS`
+
+Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
 
@@ -189,18 +191,20 @@ Until then, `Architecture Unification Gate` is CLOSED.
 
 ## 11. Review 0 decision
 
-Independent Review 0 examined checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` against baseline `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` on remote branch `nbj-arch-p2`. The verdict is `REQUEST CHANGES`; the full receipt is [nbj-arch-p2-review-0.md](./nbj-arch-p2-review-0.md).
+Independent Review 0 examined checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` and returned `REQUEST CHANGES`; that historical receipt remains [nbj-arch-p2-review-0.md](./nbj-arch-p2-review-0.md). A later independent re-review examined corrected checkpoint `fec5659a7f514201ea1f090cc2c7e9c02aeb57db`, confirmed its parent and exact five-file docs-only diff, and returned `PASS`; that receipt is [nbj-arch-p2-review-0-final.md](./nbj-arch-p2-review-0-final.md).
 
 ```text
 P0-01..P0-04 Baseline Gates: OPEN / PASS
-P2-0 Review 0: REQUEST CHANGES
-P2-0 Contract Gate: CLOSED
+P2-0 Review 0: PASS
+P2-0 Contract Gate: OPEN
 
 P2-PRE-03: BLOCKED
 P2-F-001: OPEN BLOCKER
 P2-ED-001: REGISTERED / IMPLEMENTATION PENDING
 
-P2-1 Structural Implementation Authorization: CLOSED
+P2-001: OPEN — PRE-P2-1 CI BLOCKER
+P2-1 CI Preflight Authorization: OPEN
+P2-1 Domain Implementation Authorization: CLOSED
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -209,6 +213,6 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
-P2-0.1 may correct the Review 0 documentation findings only. It does not open the Contract Gate and cannot self-certify Review 0. A later independent review of the corrected checkpoint is required before P2-1 authorization can open.
+This P2-0.2 Final Seal records the independent review of `fec5659a7f514201ea1f090cc2c7e9c02aeb57db`; it does not review or certify its own commit.
 
-Before any P2-1 runtime or Domain change, CI triggers must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. The current workflow has no push run for `nbj-arch-p2`; this is finding `P2-001` and is intentionally not changed by this docs-only checkpoint.
+The only authorized next action is CI preflight work to close `P2-001`: CI triggers must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. No P2-1 Domain or runtime implementation is authorized until that Gate closes. Separately, `P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.

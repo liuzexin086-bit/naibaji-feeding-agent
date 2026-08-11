@@ -1,12 +1,14 @@
 # NBJ-ARCH-P2 Compatibility and Behavior-Freeze Contract
 
-Status: `REVIEW 0 — CHANGES REQUIRED`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
-Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+Historical Review 0 checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` — `REQUEST CHANGES`
 
-Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `PASS`
+
+Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
 

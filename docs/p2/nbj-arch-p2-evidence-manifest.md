@@ -1,12 +1,14 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `REVIEW 0 — CHANGES REQUIRED`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
-Review candidate/checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
+Historical Review 0 checkpoint: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` — `REQUEST CHANGES`
 
-Checkpoint parent: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
+Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `PASS`
+
+Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
 
@@ -25,8 +27,10 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P1 annotated tag | `nbj-execution-contract-p1-baseline-20260811` | Tag peels to the same commit/tree |
 | Annotated tag object | `0777f9b0d199ffa962796e4a234ec5ee11d3d452` (`tag`) | `git rev-parse <tag>` plus `git cat-file -t` |
 | P2 remote branch | `nbj-arch-p2` | Remote review candidate is reachable from the named branch |
-| P2-0 review candidate/checkpoint | `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` | `git rev-parse fead997^{commit}` |
-| P2-0 checkpoint parent | `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` | `git rev-parse fead997^` |
+| P2-0 original review checkpoint | `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` | Independent Review 0: `REQUEST CHANGES` |
+| P2-0 original checkpoint parent | `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` | `git rev-parse fead997^` |
+| P2-0.1 corrected checkpoint | `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` | Independent re-review: `PASS` |
+| P2-0.1 corrected checkpoint parent | `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` | `git rev-parse fec5659^` |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -104,7 +108,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Finding | Severity for P2-0 | Disposition |
 |---|---|---|
 | Agent development dependency audit reports 1 high + 1 critical; production-pruned image reports 0 | Non-blocking carryover | Enter P2 security/supply-chain review; do not rewrite P1 baseline. |
-| `P2-001`: current workflow has no push trigger/run for `nbj-arch-p2` | Non-blocking for P2-0 docs; blocking before P2-1 source changes | Before any P2-1 runtime or Domain change, CI must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. Do not change CI in P2-0.1. |
+| `P2-001`: current workflow has no push trigger/run for `nbj-arch-p2` | Non-blocking for P2-0; blocking before P2-1 Domain/runtime changes | P2-1 CI Preflight Authorization is OPEN only to add coverage for pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. Domain/runtime authorization remains CLOSED. |
 | Root CI smoke validates the legacy JSON backend | Architecture debt | Convert to migration/legacy fixture coverage before production-path removal. |
 | Supabase remains a compiled Agent backend and direct legacy UI path | Architecture debt | P2-5/P2-11 removal Gate. |
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
@@ -130,3 +134,17 @@ An independent read-only prerequisite audit ran:
 - Targeted Agent suites (`observation-feedback`, `amendments`, `langgraph-runtime`): 56/56 PASS under local Node `24.16.0`.
 
 The targeted Node receipt is supplemental because it was not run under the frozen Node `24.18.0`; the exact-version remote P1 receipt remains run `31465609647`. The audit found `P2-F-001` by source-path review despite the existing suites being green, demonstrating the need for a new chat-endpoint regression.
+
+## 9. P2-0 Final Seal review receipt
+
+Independent re-review of remote branch `nbj-arch-p2` at `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` confirmed:
+
+- the remote branch matched the reviewed SHA;
+- `fec5659` had sole parent `fead997`;
+- the correction contained one commit and exactly five `docs/p2/*` changes;
+- P1-001 through P1-004 and P2-002 were closed;
+- no P0 or P1 finding was introduced;
+- `P2-001` remained open as a pre-P2-1 CI blocker;
+- `P2-F-001` / `P2-ED-001` remained open as a P2 Merge blocker.
+
+Verdict: `P2-0.1 PASS`. This Final Seal records that independent verdict and does not self-review its own commit.
