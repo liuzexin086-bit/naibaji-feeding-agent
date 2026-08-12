@@ -230,3 +230,43 @@ persistence, `P2-1-F02` temporary dual Domain models, `P2-1-F03` development
 dependency audit with 1 high and 1 critical versus 0 in the production-pruned
 image, and `P2-1-F04` Actions Node20 deprecation. No P2-2 implementation is
 included or authorized by this seal beyond its boundary authorization.
+
+## 13. P2-2A Observation Persistence Round-trip
+
+```text
+P2-2 Implementation: COMPLETE / REVIEW PENDING
+P2-2 Gate: CLOSED
+P2-2A Observation Persistence Round-trip: IMPLEMENTED / INDEPENDENT ACCEPTANCE PENDING
+P2-ED-001: IMPLEMENTED THROUGH PERSISTENCE / ACCEPTANCE PENDING
+P2-F-001: OPEN
+P2-PRE-03: BLOCKED
+```
+
+P2-2A implementation is limited to a dependency-direction-safe persistence
+contract, pure legacy JSON codec, and SQLite adapter over the existing
+`daily_observations` table. It does not add a table, migration, API route,
+LangGraph integration, UI path, model/SOP rule, or legacy removal.
+
+The adapter encodes `not_observed` by omission and observed values—including
+explicit diarrhea `none`—as their value. Invalid owned values fail closed and
+are returned as quarantine entries on list; non-authoritative legacy metadata is
+not treated as an observation field. Acceptance requires the real temporary
+SQLite close/reopen evidence recorded by the P2-2A test suite.
+
+Local implementation evidence (not an independent acceptance verdict):
+
+| Check | Result |
+|---|---|
+| `npm run check` | PASS |
+| `npm run p2-2-persistence-gate` | PASS — 4 files / 7 tests |
+| P2-2A SQLite round-trip | PASS — temporary SQLite close/reopen preserved omitted diarrhea, explicit `none`, mild, powder `null`, and powder `0`; invalid legacy row was quarantined |
+| `npm test` | PASS — 51 files / 392 tests |
+| `npm run p2-1-domain-gate` | PASS — 9 files / 19 tests |
+| `npm run p0-release-gate` | PASS — 7 files / 100 tests |
+| `npm run p1-safety-gate` | PASS — 16 files / 194 tests |
+| `npm run build` | PASS |
+| `git diff --check` | PASS |
+
+These results establish implementation evidence only. P2-2A acceptance and
+independent review remain pending; `P2-F-001` remains OPEN and `P2-PRE-03`
+remains BLOCKED. No later P2 gate is opened by this evidence.

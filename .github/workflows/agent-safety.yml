@@ -56,6 +56,10 @@ jobs:
         working-directory: agent
         run: npm run p2-1-domain-gate
 
+      - name: P2-2 Persistence gate
+        working-directory: agent
+        run: npm run p2-2-persistence-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

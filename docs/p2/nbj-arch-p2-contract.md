@@ -209,7 +209,7 @@ P2-0 Contract Gate: OPEN
 
 P2-PRE-03: BLOCKED
 P2-F-001: OPEN BLOCKER
-P2-ED-001: PARTIALLY ACCEPTED — CHAT/DOMAIN FIX VERIFIED; PERSISTENCE ACCEPTANCE PENDING
+P2-ED-001: IMPLEMENTED THROUGH PERSISTENCE / ACCEPTANCE PENDING
 
 P2-001: CLOSED — CI PREFLIGHT PASS
 P2-1 CI Preflight: PASS
@@ -217,6 +217,9 @@ P2-1 Implementation: PASS
 P2-1 Independent Review: PASS
 P2-1 Gate: OPEN
 P2-2 Persistence Boundary Authorization: OPEN
+P2-2 Implementation: COMPLETE / REVIEW PENDING
+P2-2 Gate: CLOSED
+P2-2A Observation Persistence Round-trip: IMPLEMENTED / INDEPENDENT ACCEPTANCE PENDING
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -237,7 +240,10 @@ deployment, tagging, optimizer production, or real device control stages. Separa
 `P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.
 
 P2-1 Domain checkpoint status: implementation and independent review PASS; the
-Chat/Domain portion of `P2-ED-001` is verified. Persistence acceptance remains
-pending under the authorized P2-2 boundary. `P2-F-001` remains OPEN,
+Chat/Domain portion of `P2-ED-001` is verified. P2-2A implementation is complete
+and awaiting independent acceptance. It is limited
+to the existing `daily_observations` table and repository/codec round-trip
+evidence; persistence acceptance remains pending under the authorized P2-2
+boundary. `P2-F-001` remains OPEN,
 `P2-PRE-03` remains BLOCKED, and the Merge Gate remains CLOSED. Findings
 `P2-1-F01` through `P2-1-F04` are non-blocking and recorded in the Final Review Seal.

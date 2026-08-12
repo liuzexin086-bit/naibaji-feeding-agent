@@ -27,6 +27,7 @@ describe("CI contract", () => {
       "npm run check",
       "npm test",
       "npm run p2-1-domain-gate",
+      "npm run p2-2-persistence-gate",
       "npm run p0-release-gate",
       "npm run p1-safety-gate",
       "npm run build",
@@ -46,6 +47,7 @@ describe("CI contract", () => {
     expect(workflow).toContain("scripts/ci-runtime-check.mjs");
     expect(workflow).toContain("docker compose -f agent/docker/compose.local.yaml config --quiet");
     expect(workflow).toContain("P2-1 Domain gate");
+    expect(workflow).toContain("P2-2 Persistence gate");
   });
 
   it("verifies runtime provenance against image files and UI markers", () => {
