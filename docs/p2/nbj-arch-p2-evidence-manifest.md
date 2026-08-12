@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-1 IMPLEMENTATION REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-1 GATE OPEN`
+Status: `P2-2A REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-2A GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -15,6 +15,8 @@ Remote branch: `nbj-arch-p2`
 CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
 
 P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-final.md)
+
+P2-2A Final Review Seal: [nbj-arch-p2-review-2a-final.md](./nbj-arch-p2-review-2a-final.md)
 
 Captured: 2026-08-11
 
@@ -38,6 +40,9 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-1 reviewed implementation checkpoint | `edbe4335f8436abdd2084776fecaf4dc9e22cff2` | Independent P2-1 review: `PASS WITH NON-BLOCKING FINDINGS` |
 | P2-1 reviewed checkpoint parent | `b861e2c8f9e1c462a67b26fe0b32e0cfb29852a8` | Exact parent supplied with the review verdict |
 | P2-1 remote CI | run `31558952869`, `agent-safety`, success | Exact reviewed checkpoint CI evidence |
+| P2-2A reviewed implementation checkpoint | `865db7b2f3840aca716d7003984373e921da1756` | Independent P2-2A review: `PASS WITH NON-BLOCKING FINDINGS` |
+| P2-2A reviewed checkpoint parent | `1e85f994d441b034ae6dfde65e89ba1ec3d46c27` | Exact reviewed parent |
+| P2-2A remote CI | run `31571087260`, `agent-safety`, success | Exact reviewed checkpoint CI evidence including the P2-2 Persistence gate |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -121,7 +126,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
 | Active production DB and active published SOP are environment data, not committed fixtures | Evidence gap | Capture sanitized, hashed fixtures before migration implementation. |
 | No registry-published immutable Docker digest exists for the ephemeral P1 images | Evidence limitation | Rebuild from baseline and prove runtime provenance; do not claim pullability. |
-| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | P1 / P2 Merge blocker | Independent P2-1 review verified the Chat/Domain fix and closure evidence; persistence acceptance remains pending under `P2-ED-001`, so this Merge blocker remains OPEN. |
+| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | CLOSED by P2-2A | Independent P2-2A review accepted the complete Chat/API/Domain/repository/SQLite close-reopen evidence chain; `P2-ED-001` is CLOSED and `P2-PRE-03` is PASS. |
 | Actual operator deployment path and live authority are not repository-verifiable | Evidence gap | P1 Docker is the reviewed canonical contract, but Electron/legacy UI and an ignored nested D1 repository exist locally. Capture deployment inventory and read-only data-source snapshots before migration. |
 | Electron passes `?api=` to root `index.html`, but no consumer was found in that file | Legacy integration ambiguity | Treat the handoff as legacy/unresolved; do not infer that JSON backend and legacy UI are correctly integrated. |
 
@@ -267,6 +272,49 @@ Local implementation evidence (not an independent acceptance verdict):
 | `npm run build` | PASS |
 | `git diff --check` | PASS |
 
-These results establish implementation evidence only. P2-2A acceptance and
-independent review remain pending; `P2-F-001` remains OPEN and `P2-PRE-03`
-remains BLOCKED. No later P2 gate is opened by this evidence.
+These local results were subsequently accepted by the independent P2-2A review
+recorded below. P2-2 overall remains in progress and no Runtime/Cutover or later
+Gate is opened by this evidence.
+
+## 14. P2-2A Final Review Seal
+
+Independent review of checkpoint `865db7b2f3840aca716d7003984373e921da1756`
+(parent `1e85f994d441b034ae6dfde65e89ba1ec3d46c27`) returned
+`PASS WITH NON-BLOCKING FINDINGS`. Remote [agent-safety run 31571087260](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31571087260)
+executed that exact SHA via `push` and completed successfully, including the new
+P2-2 Persistence gate and every pre-existing safety, build, image, Compose, and
+runtime-provenance/UI-E2E step.
+
+```text
+P2-2A Implementation: PASS
+P2-2A Independent Review: PASS
+P2-2A Gate: OPEN
+
+P2-ED-001: CLOSED — ACCEPTED
+P2-F-001: CLOSED
+P2-PRE-03: PASS
+
+P2-2 overall: IN PROGRESS
+P2-2B Repository Extraction Authorization: OPEN
+
+P2 Merge Gate: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+Non-blocking findings carried into P2-2B are:
+
+- `P2-2-F01`: the persistence port still references the legacy
+  `shared/local-store-contract.ts` input/row types;
+- `P2-2-F02`: the persistence architecture scanner currently scans only
+  top-level `src/persistence/*.ts` files and must become recursive before the
+  directory is split;
+- `P2-2-F03`: Domain-owned observation fields are intentionally not a drop-in
+  replacement for legacy UI/runtime metadata; metadata ownership must be made
+  explicit before Application/Persistence cutover.
+
+These findings do not reopen the accepted explicit-none semantic chain. They do
+keep P2-2 in progress and every Runtime/Cutover or later Gate CLOSED.
