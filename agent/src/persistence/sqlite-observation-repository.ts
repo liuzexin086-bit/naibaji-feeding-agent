@@ -1,4 +1,5 @@
 import {
+  cloneObservationPayload,
   domainObservationToLegacyPayload,
   legacyObservationToDomain,
 } from "./observation-codec.js";
@@ -7,6 +8,7 @@ import type {
   ObservationRepository,
   ObservationRepositoryEntry,
   ObservationStorePort,
+  ObservationStoreRow,
   PersistedObservation,
   QuarantinedObservation,
 } from "./contracts.js";
@@ -24,7 +26,7 @@ export class SqliteObservationRepository implements ObservationRepository {
       batchRevision: input.batchRevision,
       id: input.id ?? input.observation.id,
       idempotencyKey: input.idempotencyKey,
-      data: domainObservationToLegacyPayload(input.observation),
+      data: domainObservationToLegacyPayload(input.observation, input.raw),
     });
     return this.decode(row);
   }
@@ -39,7 +41,7 @@ export class SqliteObservationRepository implements ObservationRepository {
           id: row.id,
           userId: row.userId,
           batchId: row.batchId,
-          raw: { ...row.data },
+          raw: cloneObservationPayload(row.data),
           reason: error instanceof Error ? error.message : "PERSISTENCE_OBSERVATION_INVALID",
         };
         return quarantine;
@@ -47,10 +49,11 @@ export class SqliteObservationRepository implements ObservationRepository {
     });
   }
 
-  private decode(row: ReturnType<ObservationStorePort["listObservations"]>[number]): PersistedObservation {
+  private decode(row: ObservationStoreRow): PersistedObservation {
+    const raw = cloneObservationPayload(row.data);
     const observation = legacyObservationToDomain({
-      ...row.data,
-      ...(row.data.recordedAt === undefined ? { recordedAt: row.observedAt } : {}),
+      ...raw,
+      ...(raw.recordedAt === undefined ? { recordedAt: row.observedAt } : {}),
     });
     return {
       id: row.id,
@@ -60,6 +63,7 @@ export class SqliteObservationRepository implements ObservationRepository {
       observedAt: row.observedAt,
       batchRevision: row.batchRevision,
       observation,
+      raw,
       idempotencyKey: row.idempotencyKey,
       createdAt: row.createdAt,
     };

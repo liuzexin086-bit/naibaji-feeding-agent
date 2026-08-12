@@ -51,6 +51,11 @@ import {
   materializeObservationFeedbackPlan,
   proposalToDeviceSetting,
 } from "../operations/observation-feedback.js";
+import type {
+  ObservationStoreInput,
+  ObservationStorePort,
+  ObservationStoreRow,
+} from "../persistence/contracts.js";
 
 type Row = Record<string, unknown>;
 
@@ -3994,6 +3999,52 @@ export class SqliteLocalStore implements LocalStore {
 
 export function createLocalStore(options: LocalStoreOptions): LocalStore {
   return new SqliteLocalStore(options);
+}
+
+/**
+ * Narrow translation seam for the persistence repository. The LocalStore
+ * remains the compatibility surface for existing callers; only this adapter
+ * exposes observation rows/inputs owned by Persistence.
+ */
+export function asObservationStorePort(store: LocalStore): ObservationStorePort {
+  return {
+    appendDailyObservation(input: ObservationStoreInput): ObservationStoreRow {
+      const row = store.appendDailyObservation({
+        userId: input.userId,
+        batchId: input.batchId,
+        dateLocal: input.dateLocal,
+        observedAt: input.observedAt,
+        batchRevision: input.batchRevision,
+        data: input.data,
+        id: input.id,
+        idempotencyKey: input.idempotencyKey,
+      });
+      return {
+        id: row.id,
+        userId: row.userId,
+        batchId: row.batchId,
+        dateLocal: row.dateLocal,
+        observedAt: row.observedAt,
+        batchRevision: row.batchRevision,
+        data: { ...row.data },
+        idempotencyKey: row.idempotencyKey,
+        createdAt: row.createdAt,
+      };
+    },
+    listObservations(userId: string, batchId: string): ObservationStoreRow[] {
+      return store.listObservations(userId, batchId).map((row) => ({
+        id: row.id,
+        userId: row.userId,
+        batchId: row.batchId,
+        dateLocal: row.dateLocal,
+        observedAt: row.observedAt,
+        batchRevision: row.batchRevision,
+        data: { ...row.data },
+        idempotencyKey: row.idempotencyKey,
+        createdAt: row.createdAt,
+      }));
+    },
+  };
 }
 
 export type {

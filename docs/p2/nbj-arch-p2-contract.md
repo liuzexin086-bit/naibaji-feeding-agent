@@ -18,6 +18,8 @@ P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-f
 
 P2-2A Final Review Seal: [nbj-arch-p2-review-2a-final.md](./nbj-arch-p2-review-2a-final.md)
 
+P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nbj-arch-p2-2b-repository-boundary.md)
+
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
 Date: 2026-08-11
@@ -251,3 +253,11 @@ chain and closed `P2-ED-001`, `P2-F-001`, and `P2-PRE-03`. P2-2 remains in
 progress: P2-2B may extract repository boundaries, while Runtime/Cutover and all
 later Gates remain CLOSED. Findings `P2-2-F01` through `P2-2-F03` are
 non-blocking and recorded in the P2-2A Final Review Seal.
+
+P2-2B implementation evidence is recorded in the Repository Boundary Evidence
+document. It closes the implementation findings `P2-2-F01` through `P2-2-F03`
+for review: persistence contracts no longer import legacy LocalStore types, the
+architecture scanner is recursive, and raw metadata ownership/overlay/quarantine
+semantics are explicit. Independent review is still required before any P2-2
+Gate status changes. Runtime/Cutover, Compose Replacement, Merge, and all later
+Gates remain CLOSED.

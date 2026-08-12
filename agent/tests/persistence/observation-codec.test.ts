@@ -40,4 +40,36 @@ describe("observation persistence codec", () => {
     expect(() => legacyObservationToDomain({ actualPowderGrams: "not-a-number" }))
       .toThrow("PERSISTENCE_OBSERVATION_INVALID");
   });
+
+  it("overlays Domain-owned keys on a cloned raw payload without replacing metadata", () => {
+    const raw = {
+      dayIndex: 2,
+      effectiveHeads: 20,
+      diarrheaGrade: "mild",
+      actualPowderGrams: 12,
+      uiMetadata: { source: "legacy-console" },
+    };
+    const observation = parseObservation({ diarrheaGrade: "none", actualPowderGrams: null });
+    const encoded = domainObservationToLegacyPayload(observation, raw);
+
+    expect(encoded).toEqual({
+      dayIndex: 2,
+      effectiveHeads: 20,
+      diarrheaGrade: "none",
+      actualPowderGrams: null,
+      uiMetadata: { source: "legacy-console" },
+    });
+    expect(raw).toEqual({
+      dayIndex: 2,
+      effectiveHeads: 20,
+      diarrheaGrade: "mild",
+      actualPowderGrams: 12,
+      uiMetadata: { source: "legacy-console" },
+    });
+    expect(encoded.uiMetadata).not.toBe(raw.uiMetadata);
+    expect(legacyObservationToDomain(encoded).diarrheaGrade).toEqual({
+      kind: "observed",
+      value: "none",
+    });
+  });
 });

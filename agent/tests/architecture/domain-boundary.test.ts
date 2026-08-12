@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const domainRoot = resolve(import.meta.dirname, "../../src/domain");
-const forbidden = /(?:from\s+["'](?:node:|[^"']*(?:container|local-db|sqlite|langgraph|langchain|react|supabase|openai|anthropic|llm|ui|legacy|optimizer)[^"']*)["']|import\s*\(\s*["'](?:node:|[^"']*(?:container|local-db|sqlite|langgraph|langchain|react|supabase|openai|anthropic|llm|ui|legacy|optimizer)[^"']*)["']\s*\))/i;
+const forbidden = /(?:from\s+["'](?:node:|[^"']*(?:container|local-db|sqlite|persistence|langgraph|langchain|react|supabase|openai|anthropic|llm|ui|legacy|optimizer)[^"']*)["']|import\s*\(\s*["'](?:node:|[^"']*(?:container|local-db|sqlite|persistence|langgraph|langchain|react|supabase|openai|anthropic|llm|ui|legacy|optimizer)[^"']*)["']\s*\)\))/i;
 
 describe("domain architecture boundary", () => {
   it("keeps the Domain dependency-free from transport, persistence, UI and providers", () => {

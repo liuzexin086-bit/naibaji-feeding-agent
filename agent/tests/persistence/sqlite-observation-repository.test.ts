@@ -3,7 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLocalStore } from "../../src/local-db/index.js";
+import { asObservationStorePort, createLocalStore } from "../../src/local-db/index.js";
 import { parseObservation } from "../../src/domain/observation.js";
 import { SqliteObservationRepository } from "../../src/persistence/sqlite-observation-repository.js";
 import type { ObservationRepositoryEntry, PersistedObservation } from "../../src/persistence/contracts.js";
@@ -30,7 +30,7 @@ describe("SQLite observation repository", () => {
     const firstStore = createLocalStore({ filename });
     firstStore.migrate();
     firstStore.createBatch({ userId: "user-a", batchId: "batch-1", revision: 0 });
-    const firstRepository = new SqliteObservationRepository(firstStore);
+    const firstRepository = new SqliteObservationRepository(asObservationStorePort(firstStore));
     const observations = [
       parseObservation({ actualPowderGrams: null }),
       parseObservation({ diarrheaGrade: "none", actualPowderGrams: null }),
@@ -44,6 +44,17 @@ describe("SQLite observation repository", () => {
         batchRevision: 0,
         observation,
         idempotencyKey: `observation-${index}`,
+        ...(index === 1
+          ? {
+              raw: {
+                dayIndex: 2,
+                effectiveHeads: 20,
+                diarrheaGrade: "mild",
+                actualPowderGrams: 99,
+                uiMetadata: { source: "legacy-console" },
+              },
+            }
+          : {}),
       });
     });
     firstStore.close();
@@ -51,7 +62,7 @@ describe("SQLite observation repository", () => {
     const reopenedStore = createLocalStore({ filename });
     reopenedStore.migrate();
     try {
-      const entries = new SqliteObservationRepository(reopenedStore).list("user-a", "batch-1");
+      const entries = new SqliteObservationRepository(asObservationStorePort(reopenedStore)).list("user-a", "batch-1");
       const rows = persisted(entries);
       const byKey = new Map(rows.map((row) => [row.idempotencyKey, row]));
       expect(entries).toHaveLength(3);
@@ -60,6 +71,14 @@ describe("SQLite observation repository", () => {
       expect(byKey.get("observation-2")?.observation.diarrheaGrade).toEqual({ kind: "observed", value: "mild" });
       expect(byKey.get("observation-0")?.observation.actualPowderGrams).toBeNull();
       expect(byKey.get("observation-2")?.observation.actualPowderGrams).toBe(0);
+      expect(byKey.get("observation-1")?.raw).toEqual({
+        dayIndex: 2,
+        effectiveHeads: 20,
+        diarrheaGrade: "none",
+        actualPowderGrams: null,
+        recordedAt: byKey.get("observation-1")?.observedAt,
+        uiMetadata: { source: "legacy-console" },
+      });
     } finally {
       reopenedStore.close();
     }
@@ -84,19 +103,23 @@ describe("SQLite observation repository", () => {
       "2026-08-12",
       "2026-08-12T01:00:00.000Z",
       0,
-      JSON.stringify({ diarrheaGrade: "invented", actualPowderGrams: 0 }),
+      JSON.stringify({ diarrheaGrade: "invented", actualPowderGrams: 0, source: "legacy" }),
       "invalid-observation-key",
       "2026-08-12T01:00:00.000Z",
     );
     database.close();
     const reopened = createLocalStore({ filename });
     reopened.migrate();
-    const entries = new SqliteObservationRepository(reopened).list("user-a", "batch-1");
-    expect(entries).toEqual([expect.objectContaining({
-      kind: "quarantine",
-      id: "invalid-observation",
-      reason: "PERSISTENCE_OBSERVATION_INVALID",
-    })]);
-    reopened.close();
+    try {
+      const entries = new SqliteObservationRepository(asObservationStorePort(reopened)).list("user-a", "batch-1");
+      expect(entries).toEqual([expect.objectContaining({
+        kind: "quarantine",
+        id: "invalid-observation",
+        reason: "PERSISTENCE_OBSERVATION_INVALID",
+        raw: { diarrheaGrade: "invented", actualPowderGrams: 0, source: "legacy" },
+      })]);
+    } finally {
+      reopened.close();
+    }
   });
 });

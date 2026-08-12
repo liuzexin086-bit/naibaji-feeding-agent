@@ -18,6 +18,8 @@ P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-f
 
 P2-2A Final Review Seal: [nbj-arch-p2-review-2a-final.md](./nbj-arch-p2-review-2a-final.md)
 
+P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nbj-arch-p2-2b-repository-boundary.md)
+
 Captured: 2026-08-11
 
 Hash semantics: lowercase SHA-256 over raw committed file content bytes (as returned by `git show <ref>:<path>`), unless otherwise stated. These are not Git object IDs.
@@ -318,3 +320,23 @@ Non-blocking findings carried into P2-2B are:
 
 These findings do not reopen the accepted explicit-none semantic chain. They do
 keep P2-2 in progress and every Runtime/Cutover or later Gate CLOSED.
+
+## 15. P2-2B Repository Extraction Implementation Evidence
+
+The implementation checkpoint remains within the authorized Repository
+Extraction scope and has not changed schema, migration, API, Application,
+Agent, UI, LangGraph, model, SOP, Compose, JSON/Supabase, or device-control
+paths. The local evidence is:
+
+| Check | Result |
+|---|---|
+| Persistence-owned contracts | PASS — no imports from `shared/local-store-contract.ts`; LocalStore compatibility is isolated behind `asObservationStorePort`. |
+| Recursive architecture scan | PASS — every `.ts` below `src/persistence/**` is scanned in deterministic order; nested forbidden-import fixture fails as expected. |
+| Metadata boundary | PASS — Domain projection, cloned raw envelope, Domain-owned collision overlay, unknown metadata retention, and untouched quarantine payload are documented and tested. |
+| Explicit-none freeze | PASS — omitted diarrhea remains `not_observed`; explicit `none` remains observed `none`; powder `null` remains distinct from zero. |
+| `npm run check` | PASS |
+| `npm run p2-2-persistence-gate` | PASS — 4 files / 9 tests |
+
+This is implementation evidence only; independent P2-2B review is pending.
+P2-2 overall remains in progress. P2-2B does not open Runtime/Cutover,
+Compose Replacement, Merge, or any later Gate.
