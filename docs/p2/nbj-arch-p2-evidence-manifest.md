@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-2A REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-2A GATE OPEN`
+Status: `P2-2 REVIEW PASS — P2-2 GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -19,6 +19,8 @@ P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-f
 P2-2A Final Review Seal: [nbj-arch-p2-review-2a-final.md](./nbj-arch-p2-review-2a-final.md)
 
 P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nbj-arch-p2-2b-repository-boundary.md)
+
+P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
 Captured: 2026-08-11
 
@@ -45,6 +47,9 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-2A reviewed implementation checkpoint | `865db7b2f3840aca716d7003984373e921da1756` | Independent P2-2A review: `PASS WITH NON-BLOCKING FINDINGS` |
 | P2-2A reviewed checkpoint parent | `1e85f994d441b034ae6dfde65e89ba1ec3d46c27` | Exact reviewed parent |
 | P2-2A remote CI | run `31571087260`, `agent-safety`, success | Exact reviewed checkpoint CI evidence including the P2-2 Persistence gate |
+| P2-2B reviewed implementation checkpoint | `ae4edf7c209ec951d6d13dad0df47e3cf0ad9c1e` | Independent P2-2B review: `PASS` |
+| P2-2B reviewed checkpoint parent | `b4b1921858aac464ce1382594cd1825a37bf780c` | Exact reviewed parent |
+| P2-2B remote CI | run `31581143939`, `agent-safety`, success | Exact reviewed checkpoint CI evidence; full suite was 393 passed / 1 skipped / 394 total |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -337,6 +342,54 @@ paths. The local evidence is:
 | `npm run check` | PASS |
 | `npm run p2-2-persistence-gate` | PASS — 4 files / 9 tests |
 
-This is implementation evidence only; independent P2-2B review is pending.
-P2-2 overall remains in progress. P2-2B does not open Runtime/Cutover,
-Compose Replacement, Merge, or any later Gate.
+This implementation evidence was subsequently accepted by the independent
+P2-2B review recorded below. The review closes P2-2 without opening
+Runtime/Cutover, Compose Replacement, Merge, or other later Gates.
+
+## 16. P2-2B / P2-2 Final Review Seal
+
+Independent review of checkpoint `ae4edf7c209ec951d6d13dad0df47e3cf0ad9c1e`
+(parent `b4b1921858aac464ce1382594cd1825a37bf780c`) returned `PASS`.
+Remote [agent-safety run 31581143939](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31581143939)
+executed that exact SHA via `push` and completed successfully. Typecheck, the
+full suite (`393 passed / 1 skipped / 394 total`), P2-1 Domain, P2-2
+Persistence, P0, P1, build, clean-source, image builds, Compose config, and
+runtime-provenance/UI-E2E all passed.
+
+The independent review confirmed that Persistence contracts no longer depend on
+legacy LocalStore types (`P2-2-F01`), recursive architecture enforcement covers
+nested dependencies (`P2-2-F02`), and the Domain/Persistence/opaque-metadata
+ownership boundary is explicit and lossless (`P2-2-F03`). No schema, migration,
+API, Application, LangGraph, UI, model, SOP, Compose, runtime cutover, optimizer,
+or device-control change was present. The P2-2A explicit-none semantics remain
+frozen.
+
+```text
+P2-2A Implementation: PASS
+P2-2A Independent Review: PASS
+P2-2A Gate: OPEN
+
+P2-2B Implementation: PASS
+P2-2B Independent Review: PASS
+P2-2B Gate: OPEN
+
+P2-2-F01: CLOSED
+P2-2-F02: CLOSED
+P2-2-F03: CLOSED
+
+P2-2 Persistence Boundary: PASS
+P2-2 Gate: OPEN
+
+P2-3 Migration Ledger Authorization: OPEN
+
+P2 Merge Gate: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+This docs-only seal records the independent verdict and does not certify its own
+commit. P2-2 is complete and there is no P2-2C. P2-3 implementation is not part
+of this checkpoint.

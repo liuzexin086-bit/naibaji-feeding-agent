@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-2A REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-2A GATE OPEN`
+Status: `P2-2 REVIEW PASS — P2-2 GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -19,6 +19,8 @@ P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-f
 P2-2A Final Review Seal: [nbj-arch-p2-review-2a-final.md](./nbj-arch-p2-review-2a-final.md)
 
 P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nbj-arch-p2-2b-repository-boundary.md)
+
+P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -226,8 +228,20 @@ P2-2 Persistence Boundary Authorization: OPEN
 P2-2A Implementation: PASS
 P2-2A Independent Review: PASS
 P2-2A Gate: OPEN
-P2-2 overall: IN PROGRESS
-P2-2B Repository Extraction Authorization: OPEN
+
+P2-2B Implementation: PASS
+P2-2B Independent Review: PASS
+P2-2B Gate: OPEN
+
+P2-2-F01: CLOSED
+P2-2-F02: CLOSED
+P2-2-F03: CLOSED
+
+P2-2 Persistence Boundary: PASS
+P2-2 Gate: OPEN
+
+P2-3 Migration Ledger Authorization: OPEN
+
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -242,22 +256,22 @@ CI preflight commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` added push covera
 
 P2-1 Domain implementation and independent review have passed. P2-2A independently
 proved the accepted Domain contract through repository, SQLite, reload, and Domain
-round-trip behavior. P2-2B is authorized only for Repository Extraction within the
-Persistence Boundary, including closing `P2-2-F01` through `P2-2-F03`. This does not
-authorize Application, Agent, UI, runtime/cutover, Compose replacement, merge,
-deployment, tagging, optimizer production, or real device control stages.
+round-trip behavior. P2-2B independently closed `P2-2-F01` through `P2-2-F03`,
+so the P2-2 Persistence Boundary and P2-2 Gate are OPEN. P2-3 Migration Ledger
+is the next authorized stage. This does not authorize Application, Agent, UI,
+runtime/cutover, Compose replacement, merge, deployment, tagging, optimizer
+production, or real device control stages.
 
-P2-1 Domain checkpoint status: implementation and independent review PASS; the
+P2-1 Domain checkpoint status is implementation and independent review PASS.
 The independent P2-2A review accepted the complete observation-presence evidence
-chain and closed `P2-ED-001`, `P2-F-001`, and `P2-PRE-03`. P2-2 remains in
-progress: P2-2B may extract repository boundaries, while Runtime/Cutover and all
-later Gates remain CLOSED. Findings `P2-2-F01` through `P2-2-F03` are
-non-blocking and recorded in the P2-2A Final Review Seal.
+chain and closed `P2-ED-001`, `P2-F-001`, and `P2-PRE-03`. The independent
+P2-2B review then closed `P2-2-F01` through `P2-2-F03` without reopening the
+explicit-none semantics. Runtime/Cutover, Compose Replacement, Merge, and other
+later Gates remain CLOSED.
 
 P2-2B implementation evidence is recorded in the Repository Boundary Evidence
-document. It closes the implementation findings `P2-2-F01` through `P2-2-F03`
-for review: persistence contracts no longer import legacy LocalStore types, the
+document and its independent PASS is sealed by the P2-2B / P2-2 Final Review
+Seal. Persistence contracts no longer import legacy LocalStore types, the
 architecture scanner is recursive, and raw metadata ownership/overlay/quarantine
-semantics are explicit. Independent review is still required before any P2-2
-Gate status changes. Runtime/Cutover, Compose Replacement, Merge, and all later
-Gates remain CLOSED.
+semantics are explicit. P2-2 is complete; there is no P2-2C. P2-3 Migration
+Ledger Authorization is OPEN, but no P2-3 implementation is included here.
