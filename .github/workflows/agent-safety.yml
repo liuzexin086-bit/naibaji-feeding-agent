@@ -52,6 +52,10 @@ jobs:
         working-directory: agent
         run: npm test
 
+      - name: P2-1 Domain gate
+        working-directory: agent
+        run: npm run p2-1-domain-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

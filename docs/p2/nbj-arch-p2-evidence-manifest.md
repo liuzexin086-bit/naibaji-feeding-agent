@@ -116,7 +116,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
 | Active production DB and active published SOP are environment data, not committed fixtures | Evidence gap | Capture sanitized, hashed fixtures before migration implementation. |
 | No registry-published immutable Docker digest exists for the ephemeral P1 images | Evidence limitation | Rebuild from baseline and prove runtime provenance; do not claim pullability. |
-| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | P1 / P2 Merge blocker | `server.ts` emits no `diarrheaGrade` for `none`; the chat tool therefore cannot close an earlier event from current chat context. Resolve through `P2-ED-001` or remove chat observation authority, then add endpoint regression coverage. |
+| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | P1 / P2 Merge blocker | Local P2-1 projection and real `/api/feeding-agent/chat` regression now retain explicit `none`, distinguish omission, and fail closed for invalid selected fields; preview/sync closure tests cover prior moderate state. Independent acceptance is pending, so this Merge blocker remains OPEN. |
 | Actual operator deployment path and live authority are not repository-verifiable | Evidence gap | P1 Docker is the reviewed canonical contract, but Electron/legacy UI and an ignored nested D1 repository exist locally. Capture deployment inventory and read-only data-source snapshots before migration. |
 | Electron passes `?api=` to root `index.html`, but no consumer was found in that file | Legacy integration ambiguity | Treat the handoff as legacy/unresolved; do not infer that JSON backend and legacy UI are correctly integrated. |
 
@@ -163,3 +163,39 @@ CI preflight commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` has sole parent `
 GitHub Actions push run [`31550812177`](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31550812177) executed exact head SHA `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` and completed with conclusion `success`. All safety-job steps passed, including the root smoke test, optimizer tests, Agent typecheck/tests, P0 release gate, P1 safety gate, builds, clean-source gate, image builds, Compose config, and runtime provenance/UI E2E.
 
 Verdict: `P2-001 CLOSED — CI PREFLIGHT PASS`. P2-1 Domain implementation is authorized; subsequent stage Gates remain unchanged.
+
+## 11. P2-1 Domain checkpoint evidence
+
+The P2-1 Domain checkpoint adds framework-free contracts under `agent/src/domain/` for
+observations, runtime latches, creep control, planned/active decisions, and operation
+state transitions. The Domain architecture test scans every module and rejects HTTP,
+SQLite, LangGraph, UI, and LLM/provider imports. Root review also corrected the chat
+projection and current-turn explicit-none closure; the evidence below is local
+implementation evidence, not independent acceptance.
+
+Focused local evidence:
+
+| Check | Result |
+|---|---|
+| `npm run check` | PASS |
+| `npm run p2-1-domain-gate` | PASS — 8 files / 18 tests |
+| `git diff --check` | PASS |
+| Full `npm test` | PASS — 48 files / 386 tests |
+| `npm run p0-release-gate` | PASS — 7 files / 100 tests |
+| `npm run p1-safety-gate` | PASS — 16 files / 194 tests |
+| `npm run build` | PASS |
+| Chat transport regression | PASS — real HTTP `/api/feeding-agent/chat` accepts complete UI payload, retains explicit `none`, distinguishes omission, rejects invalid selected values with 400, and captures no application/device claim |
+| Earlier-abnormal closure | PASS — prior moderate + current explicit `none` returns ended/no device operation in preview; sync/evaluation returns no feedback |
+
+The chat adapter projects only `diarrheaGrade` and `actualPowderGrams` before delegating
+validation to the Domain observation parser; richer UI metadata is not treated as chat
+tampering. It maps the tagged presence contract to the existing Agent transport shape
+without persisting, confirming, applying, or controlling a device. SQLite/persistence
+wiring remains a later P2 stage.
+
+Post-preflight evidence required by `P2-003` was checked against run
+[`31551632349`](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31551632349):
+the run completed successfully on `nbj-arch-p2` at `b861e2c8f9e1c462a67b26fe0b32e0cfb29852a8`
+and passed the pre-existing safety workflow. That run predates this local Domain
+checkpoint and therefore is evidence for the preflight baseline, not remote execution
+of the new `p2-1-domain-gate`.

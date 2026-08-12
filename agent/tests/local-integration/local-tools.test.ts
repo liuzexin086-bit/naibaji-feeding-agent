@@ -259,6 +259,32 @@ describe("local deterministic tools", () => {
     }
   });
 
+  it("ends a prior moderate event when the current observation explicitly says none", async () => {
+    const { store, context } = contextFor("user-a", [
+      { recordedAt: "2026-08-05T09:00:00.000Z", diarrheaGrade: "moderate", actualPowderGrams: 0 },
+    ]);
+    try {
+      const tool = createFeedingTools({
+        ...context,
+        observation: { diarrheaGrade: "none", actualPowderGrams: 0 },
+      }).find((item) => item.name === "preview_diarrhea_adjustment");
+      if (!tool) throw new Error("missing preview tool");
+      const output = await tool.execute(
+        "call-1",
+        { grades: ["moderate"], observedAt: "2026-08-05T10:00:00+08:00" },
+        new AbortController().signal,
+      );
+      const details = output.details as {
+        data: { status: string; deviceOperation: unknown; manualDispositionRequired: boolean };
+      };
+      expect(details.data.status).toBe("ended");
+      expect(details.data.deviceOperation).toBeNull();
+      expect(details.data.manualDispositionRequired).toBe(false);
+    } finally {
+      store.close();
+    }
+  });
+
   it("registers sync_observation_feedback and materializes a verified feedback plan", async () => {
     const { store, context } = contextFor("user-a", [
       {

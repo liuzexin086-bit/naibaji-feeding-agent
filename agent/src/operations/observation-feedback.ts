@@ -300,12 +300,21 @@ export function evaluateObservationFeedback(input: FeedbackEngineInput): Feedbac
     input.observation.recordedAt === undefined ||
     input.observation.recordedAt === null ||
     normalizeIsoTimestamp(input.observation.recordedAt) !== null;
-  const diarrheaRecord = latestDiarrheaStatusRecord(validRecords);
+  const currentDiarrheaObserved = currentObservationValid &&
+    input.observation !== undefined &&
+    Object.prototype.hasOwnProperty.call(input.observation, "diarrheaGrade");
+  const currentExplicitNone = currentDiarrheaObserved &&
+    input.observation?.diarrheaGrade === "none";
+  const diarrheaRecord = currentExplicitNone
+    ? undefined
+    : latestDiarrheaStatusRecord(validRecords);
   const diarrheaGradeRaw = diarrheaRecord?.diarrheaGrade;
   const observedGrade = currentObservationValid
     ? input.observation?.diarrheaGrade
     : undefined;
-  const grade = diarrheaRecord
+  const grade = currentExplicitNone
+    ? "none"
+    : diarrheaRecord
     ? String(diarrheaGradeRaw) as DiarrheaGrade
     : currentObservationValid && observedGrade && observedGrade !== "none" && DIARRHEA_ORDER.includes(String(observedGrade) as DiarrheaGrade)
       ? String(observedGrade) as DiarrheaGrade
@@ -546,7 +555,12 @@ export function materializeObservationFeedbackPlan(input: {
     reductionPriority: context.devicePlan.templates.timed_quantity.reductionPriority,
     freeReductionPriority: context.devicePlan.templates.free_feeding.reductionPriority,
   });
-  const latestDiarrhea = latestDiarrheaStatusRecord(feedbackRecords);
+  const currentExplicitNone = input.observation !== undefined &&
+    Object.prototype.hasOwnProperty.call(input.observation, "diarrheaGrade") &&
+    input.observation.diarrheaGrade === "none";
+  const latestDiarrhea = currentExplicitNone
+    ? input.observation
+    : latestDiarrheaStatusRecord(feedbackRecords);
   if (latestDiarrhea?.diarrheaGrade === "none") {
     input.store.supersedeDailyOperationAmendments({
       userId: input.userId,

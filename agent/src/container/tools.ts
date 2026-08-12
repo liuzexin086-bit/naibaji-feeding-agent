@@ -818,7 +818,12 @@ export function createFeedingTools(
       });
       const latestRecord = sortedRecords[sortedRecords.length - 1] as Record<string, unknown> | undefined;
       const latestDiarrheaStatus = latestDiarrheaStatusRecord(sortedRecords);
-      const observedGrade = context.observation?.diarrheaGrade &&
+      const currentDiarrheaObserved = context.observation !== undefined &&
+        Object.prototype.hasOwnProperty.call(context.observation, "diarrheaGrade");
+      const explicitNone = currentDiarrheaObserved &&
+        context.observation?.diarrheaGrade === "none";
+      const observedGrade = currentDiarrheaObserved &&
+        context.observation?.diarrheaGrade &&
         context.observation.diarrheaGrade !== "none"
         ? context.observation.diarrheaGrade
         : undefined;
@@ -838,6 +843,20 @@ export function createFeedingTools(
             ? [recordGrade]
             : [];
       const production = await productionDecisionsForBatch(context);
+      if (explicitNone) {
+        return record(context, "preview_diarrhea_adjustment", {
+          status: "ended",
+          reason: "本轮腹泻观察为无，已结束既有腹泻处置，无需生成设备操作。",
+          deviceOperation: null,
+          manualDispositionRequired: false,
+        }, {
+          sopVersion: production.state.sopVersion,
+          modelVersion: production.selectedDecision?.evidence.modelVersion,
+          calculationDate: production.state.dateLocal,
+          basis: "本轮明确观察为无，不回退历史异常记录，不生成腹泻减餐预览。",
+          frozenReceipt: frozenReceipt(production.state),
+        });
+      }
       if (!grades.length) {
         if (recordGradeRaw === "none") {
           return record(context, "preview_diarrhea_adjustment", {

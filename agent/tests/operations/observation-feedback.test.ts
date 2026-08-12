@@ -147,6 +147,18 @@ describe("observation feedback engine", () => {
     expect(result).toBeNull();
   });
 
+  it("lets a current explicit none close an earlier moderate record", () => {
+    const result = evaluateObservationFeedback(engineInput({
+      records: [{
+        recordedAt: "2026-08-05T09:00:00.000Z",
+        diarrheaGrade: "moderate",
+        actualPowderGrams: 0,
+      }],
+      observation: { diarrheaGrade: "none", actualPowderGrams: 0 },
+    }));
+    expect(result).toBeNull();
+  });
+
   it("does not treat an omitted diarrheaGrade as an explicit none", () => {
     const result = evaluateObservationFeedback(engineInput({
       records: [

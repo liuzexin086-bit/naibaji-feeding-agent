@@ -1,5 +1,7 @@
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { AIMessage, HumanMessage, type BaseMessage } from "@langchain/core/messages";
 import {
   supabaseRest,
@@ -50,6 +52,7 @@ import {
   requireLocalAdmin,
   resolveLocalAuth,
 } from "./local-auth.js";
+import { handleChatObservation } from "./chat-observation.js";
 
 const SYSTEM_PROMPT = `你是奶爸机超早期断奶现场执行助手。
 你只能解释和组织任务；所有时间、奶量、餐次、缺口、状态和审批数字必须来自已注册的确定性工具。
@@ -105,28 +108,7 @@ function restoredMessages(
   });
 }
 
-function normalizeChatObservation(raw: unknown): AgentObservation | undefined {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const source = raw as Record<string, unknown>;
-  const diarrheaGrade = source.diarrheaGrade == null ? undefined : String(source.diarrheaGrade);
-  if (diarrheaGrade !== undefined &&
-      !["none", "mild", "moderate", "severe"].includes(diarrheaGrade)) {
-    throw new Error("NBJ_AGENT_OBSERVATION_INVALID");
-  }
-  const actual = source.actualPowderGrams;
-  const actualPowderGrams = actual == null || actual === "" ? null : Number(actual);
-  if (actualPowderGrams !== null &&
-      (!Number.isFinite(actualPowderGrams) || actualPowderGrams < 0)) {
-    throw new Error("NBJ_AGENT_OBSERVATION_INVALID");
-  }
-  const normalizedGrade = diarrheaGrade as AgentObservation["diarrheaGrade"];
-  return {
-    ...(normalizedGrade && normalizedGrade !== "none" ? { diarrheaGrade: normalizedGrade } : {}),
-    actualPowderGrams,
-  };
-}
-
-interface ContainerEnv {
+export interface ContainerEnv {
   AGENT_STORAGE_BACKEND?: string;
   LOCAL_DB_PATH?: string;
   SUPABASE_URL?: string;
@@ -147,9 +129,24 @@ interface ContainerEnv {
   LANGSMITH_API_KEY?: string;
 }
 
-type ContainerStorage =
+export type ContainerStorage =
   | { backend: "local"; store: SqliteLocalStore }
   | { backend: "supabase"; runtime: SupabaseRuntime };
+
+export interface ChatContext {
+  readonly env: ContainerEnv;
+  readonly token: string;
+  readonly userId: string;
+  readonly batchId: string;
+  readonly sessionId: string;
+  readonly evidence: Map<string, unknown>;
+  readonly observation: AgentObservation | undefined;
+}
+
+export interface ContainerServerOptions {
+  readonly onChatContext?: (context: ChatContext) => void;
+  readonly stopAfterChatObservation?: boolean;
+}
 
 async function validateProviderConnection(
   config: RuntimeAgentConfig,
@@ -231,6 +228,7 @@ async function handleChat(
   response: import("node:http").ServerResponse,
   env: ContainerEnv,
   storage: ContainerStorage,
+  options: ContainerServerOptions = {},
 ): Promise<void> {
   if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
     response.writeHead(403).end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
@@ -268,15 +266,30 @@ async function handleChat(
     response.writeHead(400).end(JSON.stringify({ code: "NBJ_AGENT_CLIENT_MESSAGE_ID_INVALID" }));
     return;
   }
-  let observation: AgentObservation | undefined;
-  try {
-    observation = normalizeChatObservation(body.observation);
-  } catch {
+  const observationBoundary = handleChatObservation(body.observation);
+  if (!observationBoundary.ok) {
     response.writeHead(400, { "content-type": "application/json; charset=utf-8" });
     response.end(JSON.stringify({ code: "NBJ_AGENT_OBSERVATION_INVALID" }));
     return;
   }
+  const observation: AgentObservation | undefined = observationBoundary.observation;
 
+  const token = authorization.slice(7);
+  const evidence = new Map<string, unknown>();
+  const context: ChatContext = {
+    env,
+    token,
+    userId,
+    batchId: body.batchId,
+    sessionId: body.sessionId,
+    evidence,
+    observation,
+  };
+  options.onChatContext?.(context);
+  if (options.stopAfterChatObservation) {
+    response.writeHead(204).end();
+    return;
+  }
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-cache, no-transform",
@@ -290,18 +303,6 @@ async function handleChat(
       response.write(": keepalive\n\n");
     }
   }, 15_000);
-
-  const token = authorization.slice(7);
-  const evidence = new Map<string, unknown>();
-  const context = {
-    env,
-    token,
-    userId,
-    batchId: body.batchId,
-    sessionId: body.sessionId,
-    evidence,
-    observation,
-  };
   let identity: { messageId: string; clientMessageId: string } = {
     messageId: crypto.randomUUID(),
     clientMessageId: body.clientMessageId?.trim() || crypto.randomUUID(),
@@ -547,6 +548,7 @@ async function handleAdminConfig(
   request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
   env: ContainerEnv,
+  storage: ContainerStorage,
 ): Promise<void> {
   try {
     const userId = requireAdminGateway(request, env, storage);
@@ -660,73 +662,86 @@ async function handleAdminConfig(
   }
 }
 
-const runtime = runtimeEnv();
-const env = runtime.env;
-const storage = initializeStorage(runtime.storageConfig);
-if (storage.backend === "local") {
-  initializeLocalAdmin(storage.store, env.LOCAL_ADMIN_EMAIL, env.LOCAL_ADMIN_PASSWORD);
-}
-const port = Number(process.env.PORT ?? 8080);
-const server = createServer(async (request, response) => {
-  const url = new URL(request.url ?? "/", "http://container");
-  if (url.pathname === "/health" || url.pathname === "/ping") {
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true }));
-    return;
-  }
-  if (url.pathname === "/version") {
-    let commit = "unknown";
-    let provenance: Record<string, unknown> | null = null;
-    try {
-      const raw = readFileSync("/app/agent-provenance.json", "utf8");
-      provenance = JSON.parse(raw) as Record<string, unknown>;
-      commit = String(provenance.commit ?? "unknown");
-    } catch {
-      try {
-        commit = readFileSync("/app/version", "utf8").trim() || "unknown";
-      } catch {
-        // Version files are produced by the Docker build; local dev can omit them.
-      }
-    }
-    response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify(provenance ?? { commit }));
-    return;
-  }
-  if (storage.backend === "local" && url.pathname.startsWith("/api/")) {
-    if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
-      response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
+export function createContainerServer(
+  env: ContainerEnv,
+  storage: ContainerStorage,
+  options: ContainerServerOptions = {},
+): ReturnType<typeof createServer> {
+  const server = createServer(async (request, response) => {
+    const url = new URL(request.url ?? "/", "http://container");
+    if (url.pathname === "/health" || url.pathname === "/ping") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ ok: true }));
       return;
     }
-    const handled = await handleLocalApi(request, response, storage.store, env);
-    if (handled) return;
-  }
-  if (request.method === "POST" && url.pathname === "/api/feeding-agent/chat") {
-    await handleChat(request, response, env, storage);
-    return;
-  }
-  if (
-    (url.pathname === "/internal/admin/feeding-agent/config" ||
-      url.pathname === "/api/admin/feeding-agent/config" ||
-      url.pathname === "/api/admin/feeding-agent/config/validate") &&
-    ["GET", "PUT", "POST"].includes(request.method || "")
-  ) {
-    await handleAdminConfig(request, response, env);
-    return;
-  }
-  response.writeHead(404, { "content-type": "application/json" });
-  response.end(JSON.stringify({ code: "NBJ_AGENT_ROUTE_NOT_FOUND" }));
-});
+    if (url.pathname === "/version") {
+      let commit = "unknown";
+      let provenance: Record<string, unknown> | null = null;
+      try {
+        const raw = readFileSync("/app/agent-provenance.json", "utf8");
+        provenance = JSON.parse(raw) as Record<string, unknown>;
+        commit = String(provenance.commit ?? "unknown");
+      } catch {
+        try {
+          commit = readFileSync("/app/version", "utf8").trim() || "unknown";
+        } catch {
+          // Version files are produced by the Docker build; local dev can omit them.
+        }
+      }
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify(provenance ?? { commit }));
+      return;
+    }
+    if (storage.backend === "local" && url.pathname.startsWith("/api/")) {
+      if (request.headers["x-agent-gateway-secret"] !== env.AGENT_GATEWAY_SECRET) {
+        response.writeHead(403, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ code: "NBJ_AGENT_GATEWAY_REQUIRED" }));
+        return;
+      }
+      const handled = await handleLocalApi(request, response, storage.store, env);
+      if (handled) return;
+    }
+    if (request.method === "POST" && url.pathname === "/api/feeding-agent/chat") {
+      await handleChat(request, response, env, storage, options);
+      return;
+    }
+    if (
+      (url.pathname === "/internal/admin/feeding-agent/config" ||
+        url.pathname === "/api/admin/feeding-agent/config" ||
+        url.pathname === "/api/admin/feeding-agent/config/validate") &&
+      ["GET", "PUT", "POST"].includes(request.method || "")
+    ) {
+      await handleAdminConfig(request, response, env, storage);
+      return;
+    }
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ code: "NBJ_AGENT_ROUTE_NOT_FOUND" }));
+  });
 
-server.once("close", () => {
-  if (storage.backend === "local") storage.store.close();
-  closeSharedCheckpointSavers();
-});
-
-function shutdown(): void {
-  server.close();
+  server.once("close", () => {
+    if (storage.backend === "local") storage.store.close();
+    closeSharedCheckpointSavers();
+  });
+  return server;
 }
 
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
-server.listen(port, "0.0.0.0");
+function isMainModule(): boolean {
+  return Boolean(process.argv[1]) && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+}
+
+if (isMainModule()) {
+  const runtime = runtimeEnv();
+  const env = runtime.env;
+  const storage = initializeStorage(runtime.storageConfig);
+  if (storage.backend === "local") {
+    initializeLocalAdmin(storage.store, env.LOCAL_ADMIN_EMAIL, env.LOCAL_ADMIN_PASSWORD);
+  }
+  const port = Number(process.env.PORT ?? 8080);
+  const server = createContainerServer(env, storage);
+  const shutdown = (): void => {
+    server.close();
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+  server.listen(port, "0.0.0.0");
+}
