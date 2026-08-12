@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 CLOSED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -11,6 +11,8 @@ Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `P
 Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
+
+CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
 
 Captured: 2026-08-11
 
@@ -108,7 +110,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Finding | Severity for P2-0 | Disposition |
 |---|---|---|
 | Agent development dependency audit reports 1 high + 1 critical; production-pruned image reports 0 | Non-blocking carryover | Enter P2 security/supply-chain review; do not rewrite P1 baseline. |
-| `P2-001`: current workflow has no push trigger/run for `nbj-arch-p2` | Non-blocking for P2-0; blocking before P2-1 Domain/runtime changes | P2-1 CI Preflight Authorization is OPEN only to add coverage for pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. Domain/runtime authorization remains CLOSED. |
+| `P2-001`: CI coverage for the P2 branch | CLOSED on 2026-08-12 | Commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` covers pushes to `main` and `nbj-arch-p2` plus pull requests targeting `main`; exact-SHA push run `31550812177` passed. P2-1 Domain implementation is authorized; later runtime/cutover Gates remain CLOSED. |
 | Root CI smoke validates the legacy JSON backend | Architecture debt | Convert to migration/legacy fixture coverage before production-path removal. |
 | Supabase remains a compiled Agent backend and direct legacy UI path | Architecture debt | P2-5/P2-11 removal Gate. |
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
@@ -148,3 +150,16 @@ Independent re-review of remote branch `nbj-arch-p2` at `fec5659a7f514201ea1f090
 - `P2-F-001` / `P2-ED-001` remained open as a P2 Merge blocker.
 
 Verdict: `P2-0.1 PASS`. This Final Seal records that independent verdict and does not self-review its own commit.
+
+## 10. P2-001 CI preflight receipt
+
+CI preflight commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` has sole parent `c5365fdb8007681a551415edeea7d21326c3485f` and changes only `.github/workflows/agent-safety.yml`. The workflow now covers:
+
+- pushes to `main`;
+- pushes to `nbj-arch-p2`;
+- pull requests targeting `main`;
+- manual `workflow_dispatch` runs.
+
+GitHub Actions push run [`31550812177`](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31550812177) executed exact head SHA `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` and completed with conclusion `success`. All safety-job steps passed, including the root smoke test, optimizer tests, Agent typecheck/tests, P0 release gate, P1 safety gate, builds, clean-source gate, image builds, Compose config, and runtime provenance/UI E2E.
+
+Verdict: `P2-001 CLOSED — CI PREFLIGHT PASS`. P2-1 Domain implementation is authorized; subsequent stage Gates remain unchanged.

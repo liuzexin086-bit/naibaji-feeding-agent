@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Authority Map
 
-Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 CLOSED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -11,6 +11,8 @@ Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `P
 Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
+
+CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
 
 ## Authority vocabulary
 

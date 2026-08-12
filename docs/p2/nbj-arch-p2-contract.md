@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-0 CONTRACT REVIEW PASS — P2-001 OPEN`
+Status: `P2-0 CONTRACT REVIEW PASS — P2-001 CLOSED`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -11,6 +11,8 @@ Accepted corrected checkpoint: `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` — `P
 Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 
 Remote branch: `nbj-arch-p2`
+
+CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -202,9 +204,9 @@ P2-PRE-03: BLOCKED
 P2-F-001: OPEN BLOCKER
 P2-ED-001: REGISTERED / IMPLEMENTATION PENDING
 
-P2-001: OPEN — PRE-P2-1 CI BLOCKER
-P2-1 CI Preflight Authorization: OPEN
-P2-1 Domain Implementation Authorization: CLOSED
+P2-001: CLOSED — CI PREFLIGHT PASS
+P2-1 CI Preflight: PASS
+P2-1 Domain Implementation Authorization: OPEN
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -215,4 +217,6 @@ Real Device Control Gate: CLOSED
 
 This P2-0.2 Final Seal records the independent review of `fec5659a7f514201ea1f090cc2c7e9c02aeb57db`; it does not review or certify its own commit.
 
-The only authorized next action is CI preflight work to close `P2-001`: CI triggers must cover pushes to `main` and `nbj-arch-p2`, plus pull requests targeting `main`. No P2-1 Domain or runtime implementation is authorized until that Gate closes. Separately, `P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.
+CI preflight commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` added push coverage for `main` and `nbj-arch-p2` plus pull-request coverage targeting `main`. Remote push run [`31550812177`](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31550812177) executed that exact SHA and passed, closing `P2-001`; the evidence is recorded in [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md).
+
+P2-1 Domain implementation is now authorized under this contract. This does not authorize later persistence, migration, application, Agent, UI, runtime/cutover, Compose replacement, merge, deployment, tagging, optimizer production, or real device control stages. Separately, `P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.
