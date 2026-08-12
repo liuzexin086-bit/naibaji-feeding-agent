@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-0 CONTRACT REVIEW PASS — P2-001 CLOSED`
+Status: `P2-1 IMPLEMENTATION REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-1 GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -13,6 +13,8 @@ Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 Remote branch: `nbj-arch-p2`
 
 CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
+
+P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-final.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -105,7 +107,7 @@ These checks are starting-condition findings and deliberately do not reuse canon
 |---|---|---|
 | `P2-PRE-01` Optimizer cannot enter production | PASS | `optimizer/README.md` marks it EXPERIMENTAL / NOT FOR PRODUCTION and rejects legacy output. |
 | `P2-PRE-02` `diarOffset` cannot enter production parameters | PASS | It is absent from optimizer production output/search and locked by `optimizer/tests/test_calibration.py`. |
-| `P2-PRE-03` Missing diarrhea observation is not `none` | BLOCKED | The local P2-1 transport projection and closure regressions now distinguish omission from explicit `none`; independent acceptance is pending, and the Merge blocker remains tracked as `P2-F-001` / `P2-ED-001`. |
+| `P2-PRE-03` Missing diarrhea observation is not `none` | BLOCKED | The independent P2-1 review verified the Chat/Domain distinction between omission and explicit `none`; persistence acceptance remains pending under `P2-ED-001`, and `P2-F-001` remains open. |
 | `P2-PRE-04` Exceptions after plan confirmation are not swallowed | PASS | Confirmed plans are immutable; post-confirmation amendments have independent digest, state, audit, confirmation, and application paths. |
 | `P2-PRE-05` LLM cannot freely generate safety-critical numbers | PASS | Protected facts are deterministic; numeric LLM narration is discarded; missing/tampered receipts fail closed. |
 
@@ -195,6 +197,11 @@ Until then, `Architecture Unification Gate` is CLOSED.
 
 Independent Review 0 examined checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` and returned `REQUEST CHANGES`; that historical receipt remains [nbj-arch-p2-review-0.md](./nbj-arch-p2-review-0.md). A later independent re-review examined corrected checkpoint `fec5659a7f514201ea1f090cc2c7e9c02aeb57db`, confirmed its parent and exact five-file docs-only diff, and returned `PASS`; that receipt is [nbj-arch-p2-review-0-final.md](./nbj-arch-p2-review-0-final.md).
 
+The independent P2-1 review examined `edbe4335f8436abdd2084776fecaf4dc9e22cff2`
+with parent `b861e2c8f9e1c462a67b26fe0b32e0cfb29852`, verified remote
+[agent-safety run 31558952869](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31558952869),
+and returned `PASS WITH NON-BLOCKING FINDINGS`. See the [P2-1 Final Review Seal](./nbj-arch-p2-review-1-final.md).
+
 ```text
 P0-01..P0-04 Baseline Gates: OPEN / PASS
 P2-0 Review 0: PASS
@@ -202,11 +209,14 @@ P2-0 Contract Gate: OPEN
 
 P2-PRE-03: BLOCKED
 P2-F-001: OPEN BLOCKER
-P2-ED-001: IMPLEMENTED LOCALLY / INDEPENDENT ACCEPTANCE PENDING
+P2-ED-001: PARTIALLY ACCEPTED — CHAT/DOMAIN FIX VERIFIED; PERSISTENCE ACCEPTANCE PENDING
 
 P2-001: CLOSED — CI PREFLIGHT PASS
 P2-1 CI Preflight: PASS
-P2-1 Domain Implementation Authorization: OPEN
+P2-1 Implementation: PASS
+P2-1 Independent Review: PASS
+P2-1 Gate: OPEN
+P2-2 Persistence Boundary Authorization: OPEN
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED
@@ -219,10 +229,15 @@ This P2-0.2 Final Seal records the independent review of `fec5659a7f514201ea1f09
 
 CI preflight commit `7912b1721a11e441a741e7bdcd4e7ebf367f1a76` added push coverage for `main` and `nbj-arch-p2` plus pull-request coverage targeting `main`. Remote push run [`31550812177`](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31550812177) executed that exact SHA and passed, closing `P2-001`; the evidence is recorded in [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md).
 
-P2-1 Domain implementation is now authorized under this contract. This does not authorize later persistence, migration, application, Agent, UI, runtime/cutover, Compose replacement, merge, deployment, tagging, optimizer production, or real device control stages. Separately, `P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.
+P2-1 Domain implementation and independent review have passed. P2-2 is authorized
+only for the Persistence Boundary work needed to prove the accepted Domain contract
+through repository, SQLite, reload, and Domain round-trip behavior. This does not
+authorize later application, Agent, UI, runtime/cutover, Compose replacement, merge,
+deployment, tagging, optimizer production, or real device control stages. Separately,
+`P2-F-001` / `P2-ED-001` remains a P2 Merge blocker.
 
-P2-1 Domain checkpoint status: implementation, endpoint, and current-turn closure
-evidence is recorded in the Evidence Manifest. The checkpoint does not open any
-later Gate; `P2-F-001` / `P2-PRE-03` remain OPEN/BLOCKED and the Merge Gate remains
-CLOSED. Independent acceptance is still required for the Domain checkpoint and
-`P2-ED-001` before merge consideration.
+P2-1 Domain checkpoint status: implementation and independent review PASS; the
+Chat/Domain portion of `P2-ED-001` is verified. Persistence acceptance remains
+pending under the authorized P2-2 boundary. `P2-F-001` remains OPEN,
+`P2-PRE-03` remains BLOCKED, and the Merge Gate remains CLOSED. Findings
+`P2-1-F01` through `P2-1-F04` are non-blocking and recorded in the Final Review Seal.

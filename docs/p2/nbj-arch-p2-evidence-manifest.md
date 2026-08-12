@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-0 CONTRACT REVIEW PASS — P2-001 CLOSED`
+Status: `P2-1 IMPLEMENTATION REVIEW PASS WITH NON-BLOCKING FINDINGS — P2-1 GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -13,6 +13,8 @@ Corrected checkpoint parent: `fead997b78afb2b03c372a957f9fe8c19fd6d4a0`
 Remote branch: `nbj-arch-p2`
 
 CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-preflight-receipt.md)
+
+P2-1 Final Review Seal: [nbj-arch-p2-review-1-final.md](./nbj-arch-p2-review-1-final.md)
 
 Captured: 2026-08-11
 
@@ -33,6 +35,9 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-0 original checkpoint parent | `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232` | `git rev-parse fead997^` |
 | P2-0.1 corrected checkpoint | `fec5659a7f514201ea1f090cc2c7e9c02aeb57db` | Independent re-review: `PASS` |
 | P2-0.1 corrected checkpoint parent | `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` | `git rev-parse fec5659^` |
+| P2-1 reviewed implementation checkpoint | `edbe4335f8436abdd2084776fecaf4dc9e22cff2` | Independent P2-1 review: `PASS WITH NON-BLOCKING FINDINGS` |
+| P2-1 reviewed checkpoint parent | `b861e2c8f9e1c462a67b26fe0b32e0cfb29852a8` | Exact parent supplied with the review verdict |
+| P2-1 remote CI | run `31558952869`, `agent-safety`, success | Exact reviewed checkpoint CI evidence |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -116,7 +121,7 @@ The CI image IDs are evidence from an ephemeral runner, not pullable release ima
 | Migration ledger lacks checksum/name/application version | Architecture debt | P2-3 blocking acceptance item. |
 | Active production DB and active published SOP are environment data, not committed fixtures | Evidence gap | Capture sanitized, hashed fixtures before migration implementation. |
 | No registry-published immutable Docker digest exists for the ephemeral P1 images | Evidence limitation | Rebuild from baseline and prove runtime provenance; do not claim pullability. |
-| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | P1 / P2 Merge blocker | Local P2-1 projection and real `/api/feeding-agent/chat` regression now retain explicit `none`, distinguish omission, and fail closed for invalid selected fields; preview/sync closure tests cover prior moderate state. Independent acceptance is pending, so this Merge blocker remains OPEN. |
+| `P2-F-001`: chat observation normalization drops explicit diarrhea `none` | P1 / P2 Merge blocker | Independent P2-1 review verified the Chat/Domain fix and closure evidence; persistence acceptance remains pending under `P2-ED-001`, so this Merge blocker remains OPEN. |
 | Actual operator deployment path and live authority are not repository-verifiable | Evidence gap | P1 Docker is the reviewed canonical contract, but Electron/legacy UI and an ignored nested D1 repository exist locally. Capture deployment inventory and read-only data-source snapshots before migration. |
 | Electron passes `?api=` to root `index.html`, but no consumer was found in that file | Legacy integration ambiguity | Treat the handoff as legacy/unresolved; do not infer that JSON backend and legacy UI are correctly integrated. |
 
@@ -171,7 +176,8 @@ observations, runtime latches, creep control, planned/active decisions, and oper
 state transitions. The Domain architecture test scans every module and rejects HTTP,
 SQLite, LangGraph, UI, and LLM/provider imports. Root review also corrected the chat
 projection and current-turn explicit-none closure; the evidence below is local
-implementation evidence, not independent acceptance.
+implementation evidence, now independently reviewed by the P2-1 Final Review Seal.
+The Chat/Domain portion is accepted; persistence acceptance remains pending.
 
 Focused local evidence:
 
@@ -180,7 +186,7 @@ Focused local evidence:
 | `npm run check` | PASS |
 | `npm run p2-1-domain-gate` | PASS — 8 files / 18 tests |
 | `git diff --check` | PASS |
-| Full `npm test` | PASS — 48 files / 386 tests |
+| Full suite (reviewed checkpoint) | PASS — 385 passed / 1 skipped / 386 total |
 | `npm run p0-release-gate` | PASS — 7 files / 100 tests |
 | `npm run p1-safety-gate` | PASS — 16 files / 194 tests |
 | `npm run build` | PASS |
@@ -199,3 +205,28 @@ the run completed successfully on `nbj-arch-p2` at `b861e2c8f9e1c462a67b26fe0b32
 and passed the pre-existing safety workflow. That run predates this local Domain
 checkpoint and therefore is evidence for the preflight baseline, not remote execution
 of the new `p2-1-domain-gate`.
+
+## 12. P2-1 Final Review Seal
+
+Independent review of checkpoint `edbe4335f8436abdd2084776fecaf4dc9e22cff2`
+(parent `b861e2c8f9e1c462a67b26fe0b32e0cfb29852`) returned
+`PASS WITH NON-BLOCKING FINDINGS`. Remote [agent-safety run 31558952869](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31558952869)
+completed successfully. The reviewed full-suite wording is `385 passed / 1 skipped /
+386 total`.
+
+| State | Decision |
+|---|---|
+| P2-1 Implementation | PASS |
+| P2-1 Independent Review | PASS |
+| P2-1 Gate | OPEN |
+| P2-2 Persistence Boundary Authorization | OPEN |
+| P2-ED-001 | PARTIALLY ACCEPTED — CHAT/DOMAIN FIX VERIFIED, PERSISTENCE ACCEPTANCE PENDING |
+| P2-F-001 | OPEN |
+| P2-PRE-03 | BLOCKED |
+| P2 Merge / Runtime-Cutover / Compose / Architecture-Unification / Optimizer-Production / Real-Device | CLOSED |
+
+Non-blocking findings are `P2-1-F01` legacy optional Chat adapter and pending
+persistence, `P2-1-F02` temporary dual Domain models, `P2-1-F03` development
+dependency audit with 1 high and 1 critical versus 0 in the production-pruned
+image, and `P2-1-F04` Actions Node20 deprecation. No P2-2 implementation is
+included or authorized by this seal beyond its boundary authorization.
