@@ -22,6 +22,8 @@ P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nb
 
 P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
+P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
+
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
 Date: 2026-08-11
@@ -241,6 +243,9 @@ P2-2 Persistence Boundary: PASS
 P2-2 Gate: OPEN
 
 P2-3 Migration Ledger Authorization: OPEN
+P2-3A Ordered Migration Ledger: IMPLEMENTED / INDEPENDENT REVIEW PENDING
+P2-3A Gate: CLOSED
+P2-4 JSON Import Authorization: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
@@ -274,4 +279,10 @@ document and its independent PASS is sealed by the P2-2B / P2-2 Final Review
 Seal. Persistence contracts no longer import legacy LocalStore types, the
 architecture scanner is recursive, and raw metadata ownership/overlay/quarantine
 semantics are explicit. P2-2 is complete; there is no P2-2C. P2-3 Migration
-Ledger Authorization is OPEN, but no P2-3 implementation is included here.
+Ledger Authorization is OPEN. At the P2-2 seal checkpoint, no P2-3
+implementation was included.
+
+P2-3A implementation evidence now records an ordered, checksum-verified ledger
+and lossless legacy-ledger compatibility seam. It retains schema version 12 and
+does not invent identities for historical v3-v11 rows. Independent review is
+still required before the P2-3A Gate or P2-4 authorization may change.

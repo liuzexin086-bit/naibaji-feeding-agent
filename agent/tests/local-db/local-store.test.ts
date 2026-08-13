@@ -13,6 +13,10 @@ import { digestFrozenSopSnapshot } from "../../src/decision/batch-decision-servi
 import { DECISION_POLICY_VERSION } from "../../src/shared/agent-v2-contract.js";
 import { loadFrozenBatchDecisionContext } from "../../src/decision/batch-decision-service.js";
 import type { FeedingDecision } from "../../src/shared/agent-v2-contract.js";
+import {
+  AGENT_APPLICATION_VERSION,
+  LEGACY_APPLICATION_VERSION,
+} from "../../src/local-db/migration-ledger.js";
 
 const cleanupDirectories: string[] = [];
 
@@ -35,6 +39,24 @@ function fileStore(): { directory: string; filename: string; store: LocalStore }
   const store = createLocalStore({ filename });
   store.migrate();
   return { directory, filename, store };
+}
+
+function replaceWithLegacyMigrationLedger(
+  database: DatabaseSync,
+  version: number,
+  appliedAt: string,
+): void {
+  database.exec(`
+    DROP TABLE IF EXISTS schema_migrations_legacy;
+    DROP TABLE schema_migrations;
+    CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY,
+      applied_at TEXT NOT NULL
+    ) STRICT;
+  `);
+  database.prepare(
+    "INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)",
+  ).run(version, appliedAt);
 }
 
 function decision(
@@ -118,6 +140,25 @@ describe("SQLite local store", () => {
       "audit_events",
     ]));
     expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count).toBe(1);
+    expect(database.prepare("PRAGMA table_info(schema_migrations)").all()
+      .map((row) => String(row.name))).toEqual([
+        "version",
+        "name",
+        "checksum",
+        "application_version",
+        "applied_at",
+      ]);
+    expect(database.prepare(`
+      SELECT version, name, checksum, application_version
+      FROM schema_migrations
+    `).get()).toMatchObject({
+      version: 12,
+      name: "audited-schema-v12-baseline",
+      application_version: AGENT_APPLICATION_VERSION,
+    });
+    expect(String(database.prepare(
+      "SELECT checksum FROM schema_migrations WHERE version = 12",
+    ).get()?.checksum)).toMatch(/^[A-F0-9]{64}$/);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     const indexes = database.prepare(`
       SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'
@@ -132,6 +173,64 @@ describe("SQLite local store", () => {
       "feeding_decisions_batch_date_revision_idx",
       "agent_messages_session_batch_idx",
     ]));
+    database.close();
+  });
+
+  it("imports a legacy v12 ledger without changing data or its audit timestamp", () => {
+    const { filename, store } = fileStore();
+    store.createBatch({
+      userId: "user-a",
+      batchId: "legacy-v12-batch",
+      revision: 4,
+      currentDay: 2,
+      data: { preserved: true },
+    });
+    store.close();
+
+    const legacy = new DatabaseSync(filename);
+    replaceWithLegacyMigrationLedger(legacy, 12, "2026-08-08T00:00:00.000Z");
+    legacy.close();
+
+    const upgraded = createLocalStore({ filename });
+    upgraded.migrate();
+    expect(upgraded.getBatch("user-a", "legacy-v12-batch")).toMatchObject({
+      revision: 4,
+      currentDay: 2,
+      data: { preserved: true },
+    });
+    upgraded.close();
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    expect(database.prepare("SELECT * FROM schema_migrations_legacy").all())
+      .toEqual([{ version: 12, applied_at: "2026-08-08T00:00:00.000Z" }]);
+    expect(database.prepare(`
+      SELECT version, application_version, applied_at FROM schema_migrations
+    `).get()).toEqual({
+      version: 12,
+      application_version: LEGACY_APPLICATION_VERSION,
+      applied_at: "2026-08-08T00:00:00.000Z",
+    });
+    expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+    database.close();
+  });
+
+  it("keeps the frozen idempotent repair behavior after rich v12 is recorded", () => {
+    const { filename, store } = fileStore();
+    store.close();
+
+    const damaged = new DatabaseSync(filename);
+    damaged.exec("ALTER TABLE users DROP COLUMN password_salt;");
+    damaged.close();
+
+    const repaired = createLocalStore({ filename });
+    repaired.migrate();
+    repaired.close();
+
+    const database = new DatabaseSync(filename, { readOnly: true });
+    expect(database.prepare("PRAGMA table_info(users)").all()
+      .map((row) => String(row.name))).toContain("password_salt");
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count)
+      .toBe(1);
     database.close();
   });
 
@@ -187,7 +286,7 @@ describe("SQLite local store", () => {
       "user-a",
       "legacy-batch",
     );
-    legacy.exec("DELETE FROM schema_migrations; INSERT INTO schema_migrations (version, applied_at) VALUES (3, '2026-08-04T00:00:00.000Z');");
+    replaceWithLegacyMigrationLedger(legacy, 3, "2026-08-04T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -247,9 +346,8 @@ describe("SQLite local store", () => {
     const legacy = new DatabaseSync(filename);
     legacy.exec(`
       DROP TABLE daily_operation_amendments;
-      DELETE FROM schema_migrations WHERE version = 11;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (7, '2026-08-06T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 7, "2026-08-06T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -361,9 +459,8 @@ describe("SQLite local store", () => {
         created_at, decided_at, decided_by
       FROM daily_operation_amendments_v9_old;
       DROP TABLE daily_operation_amendments_v9_old;
-      DELETE FROM schema_migrations WHERE version = 9;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (8, '2026-08-06T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 8, "2026-08-06T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -475,9 +572,8 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 11;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 9, "2026-08-07T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -642,9 +738,8 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v10_old;
       DROP TABLE daily_operation_amendments_v10_old;
-      DELETE FROM schema_migrations WHERE version = 11;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (9, '2026-08-07T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 9, "2026-08-07T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -835,9 +930,8 @@ describe("SQLite local store", () => {
         decision_id, response_json, created_at
       FROM daily_operation_amendment_actions_v10_old;
       DROP TABLE daily_operation_amendment_actions_v10_old;
-      DELETE FROM schema_migrations WHERE version = 11;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (10, '2026-08-07T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 10, "2026-08-07T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -1034,9 +1128,8 @@ describe("SQLite local store", () => {
         idempotency_key, created_at, decided_at, decided_by
       FROM daily_operation_amendments_v11_old;
       DROP TABLE daily_operation_amendments_v11_old;
-      DELETE FROM schema_migrations WHERE version = 12;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (11, '2026-08-08T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 11, "2026-08-08T00:00:00.000Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -1097,6 +1190,8 @@ describe("SQLite local store", () => {
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(12);
+    expect(database.prepare("SELECT * FROM schema_migrations_legacy").all())
+      .toEqual([{ version: 11, applied_at: "2026-08-08T00:00:00.000Z" }]);
     database.close();
     upgraded.close();
   });
@@ -1134,10 +1229,7 @@ describe("SQLite local store", () => {
       JSON.stringify(second.setting), JSON.stringify(second.evidence), JSON.stringify(second),
       "2026-08-08T00:00:00Z", "2026-08-08T00:00:00Z",
     );
-    legacy.exec(`
-      DELETE FROM schema_migrations WHERE version = 12;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (11, '2026-08-08T00:00:00Z');
-    `);
+    replaceWithLegacyMigrationLedger(legacy, 11, "2026-08-08T00:00:00Z");
     legacy.close();
 
     const upgraded = createLocalStore({ filename });
@@ -1543,9 +1635,8 @@ describe("SQLite local store", () => {
       ALTER TABLE daily_operation_plans DROP COLUMN feedback_origin_json;
       ALTER TABLE daily_operation_confirmations DROP COLUMN device_setting_json;
       ALTER TABLE daily_operation_confirmations DROP COLUMN decision_id;
-      DELETE FROM schema_migrations;
-      INSERT INTO schema_migrations (version, applied_at) VALUES (6, '2026-08-05T00:00:00.000Z');
     `);
+    replaceWithLegacyMigrationLedger(legacy, 6, "2026-08-05T00:00:00.000Z");
     legacy.close();
     const upgraded = createLocalStore({ filename });
     upgraded.migrate();

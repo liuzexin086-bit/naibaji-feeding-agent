@@ -60,6 +60,10 @@ jobs:
         working-directory: agent
         run: npm run p2-2-persistence-gate
 
+      - name: P2-3A Migration gate
+        working-directory: agent
+        run: npm run p2-3a-migration-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

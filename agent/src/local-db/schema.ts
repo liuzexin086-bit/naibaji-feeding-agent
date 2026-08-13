@@ -1,11 +1,6 @@
 export const MIGRATION_VERSION = 12;
 
 export const INITIAL_SCHEMA = `
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  version INTEGER PRIMARY KEY,
-  applied_at TEXT NOT NULL
-) STRICT;
-
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
   email TEXT,

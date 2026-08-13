@@ -48,6 +48,11 @@ import type {
 } from "../shared/local-store-contract.js";
 import { INITIAL_SCHEMA, MIGRATION_VERSION } from "./schema.js";
 import {
+  AGENT_APPLICATION_VERSION,
+  defineMigration,
+  runMigrationLedger,
+} from "./migration-ledger.js";
+import {
   materializeObservationFeedbackPlan,
   proposalToDeviceSetting,
 } from "../operations/observation-feedback.js";
@@ -730,14 +735,41 @@ export class SqliteLocalStore implements LocalStore {
   migrate(): void {
     this.#ensureOpen();
     return this.#transaction(() => {
-      this.#preflightDuplicateActiveDecisions();
+      let baselineApplied = false;
+      const migration = defineMigration({
+        version: MIGRATION_VERSION,
+        name: "audited-schema-v12-baseline",
+        canonicalBody: [
+          "NBJ-ARCH-P2/P2-3A",
+          "schema-version=12",
+          "initial-schema-sql:",
+          INITIAL_SCHEMA,
+          "legacy-repairs=auth-columns,sop-publication,daily-plan-feedback,v10-amendments,v11-cancel,v12-mode-change",
+          "frozen-sop-digest-backfill=on-first-v12-application",
+        ].join("\n"),
+        apply: () => {
+          baselineApplied = true;
+          this.#applyAuditedSchemaV12();
+        },
+      });
+      runMigrationLedger({
+        database: this.#database,
+        migrations: [migration],
+        applicationVersion: AGENT_APPLICATION_VERSION,
+        beforeApply: () => this.#preflightDuplicateActiveDecisions(),
+      });
+      // The legacy LocalStore always ran these idempotent compatibility checks
+      // on startup, including after v12 was already recorded. Keep that behavior
+      // without recording a second application of the audited baseline.
+      if (!baselineApplied) this.#applyAuditedSchemaV12();
+    });
+  }
+
+  #applyAuditedSchemaV12(): void {
       this.#database.exec(INITIAL_SCHEMA);
       this.#ensureAmendmentV10();
       this.#ensureAmendmentActionCancelV11();
       this.#ensureModeChangeV12();
-      const appliesFrozenSopDigestBackfill = !this.#database.prepare(
-        "SELECT 1 FROM schema_migrations WHERE version = ?",
-      ).get(MIGRATION_VERSION);
       // Existing development volumes may contain the pre-auth users table.
       // The product no longer migrates business data, but adding nullable
       // credential columns keeps a restart safe without copying or exposing
@@ -804,11 +836,7 @@ export class SqliteLocalStore implements LocalStore {
         CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx
           ON users(email) WHERE email IS NOT NULL;
       `);
-      if (appliesFrozenSopDigestBackfill) this.#backfillLegacyFrozenSnapshots();
-      this.#database.prepare(
-        "INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)",
-      ).run(MIGRATION_VERSION, new Date().toISOString());
-    });
+      this.#backfillLegacyFrozenSnapshots();
   }
 
   #preflightDuplicateActiveDecisions(): void {

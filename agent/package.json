@@ -23,6 +23,7 @@
     "p1-safety-gate": "npm run check && vitest run tests/decision/core.test.ts tests/decision/runtime-state.test.ts tests/operations/observation-feedback.test.ts tests/local-db/local-store.test.ts tests/local-integration/local-api.test.ts tests/local-integration/amendments.test.ts tests/local-integration/local-tools.test.ts tests/langgraph-runtime.test.ts tests/local-integration/mode-switch.test.ts tests/local-integration/agent-local-parity.test.ts tests/local-integration/today-operations.test.ts tests/local-integration/free-window-propagation.test.ts tests/provenance-contract.test.ts tests/web-model-derivation.test.ts tests/ci-contract.test.ts tests/ui-shell-contract.test.ts",
     "p2-1-domain-gate": "npm run check && vitest run tests/domain tests/architecture",
     "p2-2-persistence-gate": "npm run check && vitest run tests/persistence tests/architecture",
+    "p2-3a-migration-gate": "npm run check && vitest run tests/migration tests/local-db/local-store.test.ts",
     "test:watch": "vitest",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "start:container": "node dist/container/server.js"

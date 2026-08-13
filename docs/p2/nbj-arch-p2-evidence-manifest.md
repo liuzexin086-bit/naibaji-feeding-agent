@@ -22,6 +22,8 @@ P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nb
 
 P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
+P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
+
 Captured: 2026-08-11
 
 Hash semantics: lowercase SHA-256 over raw committed file content bytes (as returned by `git show <ref>:<path>`), unless otherwise stated. These are not Git object IDs.
@@ -83,7 +85,9 @@ Checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` contains the four original
 | Chroma | `chromadb/chroma:1.5.9` | local Compose |
 | Embedding model revision | `BAAI/bge-small-zh-v1.5@534b6bfaaf500e70bcb9f3771cebc940c23b219d` | local Compose |
 
-The current `schema_migrations` table contains only `version` and `applied_at`; checksum, name, and application version are P2 target requirements, not baseline facts.
+At the sealed P2-2 baseline, `schema_migrations` contains only `version` and
+`applied_at`. P2-3A implementation evidence below upgrades it to the ordered
+five-column ledger; that candidate state remains independently review-pending.
 
 ## 4. Source and generated artifact hashes
 
@@ -393,3 +397,39 @@ Real Device Control Gate: CLOSED
 This docs-only seal records the independent verdict and does not certify its own
 commit. P2-2 is complete and there is no P2-2C. P2-3 implementation is not part
 of this checkpoint.
+
+## 17. P2-3A Ordered Migration Ledger Implementation Evidence
+
+P2-3A keeps business schema version `12` and replaces the two-column migration
+marker with required `version`, `name`, `checksum`, `application_version`, and
+`applied_at` metadata. Definitions are positive, unique, and strictly ordered;
+applied rows must be an exact registered prefix; name or checksum drift fails
+closed before pending migration code runs.
+
+The old ledger is retained as `schema_migrations_legacy`. Historical v3-v11
+rows are preserved without invented names or checksums. An old v12 row imports
+the audited v12 identity, retains its original `applied_at`, uses
+`legacy-unknown` for its unprovable first application version, and does not
+record a second ledger application. The frozen idempotent compatibility checks
+still run on every startup to preserve LocalStore behavior. Earlier real
+fixtures apply the frozen v12 path inside the same transaction before writing
+the new row.
+
+```text
+P2-3 Authorization: OPEN
+P2-3A Implementation: COMPLETE / INDEPENDENT REVIEW PENDING
+P2-3A Gate: CLOSED
+P2-4 JSON Import Authorization: CLOSED
+
+P2 Merge Gate: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+Focused local implementation evidence is provided by
+`npm run p2-3a-migration-gate`, covering the real LocalStore migration fixtures
+and pure ledger invariants. Full regression evidence and an independent verdict
+are required before this checkpoint can be sealed.
