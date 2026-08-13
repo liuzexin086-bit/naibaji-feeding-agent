@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-3B CONTRACT REGISTERED — IMPLEMENTATION AUTHORIZATION OPEN`
+Status: `P2-3 FINAL CLOSURE SEAL — PENDING INDEPENDENT REVIEW`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -27,6 +27,8 @@ P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch
 P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
 
 P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
+
+P2-3 Final Closure Seal Candidate: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
 
 Captured: 2026-08-11
 
@@ -547,12 +549,14 @@ adds name/checksum tamper-before-DDL proofs, binds a sanitized real legacy v5
 fixture to raw main/WAL and output hashes, and adds the dedicated
 `p2-3b-migration-ownership-gate`.
 
-Local candidate evidence currently records `46/46` dedicated-gate tests and
-`414/414` full Agent tests. P2-1 (`20/20`), P2-2 (`9/9`), P2-3A (`35/35`),
+At that candidate checkpoint, local evidence recorded `46/46` dedicated-gate
+tests and a local `414/414` summary. The authoritative exact-SHA remote count
+is recorded below as `413 passed / 1 skipped / 414 total`. P2-1 (`20/20`),
+P2-2 (`9/9`), P2-3A (`35/35`),
 P0 (`100/100`), P1 (`197/197`), build, clean-source, both Docker targets, and
-an in-container migration-package import smoke also pass. This remains local, uncommitted evidence until an
-authorized checkpoint is created. Exact-SHA CI and independent implementation
-review remain pending; no Gate state changes.
+an in-container migration-package import smoke also passed. This was local
+candidate evidence and is superseded by the exact-SHA CI and independent
+remote-review receipts below.
 
 The local independent-QA leaf produced no report across two bounded attempts
 and was interrupted. That dispatch is `BLOCKED — INFRASTRUCTURE / NO VERDICT`;
@@ -565,4 +569,73 @@ P2-3B Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
 P2-3B Gate: CLOSED
 P2-3 overall: IN PROGRESS
 P2-4 Authorization: CLOSED
+```
+
+## 21. P2-3B Correction and Independent Remote Review
+
+Implementation checkpoint `b280f64e821614c74c9a00fb601de385971c3493`
+received `REQUEST CHANGES` for `P2-3B-F02`: fixture-backed proofs did not yet
+bind complete content-bearing post-migration evidence. Correction checkpoint
+`c9165b269339cca1c2ec94bd63750d765b836079`, with parent `b280f64`, changes
+only the fixture manifest and two P2-3B test files. It changes no production
+implementation or SQLite fixture binary.
+
+The correction binds the complete ledger, normalized schema, business rows,
+raw JSON/message payloads, frozen SOP snapshot, device plan, eight free-feeding
+slots, and complete daily operation plan. Zero-pending restart and persisted
+name/checksum tamper now operate on a temporary copy of the real sanitized
+legacy fixture and require zero DDL plus exact preservation of the complete
+evidence object.
+
+Independent remote re-review returned `PASS`, closed `P2-3B-F02`, and accepted
+P2-3B implementation overall. Exact-SHA
+[run 31677062701](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31677062701)
+executed `c9165b269339cca1c2ec94bd63750d765b836079` via `push` and completed with
+`success`. Its precise full-suite result is `413 passed / 1 skipped / 414
+total`, not `414 passed`; all dedicated P2 and legacy gates, builds, images,
+Compose config, and runtime provenance/UI checks passed.
+
+The historical local QA dispatch remains `BLOCKED — INFRASTRUCTURE / NO
+VERDICT`. The later local QA `PASS` is retained as a separate receipt and does
+not rewrite that historical record.
+
+```text
+P2-3B Contract Registration: PASS
+P2-3B Implementation Authorization: OPEN
+P2-3B Implementation: PASS
+P2-3B Independent Remote Review: PASS
+P2-3B-F02: CLOSED / PASS
+P2-3B Gate: OPEN
+```
+
+## 22. P2-3 Final Closure Seal Candidate
+
+The docs-only [P2-3 Final Closure Seal Candidate](./nbj-arch-p2-review-3-final.md)
+maps each original P2-3 Closure Contract Review blocker to accepted remote
+evidence:
+
+1. canonical migration identity, ordering, validation, structural operations,
+   and orchestration are owned by `packages/persistence/migrations`;
+2. a real-fixture zero-pending restart executes no DDL, and name/checksum
+   tamper fails before DDL while preserving complete evidence;
+3. the sanitized legacy fixture is provenance-bound and its post-migration
+   schema, business, raw-payload, and frozen-plan evidence is exact and
+   immutable.
+
+This candidate does not certify its own docs commit. Only its independent
+review may close the historical P2-3 Closure Contract Review and P2-3 overall.
+P2-4 and every later Gate remain CLOSED.
+
+```text
+P2-3 Closure Contract Review: REMEDIATED / FINAL CLOSURE SEAL PENDING
+P2-3 Final Closure Seal: PENDING INDEPENDENT REVIEW
+P2-3 overall: IN PROGRESS — FINAL CLOSURE SEAL PENDING
+
+P2-4 Authorization: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
 ```

@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-3B CONTRACT REGISTERED — IMPLEMENTATION AUTHORIZATION OPEN`
+Status: `P2-3 FINAL CLOSURE SEAL — PENDING INDEPENDENT REVIEW`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -27,6 +27,8 @@ P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch
 P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
 
 P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
+
+P2-3 Final Closure Seal Candidate: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -252,14 +254,18 @@ P2-3A.1 Correction: PASS
 P2-3A Independent Remote Review: PASS
 P2-3A-F01: CLOSED
 Independent QA: BLOCKED — INFRASTRUCTURE / NO VERDICT
+Later local QA re-review: PASS — SEPARATE RECEIPT
 P2-3A Gate: OPEN
 P2-3A Final Review Seal: PASS
-P2-3 Closure Contract Review: REQUEST CHANGES
-P2-3B Contract: REGISTERED
+P2-3 Closure Contract Review: REMEDIATED / FINAL CLOSURE SEAL PENDING
+P2-3B Contract Registration: PASS
 P2-3B Implementation Authorization: OPEN
-P2-3B Implementation: NOT STARTED
-P2-3B Gate: CLOSED
-P2-3 overall: IN PROGRESS
+P2-3B Implementation: PASS
+P2-3B Independent Remote Review: PASS
+P2-3B-F02: CLOSED / PASS
+P2-3B Gate: OPEN
+P2-3 Final Closure Seal: PENDING INDEPENDENT REVIEW
+P2-3 overall: IN PROGRESS — FINAL CLOSURE SEAL PENDING
 P2-4 JSON Import Authorization: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
@@ -306,12 +312,16 @@ backfill from structural restart repair. Independent remote re-review of
 correction checkpoint `7e4101bebadbce8aed43a1b02a0f7f61f67aebc6`
 returned `PASS`, closed `P2-3A-F01`, and opened the P2-3A Gate. The failed QA
 dispatch remains separately recorded as an infrastructure blocker with no
-verdict. P2-3 overall remains in progress, P2-4 remains unauthorized, and the
+verdict. P2-3 overall remained in progress, P2-4 remained unauthorized, and the
 P2-3 Closure Contract Review then identified three remaining P2-3 gaps:
 migration identity/orchestration has not moved to the frozen Persistence
 migration authority, a rich-v12 zero-pending restart can still execute ad-hoc
 schema DDL, and the required sanitized legacy SQLite fixture is not yet present
-or replaced by an independently accepted equivalence amendment. P2-3B is now
+or replaced by an independently accepted equivalence amendment. P2-3B was
 registered to close only those gaps while freezing every accepted P2-3A
-invariant. Its implementation is authorized but not started; its Gate and P2-4
-authorization remain CLOSED.
+invariant. Independent remote review of implementation correction checkpoint
+`c9165b269339cca1c2ec94bd63750d765b836079` returned `PASS`, closed
+`P2-3B-F02`, and opened the P2-3B Gate. The three historical gaps are therefore
+remediated, but this docs-only Final Closure Seal candidate cannot certify
+itself. P2-3 overall remains in progress pending its independent review; P2-4
+authorization and every later Gate remain CLOSED.
