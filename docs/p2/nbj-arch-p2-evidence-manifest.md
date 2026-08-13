@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-3 FINAL CLOSURE SEAL — PENDING INDEPENDENT REVIEW`
+Status: `P2-4 CONTRACT REGISTRATION — PENDING INDEPENDENT REVIEW`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -28,7 +28,9 @@ P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3
 
 P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
 
-P2-3 Final Closure Seal Candidate: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
+P2-3 Final Closure Seal: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
+
+P2-4 Legacy JSON Import Contract: [nbj-arch-p2-4-contract.md](./nbj-arch-p2-4-contract.md)
 
 Captured: 2026-08-11
 
@@ -479,6 +481,89 @@ Architecture Unification Gate: CLOSED
 Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
+
+## 18.1 P2-3 Final Closure Seal Independent Review
+
+Independent remote review examined Final Closure Seal checkpoint
+`2fb45b25f6880f03f563fd472d8143bfed8699b5`, with parent
+`c9165b269339cca1c2ec94bd63750d765b836079`. The checkpoint is exactly one
+commit ahead, changes exactly the three registered `docs/p2/**` files, and
+contains no implementation, runtime, schema, test, fixture, or workflow change.
+
+Exact-SHA [agent-safety run 31680852943](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31680852943)
+executed the Seal SHA via `push` and completed with `success`. The full Agent
+suite was `413 passed / 1 skipped / 414 total`; P2-1 was `20/20`, P2-2 `9/9`,
+P2-3A `35/35`, P2-3B `46/46`, P0 `100/100`, P1 `197/197`, optimizer `12/12`,
+and typecheck, build, clean-source, both images, Compose, and runtime
+provenance/UI checks all passed.
+
+The independent verdict recorded P0 = 0, P1 = 0, and P2 blocking findings = 0.
+It accepted the three historical P1 closure mappings, preserved P2-3A/P2-3B
+invariants and F01/F02 history, retained the two distinct local-QA receipts, and
+confirmed that the Seal did not self-certify.
+
+```text
+P2-3 Closure Contract Review: CLOSED / PASS
+P2-3 Final Closure Seal: PASS
+P2-3 overall: CLOSED / PASS
+P2-4 Legacy JSON Import Authorization: OPEN
+```
+
+## 18.2 P2-4 Contract / Execution Plan Registration Candidate
+
+Repository inventory at baseline
+`2fb45b25f6880f03f563fd472d8143bfed8699b5` found the JSON Database v1 format
+in `backend/src/storage/jsonDatabase.js`: `meta.schemaVersion: 1` plus
+`batches`, `dailyRecords`, `weighSamples`, `recommendations`, `approvals`,
+`executions`, `sceneStates`, `modelRegistry`, and `auditLogs`. Browser
+`localStorage` batch snapshots are a distinct source family. Supabase JSONB,
+training/shadow exports, optimizer results, and research synthesis are not
+silently treated as JSON Database v1.
+
+No importer, import route, import manifest, durable generic quarantine,
+destination-backup flow, or committed JSON Database v1 fixture exists at this
+baseline. Existing backend snapshot upsert uses replacement/recomputation
+semantics and is not accepted as one-way import. The P2-3B fixture is SQLite,
+not JSON.
+
+The docs-only [P2-4 contract](./nbj-arch-p2-4-contract.md) therefore registers
+blocking implementation criteria for:
+
+- raw source and owner-manifest SHA-256 identity;
+- read-only source handling and preserved IDs/revisions/timestamps;
+- collection-by-collection mapped/archive/quarantine disposition;
+- deterministic import provenance, same-source replay, duplicates, conflicts,
+  and target-collision fail-closed behavior;
+- durable raw quarantine and complete field/row traceability;
+- content-bearing zero-loss counters and no silent discard;
+- transaction, destination backup, isolated restore, and rollback receipts;
+- sanitized real JSON v1 fixtures or an independently accepted equivalence
+  amendment;
+- a dedicated `p2-4-legacy-json-import-gate` and all frozen regression gates.
+
+Independent architecture pre-review returned `PASS` for this registration map.
+Independent domain pre-review could not be allocated because of the runtime
+agent thread limit and remains `BLOCKED — INFRASTRUCTURE / NO VERDICT`; this
+candidate does not claim a domain verdict.
+
+```text
+P2-4 Legacy JSON Import Authorization: OPEN
+P2-4 Contract Registration: PENDING INDEPENDENT REVIEW
+P2-4 Implementation Authorization: CLOSED
+P2-4 Implementation: NOT STARTED
+P2-4 Gate: CLOSED
+
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+This registration candidate is docs-only and does not certify itself. No
+import implementation, schema, test, fixture, workflow, runtime, PR, merge,
+tag, or deployment is included.
 
 At the P2-3A Seal checkpoint, the bound contract had no P2-3B definition. That
 Seal did not create or authorize one, complete P2-3 overall, or authorize P2-4.

@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-3 FINAL CLOSURE SEAL — PENDING INDEPENDENT REVIEW`
+Status: `P2-4 CONTRACT REGISTRATION — PENDING INDEPENDENT REVIEW`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -28,7 +28,9 @@ P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3
 
 P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
 
-P2-3 Final Closure Seal Candidate: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
+P2-3 Final Closure Seal: [nbj-arch-p2-review-3-final.md](./nbj-arch-p2-review-3-final.md)
+
+P2-4 Legacy JSON Import Contract: [nbj-arch-p2-4-contract.md](./nbj-arch-p2-4-contract.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -257,16 +259,21 @@ Independent QA: BLOCKED — INFRASTRUCTURE / NO VERDICT
 Later local QA re-review: PASS — SEPARATE RECEIPT
 P2-3A Gate: OPEN
 P2-3A Final Review Seal: PASS
-P2-3 Closure Contract Review: REMEDIATED / FINAL CLOSURE SEAL PENDING
+P2-3 Closure Contract Review: CLOSED / PASS
 P2-3B Contract Registration: PASS
 P2-3B Implementation Authorization: OPEN
 P2-3B Implementation: PASS
 P2-3B Independent Remote Review: PASS
 P2-3B-F02: CLOSED / PASS
 P2-3B Gate: OPEN
-P2-3 Final Closure Seal: PENDING INDEPENDENT REVIEW
-P2-3 overall: IN PROGRESS — FINAL CLOSURE SEAL PENDING
-P2-4 JSON Import Authorization: CLOSED
+P2-3 Final Closure Seal: PASS
+P2-3 overall: CLOSED / PASS
+
+P2-4 Legacy JSON Import Authorization: OPEN
+P2-4 Contract Registration: PENDING INDEPENDENT REVIEW
+P2-4 Implementation Authorization: CLOSED
+P2-4 Implementation: NOT STARTED
+P2-4 Gate: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
 P2 Compose Replacement Gate: CLOSED
@@ -325,3 +332,17 @@ invariant. Independent remote review of implementation correction checkpoint
 remediated, but this docs-only Final Closure Seal candidate cannot certify
 itself. P2-3 overall remains in progress pending its independent review; P2-4
 authorization and every later Gate remain CLOSED.
+
+Independent remote review of Final Closure Seal checkpoint
+`2fb45b25f6880f03f563fd472d8143bfed8699b5` returned `PASS`. Exact-SHA
+`agent-safety` run `31680852943` completed with `success`, including the precise
+full-suite result `413 passed / 1 skipped / 414 total`. The review formally
+closed the P2-3 Closure Contract Review and P2-3 overall, and opened P2-4 Legacy
+JSON Import Authorization. All later Gates remain CLOSED.
+
+The linked P2-4 contract is a docs-only registration candidate. It inventories
+the actual JSON Database v1 and browser-snapshot source families, rejects
+unrelated JSON artifacts, and freezes source identity, owner mapping,
+collection disposition, replay/conflict semantics, durable quarantine,
+zero-loss counters, backup/rollback, fixtures, and required gates. It does not
+implement an importer or open P2-4 Implementation Authorization.
