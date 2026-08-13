@@ -1,0 +1,81 @@
+{
+  "formatVersion": 1,
+  "fixture": "legacy-v5-sanitized.sqlite",
+  "sha256": "d3684b7fb47130f177c8ac48778b826e7daf51c5c94b749f8e3fc3118be1d1c1",
+  "byteSize": 245760,
+  "sqliteLibraryVersionObservedAtSanitization": "3.53.0",
+  "sourceApplication": "naibaji-feeding-agent legacy local SQLite runtime",
+  "sourceOrigin": {
+    "kind": "real local pre-change backup",
+    "relativePath": "agent/backups/production-before-agent-context-render-20260804-165803/agent-data/naibaji.db",
+    "capturedPurpose": "production-before-agent-context-render",
+    "capturedDate": "2026-08-04"
+  },
+  "observedSourceState": "2026-08-04 real local backup with two-column schema_migrations through version 5",
+  "rawSourceSha256": "da45b567fbc2dfa40c4043e42d308db9c4adaa6a6f6062ff6e45b4023d40dcef",
+  "rawWalSha256": "6af4e38dc7fbb6a50d9d2826519bf80780f91703e71023184327c6b319c8fa56",
+  "sanitizationRecord": {
+    "method": "copy raw main database and bound WAL; open the copy to checkpoint version 5; delete all business/auth/message rows; insert deterministic synthetic relationship graph; PRAGMA secure_delete=ON; VACUUM",
+    "removed": [
+      "all original users and credentials",
+      "all original auth sessions and token hashes",
+      "all original batches, observations, decisions, plans, confirmations, messages, audits, operation results, SOPs and chunks"
+    ],
+    "replaced": [
+      "identifiers with fixture-* values",
+      "email with example.invalid",
+      "all free text and JSON payloads with deterministic sanitized fixture values",
+      "all timestamps with deterministic 2026-08-04 audit values"
+    ],
+    "retained": [
+      "raw SQLite schema and indexes",
+      "two-column legacy migration ledger rows 1 through 5 with original audit timestamps",
+      "foreign-key relationship shapes required for migration coverage"
+    ],
+    "secretsPresent": false,
+    "personalDataPresent": false,
+    "liveEndpointsPresent": false,
+    "deviceControlAuthorityPresent": false
+  },
+  "expectedStartVersion": 5,
+  "expectedOutcome": {
+    "migrationVersions": [12, 13],
+    "legacyArchiveVersions": [1, 2, 3, 4, 5],
+    "integrityCheck": "ok",
+    "foreignKeyViolations": 0,
+    "preserveBusinessRelations": true,
+    "preserveFrozenPayloadEvidence": true
+  },
+  "tableInventory": [
+    "agent_messages",
+    "agent_sessions",
+    "audit_events",
+    "auth_sessions",
+    "batches",
+    "daily_observations",
+    "daily_operation_confirmations",
+    "daily_operation_plans",
+    "feeding_decisions",
+    "operation_results",
+    "schema_migrations",
+    "sop_knowledge_chunks",
+    "sop_publication_state",
+    "sop_templates",
+    "users"
+  ],
+  "indexInventory": [
+    "agent_messages_session_batch_idx",
+    "agent_sessions_batch_idx",
+    "audit_events_batch_date_idx",
+    "auth_sessions_lookup_idx",
+    "batches_user_revision_idx",
+    "daily_observations_batch_date_revision_idx",
+    "daily_operation_confirmations_plan_idx",
+    "daily_operation_plans_batch_business_date_idx",
+    "feeding_decisions_active_idx",
+    "feeding_decisions_batch_date_revision_idx",
+    "sop_knowledge_chunks_digest_idx",
+    "sop_templates_created_idx",
+    "users_email_idx"
+  ]
+}

@@ -64,6 +64,10 @@ jobs:
         working-directory: agent
         run: npm run p2-3a-migration-gate
 
+      - name: P2-3B Migration ownership gate
+        working-directory: agent
+        run: npm run p2-3b-migration-ownership-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

@@ -1,0 +1,16 @@
+{
+  "name": "@naibaji/persistence",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./migrations": {
+      "types": "./migrations/index.d.ts",
+      "default": "./migrations/index.js"
+    },
+    "./migrations/schema": {
+      "types": "./migrations/schema.d.ts",
+      "default": "./migrations/schema.js"
+    }
+  }
+}

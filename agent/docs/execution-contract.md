@@ -426,7 +426,7 @@ supersede 旧 active decision
 ## 6. Schema V12
 
 ```text
-MIGRATION_VERSION = 12
+MIGRATION_VERSION = 13
 daily_operation_amendments.origin_kind += mode_change
 
 CREATE UNIQUE INDEX feeding_decisions_one_active_idx
@@ -636,7 +636,7 @@ git archive HEAD
 ```json
 {
   "commit": "...",
-  "schemaVersion": 12,
+  "schemaVersion": 13,
   "decisionPolicyVersion": "execution-contract-v1",
   "feedingModelSourceSha256": "...",
   "feedingModelArtifactSha256": "...",

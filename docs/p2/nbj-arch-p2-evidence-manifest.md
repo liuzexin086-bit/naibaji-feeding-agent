@@ -528,3 +528,41 @@ The registration checkpoint is not implementation evidence and does not review
 or certify itself. P2-3B requires a separate implementation checkpoint,
 independent review, and exact-SHA CI before any P2-3 closure or P2-4
 authorization may change.
+
+## 20. P2-3B Implementation Candidate
+
+Independent review of registration checkpoint
+`d8a9208338b792fbcc4e3c0dbb314f9275abf842` returned `PASS WITH
+NON-BLOCKING FINDING`. `P2-3B-F01` clarified that registration wording cannot
+self-open authorization; authorization became OPEN only from that independent
+verdict.
+
+The separately reviewable implementation candidate is documented in
+[nbj-arch-p2-3b-implementation.md](./nbj-arch-p2-3b-implementation.md). It moves
+schema, structural operations, and migration authority to
+`packages/persistence/migrations`, registers
+retained repair as forward v13 while preserving the exact sealed v12 checksum,
+removes zero-pending startup DDL, instruments the real SQLite authorizer seam,
+adds name/checksum tamper-before-DDL proofs, binds a sanitized real legacy v5
+fixture to raw main/WAL and output hashes, and adds the dedicated
+`p2-3b-migration-ownership-gate`.
+
+Local candidate evidence currently records `46/46` dedicated-gate tests and
+`414/414` full Agent tests. P2-1 (`20/20`), P2-2 (`9/9`), P2-3A (`35/35`),
+P0 (`100/100`), P1 (`197/197`), build, clean-source, both Docker targets, and
+an in-container migration-package import smoke also pass. This remains local, uncommitted evidence until an
+authorized checkpoint is created. Exact-SHA CI and independent implementation
+review remain pending; no Gate state changes.
+
+The local independent-QA leaf produced no report across two bounded attempts
+and was interrupted. That dispatch is `BLOCKED — INFRASTRUCTURE / NO VERDICT`;
+the implementation candidate does not claim independent acceptance.
+
+```text
+P2-3B Contract Registration: PASS
+P2-3B Implementation Authorization: OPEN
+P2-3B Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
+P2-3B Gate: CLOSED
+P2-3 overall: IN PROGRESS
+P2-4 Authorization: CLOSED
+```

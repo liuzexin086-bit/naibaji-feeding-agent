@@ -10,6 +10,13 @@ import type {
 
 export interface LocalStoreOptions {
   filename: string;
+  /** Test/audit seam reporting SQLite schema-changing authorizer actions. */
+  onSchemaDdl?: (event: {
+    actionCode: number;
+    objectName: string | null;
+    auxiliaryName: string | null;
+    databaseName: string | null;
+  }) => void;
 }
 
 export type LocalUserRole = "admin" | "operator";

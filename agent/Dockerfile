@@ -4,6 +4,7 @@ ARG GIT_COMMIT=unknown
 RUN echo "$GIT_COMMIT" > /app/version
 
 COPY agent/package.json agent/package-lock.json ./
+COPY packages/persistence /packages/persistence
 RUN npm ci
 
 COPY agent/tsconfig.json ./
@@ -26,6 +27,7 @@ RUN mkdir -p /data /checkpoints \
 ARG GIT_COMMIT=unknown
 RUN echo "$GIT_COMMIT" > /app/version
 COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /packages/persistence /packages/persistence
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/version ./version
 COPY --from=build /app/.generated-models ./.generated-models

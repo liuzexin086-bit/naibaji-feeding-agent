@@ -55,7 +55,7 @@ export async function computeProvenance({
   const v5LiteModelArtifactSha256 = await sha256File(resolve(agentRoot, ".generated-models", "v5lite-model.cjs"));
   const uiSha256 = await sha256File(resolve(agentRoot, "ui", "liquid-index.html"));
   const schemaVersion = Number(await extractConstant(
-    resolve(agentRoot, "src", "local-db", "schema.ts"),
+    resolve(agentRoot, "..", "packages", "persistence", "migrations", "schema.js"),
     /export const MIGRATION_VERSION\s*=\s*(\d+)/u,
     "SCHEMA_VERSION",
   ));
