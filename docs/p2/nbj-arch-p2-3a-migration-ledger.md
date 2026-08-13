@@ -1,12 +1,19 @@
 # NBJ-ARCH-P2 P2-3A Ordered Migration Ledger
 
-Status: `IMPLEMENTATION EVIDENCE — INDEPENDENT REVIEW PENDING`
+Status: `P2-3A.1 CORRECTION EVIDENCE — REMOTE RE-REVIEW PENDING`
 
 Baseline: `55877db1367a190ea182642bd720ac6a9382dee6`
 
 Scope: migration infrastructure only. This checkpoint does not import JSON or
 Supabase data, change business rules or business schema version, or cut over API,
 Application, UI, LangGraph, runtime, Compose, optimizer, or device-control paths.
+
+Independent remote review of checkpoint
+`7d8da7fc0ce06dbfd6d6a6928de712cdc31869d4` returned `REQUEST CHANGES` for
+`P2-3A-F01`: a rich-v12 restart could rerun the one-time frozen snapshot
+backfill. P2-3A.1 separates structural startup repair from that business-data
+backfill and requires exact JSON non-mutation on rich-v12 restart. This
+correction does not self-close the finding or open the Gate.
 
 ## Ledger identity
 
@@ -53,8 +60,10 @@ name: audited-schema-v12-baseline
 
 If the old ledger already contains version 12, its `applied_at` is preserved and
 no second ledger application is recorded. The frozen idempotent LocalStore
-compatibility checks still run on every startup, matching the sealed runtime
-behavior. If the old ledger contains only an earlier version, that same frozen
+structural compatibility checks still run on every startup, matching the sealed
+runtime behavior. The frozen snapshot business-data backfill runs only during
+the actual first v12 application and never reconstructs evidence on a rich-v12
+restart. If the old ledger contains only an earlier version, that same frozen
 path upgrades the real database to v12 and only then records the rich v12 row.
 All work remains within the existing
 `BEGIN IMMEDIATE` transaction, so business and ledger changes roll back together.
@@ -65,7 +74,8 @@ The P2-3A gate covers:
 
 - fresh database application and idempotent rerun;
 - old v12 ledger import with unchanged business data and audit time;
-- rich v12 restart repair without a second ledger application;
+- rich v12 structural restart repair without frozen-evidence reconstruction or
+  a second ledger application;
 - real historical/N-1 v3, v6, v7, v8, v9, v10, and v11 fixtures;
 - checksum and name tampering before later apply;
 - duplicate and out-of-order registry definitions;

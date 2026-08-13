@@ -234,6 +234,79 @@ describe("SQLite local store", () => {
     database.close();
   });
 
+  it("does not reconstruct frozen batch evidence on a rich-v12 restart", () => {
+    const { filename, store } = fileStore();
+    const frozenData = {
+      config: {
+        sopTemplate: {
+          templateId: "frozen-sop",
+          version: "2026.08.13",
+          sourceSha256: "A".repeat(64),
+          collectionRevision: "frozen:1",
+          parserVersion: "sop-parser@1",
+          embeddingModel: "bge-m3",
+          config: { freeFeedingWindows: [{ startLocal: "09:00", endLocal: "18:00" }] },
+          snapshotSha256: "B".repeat(64),
+        },
+        devicePlanSnapshot: {
+          version: "device-plan@frozen",
+          firstDay: {
+            mode: "timed_quantity",
+            mealTimes: ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00"],
+          },
+          templates: {
+            timed_quantity: {
+              mealTimes: ["09:00"],
+              excludedMealTimes: [],
+              precisionGrams: 1,
+              reductionPriority: ["09:00"],
+            },
+            free_feeding: {
+              windows: [{ startLocal: "00:00", endLocal: "23:59" }],
+              slots: [],
+              stageConditions: {},
+              exceptionBlockers: [],
+            },
+          },
+          sha256: "C".repeat(64),
+        },
+      },
+      records: [],
+    };
+    store.createBatch({
+      userId: "user-a",
+      batchId: "damaged-frozen-evidence",
+      revision: 1,
+      currentDay: 1,
+      data: frozenData,
+    });
+    store.close();
+
+    const damaged = structuredClone(frozenData);
+    delete (damaged.config.sopTemplate as Partial<typeof damaged.config.sopTemplate>)
+      .snapshotSha256;
+    delete (damaged.config.devicePlanSnapshot.templates.free_feeding as Partial<
+      typeof damaged.config.devicePlanSnapshot.templates.free_feeding
+    >).slots;
+    const damagedJson = JSON.stringify(damaged);
+    const database = new DatabaseSync(filename);
+    database.prepare(
+      "UPDATE batches SET data_json = ? WHERE user_id = ? AND id = ?",
+    ).run(damagedJson, "user-a", "damaged-frozen-evidence");
+    database.close();
+
+    const restarted = createLocalStore({ filename });
+    restarted.migrate();
+    restarted.close();
+
+    const checked = new DatabaseSync(filename, { readOnly: true });
+    const restartedJson = checked.prepare(
+      "SELECT data_json FROM batches WHERE user_id = ? AND id = ?",
+    ).get("user-a", "damaged-frozen-evidence")?.data_json;
+    checked.close();
+    expect(restartedJson).toBe(damagedJson);
+  });
+
   it("backfills a missing frozen SOP digest once for legacy batches without changing their revision", () => {
     const { filename, store } = fileStore();
     const sopSnapshot = {

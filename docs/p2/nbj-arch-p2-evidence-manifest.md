@@ -411,13 +411,14 @@ rows are preserved without invented names or checksums. An old v12 row imports
 the audited v12 identity, retains its original `applied_at`, uses
 `legacy-unknown` for its unprovable first application version, and does not
 record a second ledger application. The frozen idempotent compatibility checks
-still run on every startup to preserve LocalStore behavior. Earlier real
-fixtures apply the frozen v12 path inside the same transaction before writing
-the new row.
+for schema structure still run on every startup to preserve LocalStore behavior,
+while the frozen snapshot business-data backfill runs only during actual first
+v12 application. Earlier real fixtures apply that one-time backfill inside the
+same transaction before writing the new row.
 
 ```text
 P2-3 Authorization: OPEN
-P2-3A Implementation: COMPLETE / INDEPENDENT REVIEW PENDING
+P2-3A Implementation: COMPLETE / P2-3A.1 CORRECTION RE-REVIEW PENDING
 P2-3A Gate: CLOSED
 P2-4 JSON Import Authorization: CLOSED
 
@@ -433,3 +434,10 @@ Focused local implementation evidence is provided by
 `npm run p2-3a-migration-gate`, covering the real LocalStore migration fixtures
 and pure ledger invariants. Full regression evidence and an independent verdict
 are required before this checkpoint can be sealed.
+
+Independent remote review of checkpoint
+`7d8da7fc0ce06dbfd6d6a6928de712cdc31869d4` returned `REQUEST CHANGES` with
+P1 `P2-3A-F01`: rich-v12 restart reran the one-time frozen snapshot backfill.
+The P2-3A.1 correction keeps structural repair on restart, confines frozen
+business-evidence backfill to actual first v12 application, and adds a raw
+`batches.data_json` equality regression. Remote re-review remains pending.

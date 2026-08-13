@@ -749,7 +749,8 @@ export class SqliteLocalStore implements LocalStore {
         ].join("\n"),
         apply: () => {
           baselineApplied = true;
-          this.#applyAuditedSchemaV12();
+          this.#applyAuditedSchemaV12Structure();
+          this.#backfillLegacyFrozenSnapshots();
         },
       });
       runMigrationLedger({
@@ -758,14 +759,13 @@ export class SqliteLocalStore implements LocalStore {
         applicationVersion: AGENT_APPLICATION_VERSION,
         beforeApply: () => this.#preflightDuplicateActiveDecisions(),
       });
-      // The legacy LocalStore always ran these idempotent compatibility checks
-      // on startup, including after v12 was already recorded. Keep that behavior
-      // without recording a second application of the audited baseline.
-      if (!baselineApplied) this.#applyAuditedSchemaV12();
+      // Keep structural startup repairs after v12 is recorded, but never rerun
+      // the one-time frozen business-evidence backfill on a rich-v12 restart.
+      if (!baselineApplied) this.#applyAuditedSchemaV12Structure();
     });
   }
 
-  #applyAuditedSchemaV12(): void {
+  #applyAuditedSchemaV12Structure(): void {
       this.#database.exec(INITIAL_SCHEMA);
       this.#ensureAmendmentV10();
       this.#ensureAmendmentActionCancelV11();
@@ -836,7 +836,6 @@ export class SqliteLocalStore implements LocalStore {
         CREATE UNIQUE INDEX IF NOT EXISTS users_email_idx
           ON users(email) WHERE email IS NOT NULL;
       `);
-      this.#backfillLegacyFrozenSnapshots();
   }
 
   #preflightDuplicateActiveDecisions(): void {

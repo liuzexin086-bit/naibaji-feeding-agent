@@ -243,7 +243,7 @@ P2-2 Persistence Boundary: PASS
 P2-2 Gate: OPEN
 
 P2-3 Migration Ledger Authorization: OPEN
-P2-3A Ordered Migration Ledger: IMPLEMENTED / INDEPENDENT REVIEW PENDING
+P2-3A Ordered Migration Ledger: IMPLEMENTED / P2-3A.1 CORRECTION RE-REVIEW PENDING
 P2-3A Gate: CLOSED
 P2-4 JSON Import Authorization: CLOSED
 
@@ -285,4 +285,7 @@ implementation was included.
 P2-3A implementation evidence now records an ordered, checksum-verified ledger
 and lossless legacy-ledger compatibility seam. It retains schema version 12 and
 does not invent identities for historical v3-v11 rows. Independent review is
-still required before the P2-3A Gate or P2-4 authorization may change.
+still required before the P2-3A Gate or P2-4 authorization may change. Review of
+checkpoint `7d8da7fc0ce06dbfd6d6a6928de712cdc31869d4` returned `REQUEST CHANGES`
+for `P2-3A-F01`; the P2-3A.1 candidate separates one-time frozen snapshot
+backfill from structural restart repair and awaits remote re-review.
