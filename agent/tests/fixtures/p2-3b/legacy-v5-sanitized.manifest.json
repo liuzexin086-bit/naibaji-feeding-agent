@@ -46,6 +46,116 @@
     "preserveBusinessRelations": true,
     "preserveFrozenPayloadEvidence": true
   },
+  "expectedPostMigration": {
+    "ledger": [
+      {
+        "version": 12,
+        "name": "audited-schema-v12-baseline",
+        "checksum": "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E",
+        "applicationVersion": "0.1.0"
+      },
+      {
+        "version": 13,
+        "name": "registered-schema-v13-repair",
+        "checksum": "5AE20DC37B6E3B292FBA9F67A8A55B08CC44916B094147267B7D06D9B632CD64",
+        "applicationVersion": "0.1.0"
+      }
+    ],
+    "schemaDigest": "3C84C1A08658681D750A9FB3314839091379C5354D16495D0D980BB49C2569EE",
+    "tableInventory": [
+      "agent_messages",
+      "agent_sessions",
+      "audit_events",
+      "auth_sessions",
+      "batches",
+      "daily_observations",
+      "daily_operation_amendment_actions",
+      "daily_operation_amendments",
+      "daily_operation_confirmations",
+      "daily_operation_plans",
+      "feeding_decisions",
+      "operation_results",
+      "schema_migrations",
+      "schema_migrations_legacy",
+      "sop_edit_tasks",
+      "sop_knowledge_chunks",
+      "sop_publication_state",
+      "sop_templates",
+      "users"
+    ],
+    "indexInventory": [
+      "agent_messages_session_batch_idx",
+      "agent_sessions_batch_idx",
+      "audit_events_batch_date_idx",
+      "auth_sessions_lookup_idx",
+      "batches_user_revision_idx",
+      "daily_observations_batch_date_revision_idx",
+      "daily_operation_amendment_actions_amendment_idx",
+      "daily_operation_amendments_batch_date_idx",
+      "daily_operation_confirmations_plan_idx",
+      "daily_operation_plans_batch_business_date_idx",
+      "feeding_decisions_active_idx",
+      "feeding_decisions_batch_date_revision_idx",
+      "feeding_decisions_one_active_idx",
+      "sop_edit_tasks_created_idx",
+      "sop_knowledge_chunks_digest_idx",
+      "sop_templates_created_idx",
+      "users_email_idx"
+    ],
+    "businessTables": [
+      "agent_messages",
+      "agent_sessions",
+      "audit_events",
+      "batches",
+      "daily_observations",
+      "daily_operation_confirmations",
+      "daily_operation_plans",
+      "operation_results",
+      "sop_knowledge_chunks",
+      "sop_publication_state",
+      "sop_templates",
+      "users"
+    ],
+    "businessDigest": "B0DFF80C77DDAF13466EBA61AF6489A0F8DCCED57B064FAC1ACE234E16E0DE64",
+    "rawHashes": {
+      "batchDataJsonSha256": "BF7E523CAA677DC20A8ED7D2BE5C0487F8D59C0C4A518A71EE808CE4CA1B9CB3",
+      "observationDataJsonSha256": "B47F868796965BC922A6197471DD8ACE3AAEC38575CD180A837D4001F9EBB08F",
+      "messageContentSha256": "9192767DF9B73718AB7AE1F07D839C3646F06C086BD6FCD4449A44BA55142FDE"
+    },
+    "frozenEvidence": {
+      "snapshotSha256": "4C04269BD5FF2A723D8C8F6451C6D798878866B6B6B97225678E4F72387A1930",
+      "devicePlanSnapshotSha256": "613A2BC7AC57C35A9CEED911FDB91277191355B182090FA3AF4876A41F63C6B4",
+      "freeFeedingSlots": [
+        { "slot": 1, "enabled": true, "label": "自由采食时段 1", "startLocal": "09:00", "endLocal": "18:00" },
+        { "slot": 2, "enabled": false, "label": "自由采食时段 2", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 3, "enabled": false, "label": "自由采食时段 3", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 4, "enabled": false, "label": "自由采食时段 4", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 5, "enabled": false, "label": "自由采食时段 5", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 6, "enabled": false, "label": "自由采食时段 6", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 7, "enabled": false, "label": "自由采食时段 7", "startLocal": "09:00", "endLocal": "10:00" },
+        { "slot": 8, "enabled": false, "label": "自由采食时段 8", "startLocal": "09:00", "endLocal": "10:00" }
+      ],
+      "dailyOperationPlan": {
+        "id": "fixture-plan",
+        "user_id": "fixture-user",
+        "batch_id": "fixture-batch",
+        "business_date": "2026-08-04",
+        "based_on_batch_revision": 5,
+        "sop_template_id": "fixture-sop",
+        "sop_source_sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        "device_plan_version": "device-plan@legacy-v5",
+        "device_plan_sha256": "BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+        "selected_mode": "timed_quantity",
+        "effective_mode": "timed_quantity",
+        "operations_json": "[]",
+        "operations_sha256": "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC",
+        "status": "confirmed",
+        "created_at": "2026-08-04T00:10:00.000Z",
+        "proposed_setting_json": null,
+        "feedback_origin_json": null
+      }
+    }
+  },
   "tableInventory": [
     "agent_messages",
     "agent_sessions",
