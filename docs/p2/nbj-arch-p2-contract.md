@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-2 REVIEW PASS — P2-2 GATE OPEN`
+Status: `P2-3A REVIEW PASS — P2-3A GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -23,6 +23,8 @@ P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nb
 P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
 P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
+
+P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -243,8 +245,14 @@ P2-2 Persistence Boundary: PASS
 P2-2 Gate: OPEN
 
 P2-3 Migration Ledger Authorization: OPEN
-P2-3A Ordered Migration Ledger: IMPLEMENTED / P2-3A.1 CORRECTION RE-REVIEW PENDING
-P2-3A Gate: CLOSED
+P2-3A Ordered Migration Ledger: PASS
+P2-3A.1 Correction: PASS
+P2-3A Independent Remote Review: PASS
+P2-3A-F01: CLOSED
+Independent QA: BLOCKED — INFRASTRUCTURE / NO VERDICT
+P2-3A Gate: OPEN
+P2-3A Final Review Seal: PASS
+P2-3 overall: IN PROGRESS
 P2-4 JSON Import Authorization: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
@@ -284,8 +292,12 @@ implementation was included.
 
 P2-3A implementation evidence now records an ordered, checksum-verified ledger
 and lossless legacy-ledger compatibility seam. It retains schema version 12 and
-does not invent identities for historical v3-v11 rows. Independent review is
-still required before the P2-3A Gate or P2-4 authorization may change. Review of
+does not invent identities for historical v3-v11 rows. Review of
 checkpoint `7d8da7fc0ce06dbfd6d6a6928de712cdc31869d4` returned `REQUEST CHANGES`
 for `P2-3A-F01`; the P2-3A.1 candidate separates one-time frozen snapshot
-backfill from structural restart repair and awaits remote re-review.
+backfill from structural restart repair. Independent remote re-review of
+correction checkpoint `7e4101bebadbce8aed43a1b02a0f7f61f67aebc6`
+returned `PASS`, closed `P2-3A-F01`, and opened the P2-3A Gate. The failed QA
+dispatch remains separately recorded as an infrastructure blocker with no
+verdict. P2-3 overall remains in progress, P2-4 remains unauthorized, and the
+current contract defines no P2-3B stage.

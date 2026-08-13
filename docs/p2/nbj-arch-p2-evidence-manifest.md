@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-2 REVIEW PASS — P2-2 GATE OPEN`
+Status: `P2-3A REVIEW PASS — P2-3A GATE OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -23,6 +23,8 @@ P2-2B Repository Boundary Evidence: [nbj-arch-p2-2b-repository-boundary.md](./nb
 P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-review-2b-final.md)
 
 P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
+
+P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
 
 Captured: 2026-08-11
 
@@ -440,4 +442,39 @@ Independent remote review of checkpoint
 P1 `P2-3A-F01`: rich-v12 restart reran the one-time frozen snapshot backfill.
 The P2-3A.1 correction keeps structural repair on restart, confines frozen
 business-evidence backfill to actual first v12 application, and adds a raw
-`batches.data_json` equality regression. Remote re-review remains pending.
+`batches.data_json` equality regression. At the correction checkpoint, remote
+re-review remained pending; the accepted verdict is recorded separately below.
+
+## 18. P2-3A Final Review Seal
+
+Independent remote re-review accepted implementation checkpoint
+`7d8da7fc0ce06dbfd6d6a6928de712cdc31869d4` together with correction
+checkpoint `7e4101bebadbce8aed43a1b02a0f7f61f67aebc6`. `P2-3A-F01` is CLOSED and
+the P2-3A Gate is OPEN. The QA dispatch remains separately recorded as
+`BLOCKED — INFRASTRUCTURE / NO VERDICT`; the remote review PASS does not rewrite
+that ledger.
+
+Exact-SHA `agent-safety` run `31659156393` completed successfully for the
+correction checkpoint. Its authoritative full-suite count is
+`406 passed / 1 skipped / 407 total`; P2-3A Migration passed `35/35`.
+
+```text
+P2-3A Implementation: PASS
+P2-3A.1 Correction: PASS
+P2-3A Independent Remote Review: PASS
+P2-3A-F01: CLOSED
+P2-3A Gate: OPEN
+P2-3A Final Review Seal: PASS
+
+P2-3 overall: IN PROGRESS
+P2-4 Authorization: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+The current bound contract has no P2-3B definition. This Seal does not create
+or authorize one, does not complete P2-3 overall, and does not authorize P2-4.
