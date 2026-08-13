@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-3A REVIEW PASS — P2-3A GATE OPEN`
+Status: `P2-3B CONTRACT REGISTERED — IMPLEMENTATION AUTHORIZATION OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -25,6 +25,8 @@ P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-r
 P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
 
 P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
+
+P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
 
 Captured: 2026-08-11
 
@@ -476,5 +478,53 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
-The current bound contract has no P2-3B definition. This Seal does not create
-or authorize one, does not complete P2-3 overall, and does not authorize P2-4.
+At the P2-3A Seal checkpoint, the bound contract had no P2-3B definition. That
+Seal did not create or authorize one, complete P2-3 overall, or authorize P2-4.
+The later registration below preserves that historical boundary.
+
+## 19. P2-3 Closure Contract Review and P2-3B Registration
+
+After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three
+P2-3-level gaps that do not reopen P2-3A:
+
+1. the accepted ledger remains owned under `agent/src/local-db` instead of the
+   frozen single Persistence migration authority;
+2. a rich-v12 restart with no pending ledger application still permits ad-hoc
+   schema DDL through structural repair;
+3. generated historical SQLite fixtures do not by themselves satisfy the
+   explicitly required sanitized legacy SQLite copy, and no independently
+   accepted reconstructed-fixture equivalence amendment exists.
+
+The P2-3B contract registers migration-runner ownership, zero-DDL rich restart,
+tamper-before-DDL, immutable sanitized fixture provenance, and complete P2-3A
+invariant preservation as blocking acceptance criteria. This registration is
+docs-only. It changes no implementation, schema, migration identity, runtime, or
+later-stage authority.
+
+```text
+Registration baseline: 6e83245aee33a5ec4de76249f4310e550b77dc96
+
+P2-3A Ordered Migration Ledger: CLOSED / PASS
+P2-3A Gate: OPEN
+P2-3A-F01: CLOSED
+
+P2-3 Closure Contract Review: REQUEST CHANGES
+P2-3B Contract: REGISTERED
+P2-3B Implementation Authorization: OPEN
+P2-3B Implementation: NOT STARTED
+P2-3B Gate: CLOSED
+
+P2-3 overall: IN PROGRESS
+P2-4 Legacy JSON Import Authorization: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+The registration checkpoint is not implementation evidence and does not review
+or certify itself. P2-3B requires a separate implementation checkpoint,
+independent review, and exact-SHA CI before any P2-3 closure or P2-4
+authorization may change.

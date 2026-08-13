@@ -73,6 +73,14 @@ orphans = 0
 
 Hash equality is required where ordering and serialization are contractually canonical. Otherwise compare normalized typed values and separately prove canonical reserialization.
 
+For P2-3 closure, the sanitized legacy SQLite copy requires a raw source
+SHA-256, origin schema/version statement, sanitization record, and fixture
+manifest. Tests verify the hash, copy the immutable source into a temporary
+directory, and migrate only the copy. A reconstructed fixture is not equivalent
+unless a separate independent contract amendment accepts its provenance,
+fidelity, limitations, deterministic construction, and coverage before
+implementation claims closure.
+
 ## 5. Expected Delta registry
 
 No intentional behavior change may be hidden inside a refactor. Before code changes, add a record with:
@@ -103,6 +111,9 @@ Only already approved P0 corrections may enter this registry during P2. Convenie
 - HTTP handlers translate transport contracts and call Application Services; they do not reproduce Domain rules.
 - During cutover, an adapter may preserve a legacy API response, but the adapter is read-only with respect to business semantics and has an expiry checkpoint.
 - Database migrations are forward, transactional where SQLite permits, checksum-verified, and idempotent to re-run only when explicitly designed.
+- A rich database with zero pending registered migrations executes zero schema
+  DDL on restart. All retained structural repair has migration identity and
+  checksum and runs only while that migration is pending.
 - Migration never reads the latest SOP/model to reinterpret old decisions; stored version/digest evidence is authoritative for replay.
 - JSON/Supabase import is one-way. Running the same source twice creates zero new domain records on the second run.
 - Quarantine is a successful preservation outcome, not permission to report the import as complete.
@@ -137,3 +148,8 @@ Rollback evidence includes the previous commit, database backup SHA-256, schema/
 ## 9. Closure evidence
 
 The compatibility Gate opens only when all affected frozen fixtures pass, every delta is registered and approved, import/migration invariants are zero-loss, boundary tests are enforced in CI, and an independent reviewer confirms that architectural movement did not alter unapproved business behavior.
+
+P2-3B must additionally prove both zero-DDL rich restart and tamper-before-DDL:
+ledger, normalized `sqlite_schema`, and frozen business digests remain unchanged;
+an instrumented execution seam observes zero schema DDL; checksum or name
+tampering fails before any schema/business mutation or later migration apply.

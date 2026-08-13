@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-3A REVIEW PASS — P2-3A GATE OPEN`
+Status: `P2-3B CONTRACT REGISTERED — IMPLEMENTATION AUTHORIZATION OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -25,6 +25,8 @@ P2-2B / P2-2 Final Review Seal: [nbj-arch-p2-review-2b-final.md](./nbj-arch-p2-r
 P2-3A Migration Ledger Evidence: [nbj-arch-p2-3a-migration-ledger.md](./nbj-arch-p2-3a-migration-ledger.md)
 
 P2-3A Final Review Seal: [nbj-arch-p2-review-3a-final.md](./nbj-arch-p2-review-3a-final.md)
+
+P2-3B Contract: [nbj-arch-p2-3b-contract.md](./nbj-arch-p2-3b-contract.md)
 
 Baseline tag: `nbj-execution-contract-p1-baseline-20260811`
 
@@ -252,6 +254,11 @@ P2-3A-F01: CLOSED
 Independent QA: BLOCKED — INFRASTRUCTURE / NO VERDICT
 P2-3A Gate: OPEN
 P2-3A Final Review Seal: PASS
+P2-3 Closure Contract Review: REQUEST CHANGES
+P2-3B Contract: REGISTERED
+P2-3B Implementation Authorization: OPEN
+P2-3B Implementation: NOT STARTED
+P2-3B Gate: CLOSED
 P2-3 overall: IN PROGRESS
 P2-4 JSON Import Authorization: CLOSED
 
@@ -300,4 +307,11 @@ correction checkpoint `7e4101bebadbce8aed43a1b02a0f7f61f67aebc6`
 returned `PASS`, closed `P2-3A-F01`, and opened the P2-3A Gate. The failed QA
 dispatch remains separately recorded as an infrastructure blocker with no
 verdict. P2-3 overall remains in progress, P2-4 remains unauthorized, and the
-current contract defines no P2-3B stage.
+P2-3 Closure Contract Review then identified three remaining P2-3 gaps:
+migration identity/orchestration has not moved to the frozen Persistence
+migration authority, a rich-v12 zero-pending restart can still execute ad-hoc
+schema DDL, and the required sanitized legacy SQLite fixture is not yet present
+or replaced by an independently accepted equivalence amendment. P2-3B is now
+registered to close only those gaps while freezing every accepted P2-3A
+invariant. Its implementation is authorized but not started; its Gate and P2-4
+authorization remain CLOSED.

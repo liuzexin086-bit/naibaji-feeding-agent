@@ -56,6 +56,14 @@ CI preflight receipt: [nbj-arch-p2-ci-preflight-receipt.md](./nbj-arch-p2-ci-pre
 | Optimizer candidate | Python files/results | Experimental artifact only; no production authority | Offline experiment workflow | Candidate may be reviewed in a future independent Gate | Runtime import, automatic publish, device output |
 | V5-Lite result | Root model and legacy/shadow services | Shadow-only derived telemetry until a future authority Gate | Deterministic shadow service | Retained for parity and observation only | Production decision or device authority |
 
+P2-3B registers closure work against the schema-version/migration-history row
+without changing that target. Migration definitions, identity, validation, and
+orchestration must converge on the single Persistence migration authority;
+`local-db` may retain only the SQLite connection/adapter and transactional
+execution seam. A rich database with zero pending migrations must execute zero
+schema DDL. Any alternative physical target requires a separately reviewed
+contract amendment proving that it does not create dual migration authority.
+
 ## Current runtime conflicts that P2 must close
 
 1. Electron starts the JSON backend while its page also reads/writes Supabase and calls the Feeding Agent API.
