@@ -98,7 +98,51 @@ The correction commit records these closures; the findings stay OPEN until
 the independent final narrow re-review closes them. The P2-4 Gate remains
 CLOSED.
 
+### 18.8 Implementation final narrow re-review — REQUEST CHANGES (P2-4-F05.1 / F07.1 / F09)
 
+Independent final narrow re-review of
+`bb1aa8aeba92971fd75bac0eb91865e5af7a6af4` (1 commit / 13 files) closed
+`P2-4-F04` (canonical key semantics), the original F05 tenant isolation,
+`P2-4-F06` (lossless duplicate-key raw evidence and unknown top-level value
+preservation), `P2-4-F07` (transactional rollback) and `P2-4-F08`
+(sealed v15 with literal `version: 15` and runtime drift assert), and
+confirmed exact-SHA CI (run 31763824664; Full Agent 472 passed + 1 skipped
+= 473 total; P2-4 gate 107/107). It then returned `REQUEST CHANGES` with
+three P1 items:
+
+- `P2-4-F05.1` - the replay digest projection is still incomplete:
+  mapped target rows bind only `data_json` (authoritative columns
+  `status/revision/current_day` on batches and
+  `batch_id/date_local/observed_at/batch_revision` on daily_observations
+  can drift without digest change); quarantine digest omits
+  `source_ordinal`, `parent_source_identity` and
+  `owner_mapping_sha256`; manifest digest binds only counters/unknown
+  keys/owner mapping/run state, not the immutable semantic manifest
+  fields (`source_byte_length`, `source_schema_version`,
+  `importer_contract_version`, `backup_sha256`, `restore_location`,
+  ...). No tamper tests exist for batch.status, observation.batch_id,
+  quarantine parent identity, or manifest importer/version drift.
+- `P2-4-F07.1` - restore proof is not authoritative/complete:
+  `preImportDigest` is supplied by the caller instead of being sealed by
+  the backup authority; `RestoreReceipt` lacks `preImportCommit`,
+  `sourceSha256` and `ownerMappingSha256`; `computeDestinationDigest`
+  hashes 7 of the 22 destination authority tables; restore returns a
+  receipt even when `digestMatch=false` or integrity/FK checks fail
+  (not fail-closed).
+- `P2-4-F09` (new) - duplicate-key quarantine identity still uses the
+  contract-forbidden lossy canonical representation: the quarantine
+  identity's `raw_row_canonical_sha256` is computed over the LAST-WINS
+  parsed row via CJSON (source `{"id":"a","id":"b"}` binds
+  `{"id":"b"}`), although contract 5.1 declares a duplicate-key row not
+  canonically serializable; and a row with a provable source ID
+  (`{"id":"stable-id","status":"a","status":"b"}`) is routed to the
+  quarantine identity anyway, bypassing `record_identity`.
+
+The correction checkpoint (this round) applies the docs-only micro-amendment
+in 5.2 (two frozen duplicate-key identity rules plus known vector V7) and
+records the implementation closures in the implementation document; the
+findings stay OPEN until an independent re-review of the correction closes
+them. The P2-4 Gate remains CLOSED.
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -297,6 +341,45 @@ cross-source quarantine separation.
 | V4b — boundary disambiguation | as V1, but `collection="a"`, `source_record_id="bc"`; must differ from V4a | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","a","bc"]` | `d60212cc53f784f272b5271ab57a73e2ca3f08b77621eb262d7afcad7429a8b1` |
 | V5 — source-bound quarantine identity | `source_kind="json-database-v1"`, `source_sha256` as V1, `collection="dailyRecords"`, `raw_row={"qty":2.5,"note":"乳量","id":"r-9"}`, `source_ordinal=3`; raw row bytes `{"id":"r-9","note":"乳量","qty":2.5}`; `raw_row_canonical_sha256=42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708`; tuple `["quarantine","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `["quarantine","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `e336926640a38fcc5061f098f708e6bad82a2c88da51bcca83ef0755549e4f33` |
 | V6 — cross-source quarantine separation | same raw row, collection, and ordinal as V5, but `source_sha256="6653b072ca9d89fec4eaa7e88a06bcaa6860b6ad3fd7d01020b57e0cd5b12e47"` (a different source); identity MUST differ from V5 | `["quarantine","json-database-v1","6653b072ca9d89fec4eaa7e88a06bcaa6860b6ad3fd7d01020b57e0cd5b12e47","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `6c55d8371e3befe0e3684662e94cc77bad4a932cd89ccac0df3302fed5cb5f0e` |
+| V7 — raw-slice-bound duplicate-key quarantine identity | `source_kind="json-database-v1"`, `source_sha256` as V1, `collection="dailyRecords"`, `source_ordinal=3`; original raw row slice text `{"id":"a","id":"b","status":"active"}`; `original_raw_row_sha256=e977a32c23f0cf0d65dc87d91b9922bc1a0808f9cebcee7fcf5cbf046ab7adb3` (SHA-256 of the raw slice text, duplicate occurrences included); tuple `["quarantine-raw","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","e977a32c23f0cf0d65dc87d91b9922bc1a0808f9cebcee7fcf5cbf046ab7adb3",3]` | `["quarantine-raw","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","e977a32c23f0cf0d65dc87d91b9922bc1a0808f9cebcee7fcf5cbf046ab7adb3",3]` | `d102615572048ff6969643a2d4c8ae97ac00c171872140d990c7d1e36d3723d9` |
+
+### 5.2 Duplicate-key row identity amendment (P2-4-F09 freeze)
+
+This docs-only micro-amendment resolves the 5.1 internal tension for
+duplicate-key rows. Contract 5.1 declares a row with duplicate keys not
+canonically serializable, therefore `CJSON(raw_row)` — and any identity
+derived from a parse of that row — is UNDEFINED for it. The amendment
+freezes two rules that replace the previous implicit last-wins behavior;
+the frozen V7 vector above must be reproduced byte-for-byte by the gate
+(§14.1).
+
+```text
+Rule 1 — duplicate keys do NOT affect the source id (the row still has a
+provable source ID, string or safe integer):
+  identity            = record_identity (frozen 5.1 encoding, unchanged)
+  disposition         = quarantined (reason code duplicate-key)
+  raw evidence        = the ORIGINAL raw row slice, duplicate occurrences
+                        included, with its own SHA-256/byte length
+
+Rule 2 — duplicate keys make the source id ambiguous/unprovable (the
+duplicate key IS the id field, or the id is otherwise not a provable
+source ID):
+  raw_duplicate_quarantine_identity =
+    SHA-256( UTF-8( CJSON([ "quarantine-raw", source_kind, source_sha256,
+                           collection, original_raw_row_sha256,
+                           source_ordinal ]) ) )
+  original_raw_row_sha256 = SHA-256( UTF-8( original raw row slice text ) )
+```
+
+`original_raw_row_sha256` is the hash of the ORIGINAL source row slice
+text (byte-for-byte, every duplicate key occurrence included), never a
+re-serialization of the last-wins parse. The leading `"quarantine-raw"`
+discriminator keeps this space disjoint from both the record-key space and
+the `"quarantine"` space of 5.1. Quarantine identities remain
+preservation-only and must never become a Domain business ID. Rule 2
+replaces `raw_row_canonical_sha256` for duplicate-key rows only; the 5.1
+formula continues to apply verbatim to rows without duplicate keys.
+
 
 ## 6. Owner and tenant binding
 
