@@ -26,8 +26,14 @@ export interface DuplicateKeyRowEvidence {
   readonly rawText: string;
   readonly rawSha256: string;
   readonly byteLength: number;
-  /** Canonical key names that occur more than once inside this row (contract 5.2). */
-  readonly duplicateKeys: readonly string[];
+  /**
+   * True iff the source record's id field itself is duplicated, i.e. a
+   * duplicate key at the exact top-level path
+   * $["<collection>"]["<ordinal>"]["id"] (contract 5.2 Rule 2). A nested
+   * duplicate key also named "id" does NOT touch the top-level id, so it
+   * leaves this false (Rule 1 keeps the provable record_identity).
+   */
+  readonly sourceIdFieldDuplicated: boolean;
 }
 
 export interface UnknownTopLevelValue {
@@ -108,17 +114,23 @@ export function readJsonV1Source(path: string): JsonV1Source {
   // other duplicate (envelope, meta, or unknown top-level structure) makes
   // the source non-canonically serializable and fails closed
   const duplicateKeyRowKeys = new Set<string>();
-  const duplicateKeysByRow = new Map<string, string[]>();
+  // contract 5.2 Rule 2 fires only when the duplicated key is the source
+  // record's own id field: the exact top-level path
+  // $["<collection>"]["<ordinal>"]["id"]. A nested duplicate key also
+  // named "id" is a different path and does NOT count.
+  const duplicatedSourceIdRows = new Set<string>();
   for (const duplicatePath of duplicatePaths) {
     const rowKey = rowKeyOf(duplicatePath);
     if (rowKey !== null) {
       duplicateKeyRowKeys.add(rowKey);
-      const keyMatch = /\["([^"]+)"\]$/.exec(duplicatePath);
-      if (keyMatch) {
-        const key = keyMatch[1] as string;
-        const keys = duplicateKeysByRow.get(rowKey) ?? [];
-        if (!keys.includes(key)) keys.push(key);
-        duplicateKeysByRow.set(rowKey, keys);
+      // the canonical id-field path is $["<collection>"]["<ordinal>"]["id"];
+      // rowKey is <collection>[<ordinal>] so rebuild the quoted form
+      const rk = /^(.*?)\[(\d+)\]$/.exec(rowKey);
+      if (
+        rk &&
+        duplicatePath === '$["' + rk[1] + '"][' + rk[2] + ']["id"]'
+      ) {
+        duplicatedSourceIdRows.add(rowKey);
       }
     } else {
       throw new SourceReadError("malformed-json: duplicate key outside collection rows at " + duplicatePath);
@@ -141,7 +153,7 @@ export function readJsonV1Source(path: string): JsonV1Source {
       rawText,
       rawSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
       byteLength: Buffer.byteLength(rawText, "utf8"),
-      duplicateKeys: duplicateKeysByRow.get(rowKey) ?? [],
+      sourceIdFieldDuplicated: duplicatedSourceIdRows.has(rowKey),
     });
   }
   const unknownTopLevelValues: UnknownTopLevelValue[] = [];

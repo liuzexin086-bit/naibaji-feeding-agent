@@ -139,6 +139,9 @@ function computeSourceDigest(
         dateLocal: null,
         observedAt: null,
         batchRevision: null,
+        idempotencyKey: String(content.idempotency_key),
+        createdAt: String(content.created_at),
+        updatedAt: String(content.updated_at),
       });
     } else {
       targets.push({
@@ -152,6 +155,9 @@ function computeSourceDigest(
         dateLocal: String(content.date_local),
         observedAt: String(content.observed_at),
         batchRevision: Number(content.batch_revision),
+        idempotencyKey: String(content.idempotency_key),
+        createdAt: String(content.created_at),
+        updatedAt: null,
       });
     }
   }
@@ -285,11 +291,13 @@ export function createImportPersistence(
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_record_identity",
     ),
     batchById: database.prepare(
-      "SELECT user_id, id, revision, current_day, status, data_json" +
+      "SELECT user_id, id, revision, current_day, status, data_json," +
+      " idempotency_key, created_at, updated_at" +
       " FROM batches WHERE user_id = ? AND id = ?",
     ),
     observationById: database.prepare(
-      "SELECT user_id, id, batch_id, date_local, observed_at, batch_revision, data_json" +
+      "SELECT user_id, id, batch_id, date_local, observed_at, batch_revision, data_json," +
+      " idempotency_key, created_at" +
       " FROM daily_observations WHERE user_id = ? AND id = ?",
     ),
     traceDigestRows: database.prepare(
@@ -443,35 +451,6 @@ export function createImportPersistence(
         );
       }
     },
-    queryTargetRowsByImportKeys(keys) {
-      const entries: TargetRowDigestEntry[] = [];
-      const seen = new Set<string>();
-      const manifest = statements.findManifest.get("json-database-v1", "") as Row | undefined;
-      void manifest;
-      for (const table of ["batches", "daily_observations"]) {
-        const statement = table === "batches" ? statements.batchById : statements.observationById;
-        for (const key of keys) {
-          if (seen.has(key)) continue;
-          const row = statement.get(key) as Row | undefined;
-          if (row !== undefined) {
-            seen.add(key);
-            entries.push({
-              table: table as "batches" | "daily_observations",
-              id: String(row.id),
-              dataJson: String(row.data_json),
-              revision: table === "batches" ? Number(row.revision) : null,
-              currentDay: table === "batches" ? Number(row.current_day) : null,
-              status: table === "batches" ? String(row.status) : null,
-              batchId: table === "daily_observations" ? String(row.batch_id) : null,
-              dateLocal: table === "daily_observations" ? String(row.date_local) : null,
-              observedAt: table === "daily_observations" ? String(row.observed_at) : null,
-              batchRevision: table === "daily_observations" ? Number(row.batch_revision) : null,
-            });
-          }
-        }
-      }
-      return entries.sort((a, b) => (a.table + a.id < b.table + b.id ? -1 : 1));
-    },
     querySourceDigest(sourceKind, sourceSha256, targetUserId, manifestFacts) {
       return computeSourceDigest(
         statements,
@@ -496,6 +475,9 @@ export function createImportPersistence(
           throw new ImportError("backup integrity check failed: " + integrity);
         }
         foreignKeyViolations = (check.prepare("PRAGMA foreign_key_check").all() as Row[]).length;
+        if (foreignKeyViolations !== 0) {
+          throw new ImportError("backup foreign-key violations: " + foreignKeyViolations);
+        }
         const schemaRows = check
           .prepare(
             "SELECT type, name, tbl_name, sql FROM sqlite_schema" +

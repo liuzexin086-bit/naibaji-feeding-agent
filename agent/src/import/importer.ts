@@ -26,8 +26,8 @@ export interface ImportLegacyJsonInput {
   readonly ownerMappingPath: string;
   readonly persistence: ImportPersistencePort;
   readonly now?: () => string;
-  /** Pre-import commit sealed into the backup evidence (contract 11). */
-  readonly preImportCommit?: string;
+  /** Pre-import commit sealed into the backup evidence (contract 11). Required: must be a 40-hex SHA-1 pre-import commit. */
+  readonly preImportCommit: string;
 }
 
 interface RowDecision {
@@ -124,6 +124,12 @@ const COLLECTION_MAPPINGS: Record<string, CollectionMapping> = {
 };
 
 export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult {
+  // Contract 11 rollback evidence requires THE pre-import commit; "unknown" or an
+  // empty/malformed value is not provable evidence. Reject before touching source
+  // or destination so a bad commit never yields any import writes.
+  if (!/^[0-9a-fA-F]{40}$/.test(input.preImportCommit)) {
+    throw new ImportError("invalid-pre-import-commit: " + input.preImportCommit);
+  }
   const now = input.now ?? (() => new Date().toISOString());
   const source = readJsonV1Source(input.sourcePath);
   const mapping = loadOwnerMapping(input.ownerMappingPath);
@@ -220,7 +226,7 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
   const backup = input.persistence.createBackup({
     sourceSha256: source.sha256,
     ownerMappingSha256: mapping.sha256,
-    preImportCommit: input.preImportCommit ?? "unknown",
+    preImportCommit: input.preImportCommit,
   });
   const runId = randomUUID();
   const counters = emptyCounters();
@@ -272,7 +278,7 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
           // duplicate key IS the id field (or the id is otherwise unprovable)
           // -> raw-slice-bound raw_duplicate_quarantine_identity over the
           // ORIGINAL raw row slice SHA, never a CJSON of the last-wins parse.
-          const idDuplicated = duplicateKeyRow.duplicateKeys.includes("id");
+          const idDuplicated = duplicateKeyRow.sourceIdFieldDuplicated;
           if (!idDuplicated && isProvableSourceId(idValue)) {
             identity = recordIdentity({
               sourceKind: SOURCE_KIND_JSON_DATABASE_V1,

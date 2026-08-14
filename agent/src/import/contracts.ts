@@ -193,6 +193,11 @@ export interface TargetRowDigestEntry {
   readonly dateLocal: string | null;
   readonly observedAt: string | null;
   readonly batchRevision: number | null;
+  // lifecycle/revision/timestamps shared by both tables
+  readonly idempotencyKey: string | null;
+  readonly createdAt: string | null;
+  // batches only (null for daily_observations, which have no updated_at)
+  readonly updatedAt: string | null;
 }
 
 /**
@@ -266,9 +271,6 @@ export interface ImportPersistencePort {
   findObservationByImportKey(userId: string, idempotencyKey: string): boolean;
   insertBatch(input: TargetBatchInput): void;
   insertObservation(input: TargetObservationInput): void;
-  queryTargetRowsByImportKeys(
-    keys: readonly string[],
-  ): TargetRowDigestEntry[];
   querySourceDigest(
     sourceKind: string,
     sourceSha256: string,

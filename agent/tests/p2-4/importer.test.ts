@@ -31,6 +31,10 @@ import type { ImportTestContext } from "./helpers.js";
 const manifest = loadFixtureManifest();
 const contexts: ImportTestContext[] = [];
 
+// frozen rollback evidence requires THE pre-import commit (contract 11, F07.1);
+// a 40-hex SHA-1 that must round-trip into backup evidence verbatim
+const PRE_IMPORT_COMMIT = "bb1aa8aeba92971fd75bac0eb91865e5af7a6af4";
+
 function context(): ImportTestContext {
   const ctx = createImportTestContext();
   contexts.push(ctx);
@@ -49,6 +53,7 @@ function runImport(ctx: ImportTestContext, fixtureName: string, targetUserId = "
     ownerMappingPath: mapping.path,
     persistence: ctx.persistence,
     now: () => "2026-08-01T00:00:00.000Z",
+    preImportCommit: PRE_IMPORT_COMMIT,
   });
 }
 
@@ -164,6 +169,7 @@ describe("P2-4 legacy JSON import application service", () => {
         sourcePath: fixturePath("legacy-json-v1-sanitized.json"),
         ownerMappingPath: badMapping.path,
         persistence: ctx.persistence,
+        preImportCommit: PRE_IMPORT_COMMIT,
       }),
     ).toThrow(/mapping-source-mismatch/);
     expect(() => runImport(ctx, "legacy-json-v1-sanitized.json", "missing-user")).toThrow(/target-user-missing/);
@@ -314,6 +320,7 @@ describe("P2-4 legacy JSON import application service", () => {
       ownerMappingPath: mapping.path,
       persistence: ctx.persistence,
       now: () => "2026-08-01T00:00:00.000Z",
+      preImportCommit: PRE_IMPORT_COMMIT,
     });
     expect(result.state).toBe("PRESERVED_WITH_QUARANTINE");
     expect(result.counters.perCollection.batches).toMatchObject({
@@ -373,6 +380,7 @@ describe("P2-4 legacy JSON import application service", () => {
       ownerMappingPath: mapping.path,
       persistence: ctx.persistence,
       now: () => "2026-08-01T00:00:00.000Z",
+      preImportCommit: PRE_IMPORT_COMMIT,
     });
     expect(result.state).toBe("PRESERVED_WITH_QUARANTINE");
     const quarantine = ctx.persistence.listQuarantine();
@@ -392,6 +400,43 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(rowCount(ctx.database, "batches")).toBe(0);
   });
 
+  it("keeps record_identity for a nested duplicate key also named id (contract 5.2 rule 1, F09.1)", () => {
+    const ctx = context();
+    const path = join(ctx.dir, "nested-duplicate-key.json");
+    writeFileSync(path, '{"meta":{"schemaVersion":1},"batches":[{"id":"stable-id","nested":{"id":"x","id":"y"},"status":"active","currentDayIndex":0,"createdAt":"2026-08-01T00:00:00.000Z","updatedAt":"2026-08-01T00:00:00.000Z"}],"dailyRecords":[],"weighSamples":[],"recommendations":[],"approvals":[],"executions":[],"sceneStates":[],"modelRegistry":[],"auditLogs":[]}');
+    const mapping = writeOwnerMapping(ctx.dir, sha256File(path));
+    const result = importLegacyJson({
+      sourcePath: path,
+      ownerMappingPath: mapping.path,
+      persistence: ctx.persistence,
+      now: () => "2026-08-01T00:00:00.000Z",
+      preImportCommit: "bb1aa8aeba92971fd75bac0eb91865e5af7a6af4",
+    });
+    expect(result.state).toBe("PRESERVED_WITH_QUARANTINE");
+    // one quarantine row, reason duplicate-key
+    expect(rowCount(ctx.database, "import_quarantine")).toBe(1);
+    const quarantine = ctx.persistence.listQuarantine();
+    expect(quarantine).toHaveLength(1);
+    expect(quarantine[0]?.reasonCode).toBe("duplicate-key");
+    // F09.1: the nested duplicate key also named "id" must NOT trigger
+    // contract 5.2 Rule 2. The top-level source id "stable-id" is still
+    // provable and not duplicated, so the identity is the NORMAL
+    // record_identity, never the raw-slice quarantine identity.
+    const expectedIdentity = recordIdentity({
+      sourceKind: "json-database-v1",
+      sourceSha256: sha256File(path),
+      collection: "batches",
+      sourceRecordId: "stable-id",
+    });
+    expect(quarantine[0]?.sourceRecordIdentity).toBe(expectedIdentity);
+    // raw evidence stays lossless, containing both nested id occurrences
+    expect(quarantine[0]?.rawPayloadJson).toContain('"id":"x"');
+    expect(quarantine[0]?.rawPayloadJson).toContain('"id":"y"');
+    expect(quarantine[0]?.rawPayloadJson).toContain('"id":"stable-id"');
+    // no target row is written
+    expect(rowCount(ctx.database, "batches")).toBe(0);
+  });
+
   it("fails closed on envelope-level duplicate keys with zero writes", () => {
     const ctx = context();
     const path = join(ctx.dir, "malformed.json");
@@ -402,6 +447,7 @@ describe("P2-4 legacy JSON import application service", () => {
         sourcePath: path,
         ownerMappingPath: mapping.path,
         persistence: ctx.persistence,
+        preImportCommit: PRE_IMPORT_COMMIT,
       }),
     ).toThrow(SourceReadError);
     expect(rowCount(ctx.database, "import_manifests")).toBe(0);
@@ -439,6 +485,7 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(receipt.backupSha256).toBe(result.backup.sha256);
     expect(receipt.preImportContentDigest).toBe(result.backup.preImportContentDigest);
     expect(receipt.preImportCommit).toBe(result.backup.preImportCommit);
+    expect(receipt.preImportCommit).toBe(PRE_IMPORT_COMMIT);
     expect(receipt.sourceSha256).toBe(result.backup.sourceSha256);
     expect(receipt.ownerMappingSha256).toBe(result.backup.ownerMappingSha256);
     expect(receipt.digestMatch).toBe(true);
@@ -489,6 +536,7 @@ describe("P2-4 legacy JSON import application service", () => {
       ownerMappingPath: fixturePath("owner-mapping-good.json"),
       persistence: ctx.persistence,
       now: () => "2026-08-01T00:00:00.000Z",
+      preImportCommit: PRE_IMPORT_COMMIT,
     });
     expect(result.state).toBe("COMPLETE");
     expect(result.ownerMappingSha256).toBe(good?.sha256);
@@ -541,6 +589,7 @@ describe("P2-4 legacy JSON import application service", () => {
       ownerMappingPath: mapping.path,
       persistence: ctx.persistence,
       now: () => "2026-08-01T00:00:00.000Z",
+      preImportCommit: PRE_IMPORT_COMMIT,
     });
     expect(result.state).toBe("COMPLETE");
     const manifestRow = ctx.persistence.findManifestBySource("json-database-v1", sha256File(path));
@@ -608,6 +657,9 @@ describe("P2-4 legacy JSON import application service", () => {
     // sealed pre-import proof (contract 11, P2-4-F07.1)
     expect(persisted?.preImportContentDigest).toBe(result.backup.preImportContentDigest);
     expect(persisted?.preImportContentDigest).toMatch(/^[a-f0-9]{64}$/);
+    // contract 11: persisted evidence and restore receipt carry THE exact pre-import commit verbatim
+    expect(result.backup.preImportCommit).toBe(PRE_IMPORT_COMMIT);
+    expect(persisted?.preImportCommit).toBe(PRE_IMPORT_COMMIT);
     expect(persisted?.preImportCommit).toBe(result.backup.preImportCommit);
     expect(persisted?.sourceSha256).toBe(result.backup.sourceSha256);
     expect(persisted?.sourceSha256).toBe(fixtureSha256(manifest, "legacy-json-v1-sanitized.json"));
@@ -636,6 +688,7 @@ describe("P2-4 legacy JSON import application service", () => {
         ownerMappingPath: mapping.path,
         persistence: failing,
         now: () => "2026-08-01T00:00:00.000Z",
+        preImportCommit: PRE_IMPORT_COMMIT,
       }),
     ).toThrow(/post-import integrity failure/);
     // the transaction rolled back: the destination is unchanged
@@ -706,6 +759,37 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
   });
 
+  it("fails replay with target-drift when a batch idempotency_key is mutated (F05.1)", () => {
+    const ctx = context();
+    runImport(ctx, "legacy-json-v1-sanitized.json");
+    // unique per row so the (user_id, idempotency_key) unique constraint is
+    // satisfied; every row still gets a distinct non-original value so the
+    // mapped-target digest must catch the tamper (F05.1)
+    ctx.database.prepare(
+      "UPDATE batches SET idempotency_key = 'tampered-' || id WHERE user_id = 'fixture-user'",
+    ).run();
+    expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
+  });
+
+  it("fails replay with target-drift when a batch updated_at is mutated (F05.1)", () => {
+    const ctx = context();
+    runImport(ctx, "legacy-json-v1-sanitized.json");
+    ctx.database.prepare(
+      "UPDATE batches SET updated_at = '2099-01-01T00:00:00.000Z' WHERE user_id = 'fixture-user'",
+    ).run();
+    expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
+  });
+
+  it("fails replay with target-drift when an observation idempotency_key is mutated (F05.1)", () => {
+    const ctx = context();
+    runImport(ctx, "legacy-json-v1-sanitized.json");
+    // distinct tampered value per row to satisfy (user_id, idempotency_key)
+    ctx.database.prepare(
+      "UPDATE daily_observations SET idempotency_key = 'tampered-' || id WHERE user_id = 'fixture-user'",
+    ).run();
+    expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
+  });
+
   it("fails replay with target-drift when quarantine parent provenance is mutated", () => {
     const ctx = context();
     runImport(ctx, "legacy-json-v1-orphan.json");
@@ -727,5 +811,64 @@ describe("P2-4 legacy JSON import application service", () => {
       "UPDATE import_manifests SET importer_contract_version = 'tampered' WHERE id = ?",
     ).run(manifestRow?.id);
     expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
+  });
+
+  it("rejects a missing pre-import commit with zero destination writes (F07.1)", () => {
+    const ctx = context();
+    const sha = fixtureSha256(manifest, "legacy-json-v1-sanitized.json");
+    const mapping = writeOwnerMapping(ctx.dir, sha);
+    // the contract requires THE pre-import commit; omitting it must fail closed
+    const commitless = {
+      sourcePath: fixturePath("legacy-json-v1-sanitized.json"),
+      ownerMappingPath: mapping.path,
+      persistence: ctx.persistence,
+      now: () => "2026-08-01T00:00:00.000Z",
+    };
+    expect(() => importLegacyJson(commitless as never)).toThrow(/invalid-pre-import-commit/);
+    // rejected before reading source or creating a backup: nothing written
+    expect(rowCount(ctx.database, "import_manifests")).toBe(0);
+    expect(rowCount(ctx.database, "import_record_traces")).toBe(0);
+    expect(rowCount(ctx.database, "import_backup_evidence")).toBe(0);
+    expect(rowCount(ctx.database, "batches")).toBe(0);
+  });
+
+  it("rejects a non-SHA 'unknown' pre-import commit with zero writes (F07.1)", () => {
+    const ctx = context();
+    const sha = fixtureSha256(manifest, "legacy-json-v1-sanitized.json");
+    const mapping = writeOwnerMapping(ctx.dir, sha);
+    // "unknown" is not provable rollback evidence (contract 11) - must be rejected
+    expect(() =>
+      importLegacyJson({
+        sourcePath: fixturePath("legacy-json-v1-sanitized.json"),
+        ownerMappingPath: mapping.path,
+        persistence: ctx.persistence,
+        now: () => "2026-08-01T00:00:00.000Z",
+        preImportCommit: "unknown",
+      }),
+    ).toThrow(/invalid-pre-import-commit/);
+    expect(rowCount(ctx.database, "import_manifests")).toBe(0);
+    expect(rowCount(ctx.database, "import_record_traces")).toBe(0);
+    expect(rowCount(ctx.database, "import_backup_evidence")).toBe(0);
+    expect(rowCount(ctx.database, "batches")).toBe(0);
+  });
+
+  it("fails closed on destination foreign-key violations before backing up (F07.1)", () => {
+    const ctx = context();
+    // inject an orphan daily_observations row that violates the batches FK
+    ctx.database.exec("PRAGMA foreign_keys = OFF");
+    ctx.database.prepare(
+      "INSERT INTO daily_observations (user_id, id, batch_id, date_local, observed_at, batch_revision, data_json, idempotency_key, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "fixture-user", "orphan-obs", "no-such-batch", "", "2026-08-01T00:00:00.000Z", 0, "{}", "orphan-key", "2026-08-01T00:00:00.000Z",
+    );
+    ctx.database.exec("PRAGMA foreign_keys = ON");
+    // sanity: the orphan row itself IS a foreign-key violation that PRAGMA
+    // foreign_key_check surfaces; the backup authority must therefore fail closed
+    expect(ctx.persistence.integrity().foreignKeyViolations).toBe(1);
+    expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/foreign-key violations/);
+    expect(rowCount(ctx.database, "import_manifests")).toBe(0);
+    expect(rowCount(ctx.database, "import_record_traces")).toBe(0);
+    expect(rowCount(ctx.database, "import_backup_evidence")).toBe(0);
+    expect(rowCount(ctx.database, "batches")).toBe(0);
   });
 });
