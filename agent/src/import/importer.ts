@@ -154,6 +154,12 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       SOURCE_KIND_JSON_DATABASE_V1,
       source.sha256,
       existing.targetUserId,
+      {
+        countersJson: existing.countersJson,
+        unknownTopLevelKeysJson: existing.unknownTopLevelKeysJson,
+        ownerMappingSha256: existing.ownerMappingSha256,
+        runState: existing.runState,
+      },
     );
     if (currentDigest !== existing.payloadDigest) {
       throw new ImportError(
@@ -218,20 +224,28 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       const decisions: RowDecision[] = [];
       for (let ordinal = 0; ordinal < rows.length; ordinal += 1) {
         const raw = rows[ordinal] as Record<string, unknown>;
-        const rawPayloadJson = JSON.stringify(raw);
-        const rawPayloadSha256 = sha256Text(rawPayloadJson);
+        const duplicateKeyRow = source.duplicateKeyRows.find(
+          (row) => row.collection === collection && row.ordinal === ordinal,
+        );
+        // lossless raw evidence: duplicate-key rows keep the original source
+        // slice; every other row keeps the parsed payload
+        const rawPayloadJson = duplicateKeyRow ? duplicateKeyRow.rawText : JSON.stringify(raw);
+        const rawPayloadSha256 = duplicateKeyRow
+          ? duplicateKeyRow.rawSha256
+          : sha256Text(rawPayloadJson);
+        const rawPayloadBytes = duplicateKeyRow
+          ? duplicateKeyRow.byteLength
+          : Buffer.byteLength(rawPayloadJson, "utf8");
         const canonicalSha256 = rawRowCanonicalSha256(raw);
         const idValue = raw.id;
-        const duplicateKeyRow = source.duplicateKeyRows.includes(
-          collection + "[" + ordinal + "]",
-        );
         let identity: string;
         let disposition: RowDecision["disposition"];
         let reasonCode: string | null = null;
         if (duplicateKeyRow) {
           // a row with duplicate keys is not canonically serializable and is
-          // quarantined (contract 5.1); the source-bound quarantine identity
-          // is computed from the last-wins parsed payload
+          // quarantined (contract 5.1); the raw payload is the ORIGINAL source
+          // row slice (including the duplicate keys), never a re-serialization
+          // of the last-wins parse
           identity = quarantineIdentity({
             sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
             sourceSha256: source.sha256,
@@ -275,7 +289,7 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
           identity,
           rawPayloadJson,
           rawPayloadSha256,
-          rawPayloadBytes: Buffer.byteLength(rawPayloadJson, "utf8"),
+          rawPayloadBytes,
           canonicalSha256,
           disposition,
           reasonCode,
@@ -526,12 +540,22 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       throw new ImportError("zero-loss invariant violated: rows do not balance");
     }
 
+    const state: RunState = counters.quarantined === 0 ? "COMPLETE" : "PRESERVED_WITH_QUARANTINE";
+    const unknownTopLevelKeysJson = source.unknownTopLevelValues.length > 0
+      ? JSON.stringify(source.unknownTopLevelValues)
+      : null;
+    const manifestFacts = {
+      countersJson: JSON.stringify(counters),
+      unknownTopLevelKeysJson,
+      ownerMappingSha256: mapping.sha256,
+      runState: state,
+    };
     const payloadDigest = input.persistence.querySourceDigest(
       SOURCE_KIND_JSON_DATABASE_V1,
       source.sha256,
       mapping.manifest.targetUserId,
+      manifestFacts,
     );
-    const state: RunState = counters.quarantined === 0 ? "COMPLETE" : "PRESERVED_WITH_QUARANTINE";
     input.persistence.insertManifest({
       id: runId,
       sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
@@ -545,13 +569,11 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       targetUserId: mapping.manifest.targetUserId,
       importerContractVersion: IMPORTER_CONTRACT_VERSION,
       runState: state,
-      countersJson: JSON.stringify(counters),
+      countersJson: manifestFacts.countersJson,
       payloadDigest,
       backupSha256: backup.sha256,
       restoreLocation: backup.restoreLocation,
-      unknownTopLevelKeysJson: source.unknownTopLevelKeys.length > 0
-        ? JSON.stringify(source.unknownTopLevelKeys)
-        : null,
+      unknownTopLevelKeysJson,
       createdAt: now(),
     });
     // frozen contract 11: the full backup identity (source/owner hashes,

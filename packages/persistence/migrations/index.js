@@ -14,6 +14,8 @@ export const SEALED_V12_CHECKSUM =
 export const CURRENT_MIGRATION_VERSION = 15;
 export const SEALED_V14_NAME = "registered-schema-v14-import";
 export const SEALED_V15_NAME = "registered-schema-v15-import-evidence";
+export const SEALED_V15_CHECKSUM =
+  "22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F";
 
 const LEDGER_COLUMNS = [
   "version",
@@ -249,7 +251,7 @@ export function defineNaibajiMigrationChain(database) {
     },
   });
   const v15 = defineMigration({
-    version: CURRENT_MIGRATION_VERSION,
+    version: 15,
     name: SEALED_V15_NAME,
     canonicalBody: [
       "NBJ-ARCH-P2/P2-4",
@@ -273,6 +275,9 @@ export function defineNaibajiMigrationChain(database) {
       database.exec(IMPORT_SCHEMA_V15);
     },
   });
+  if (v15.checksum !== SEALED_V15_CHECKSUM) {
+    throw new Error("sealed v15 migration identity drift: " + v15.checksum);
+  }
   return Object.freeze([v12, v13, v14, v15]);
 }
 

@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Implementation
 
-Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F04 / F05 / F06 / F07) — RE-REVIEW PENDING`
+Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F05.1 / F06 / F07.1 / F08) — RE-REVIEW PENDING`
 
 Contract registration: `PASS` (independent re-review of `f921b4f67187494b6d91965d176a3a85857ee938`)
 
@@ -215,6 +215,28 @@ published v14 identity (`0711127C...`) is unchanged. Post-import integrity
 acceptance runs inside the transaction: any integrity or foreign-key
 failure rolls the destination back to the prior reviewed state (test
 proves automatic rollback with zero residual writes).
+## Second correction — F05.1 / F06 / F07.1 / F08
+
+- `P2-4-F05.1` — the replay digest binds manifest acceptance
+  facts (counters, unknown-key evidence, owner mapping, run state) plus the
+  complete trace evidence (identity, ordinal, disposition, reason, parent,
+  field paths, raw payload) and complete quarantine evidence (reason, field
+  paths, resolution status, payload). Tamper tests: field_paths_json,
+  quarantine reason_code, and manifest counters mutations all fail replay
+  with target-drift.
+- `P2-4-F06` — the parser records byte spans for every value;
+  duplicate-key rows keep the ORIGINAL source row slice (including both
+  duplicate occurrences) as their quarantine raw payload with its own
+  SHA-256; unknown top-level keys are preserved in the manifest with their
+  value and original text slice.
+- `P2-4-F07.1` — restore emits a frozen receipt: backup SHA,
+  pre-import content digest, post-restore content digest (digestMatch),
+  integrity and FK result, restore log; a backup SHA mismatch aborts the
+  restore before any file mutation.
+- `P2-4-F08` — v15 is pinned to literal 15 with
+  `SEALED_V15_CHECKSUM` (`22DAC823...`) and a runtime
+  drift assert in the migration chain; tests pin v14 and v15 checksums
+  exactly, independent of CURRENT_MIGRATION_VERSION.
 ## Candidate state
 
 ```text
@@ -225,7 +247,7 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: CANDIDATE / CHANGES REQUIRED (P2-4-F04 / F05 / F06 / F07 — correction committed)
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED (P2-4-F05.1 / F06 / F07.1 / F08 — correction committed)
 P2-4 Gate: CLOSED
 
 Runtime/Cutover Gate: CLOSED

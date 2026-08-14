@@ -19,6 +19,24 @@ export class SourceReadError extends Error {
   }
 }
 
+export interface DuplicateKeyRowEvidence {
+  readonly collection: string;
+  readonly ordinal: number;
+  /** The ORIGINAL source row text slice, including the duplicate keys. */
+  readonly rawText: string;
+  readonly rawSha256: string;
+  readonly byteLength: number;
+}
+
+export interface UnknownTopLevelValue {
+  readonly key: string;
+  /** The ORIGINAL source value text slice for the unknown top-level key. */
+  readonly rawText: string;
+  readonly rawSha256: string;
+  readonly byteLength: number;
+  readonly value: unknown;
+}
+
 export interface JsonV1Source {
   readonly path: string;
   readonly byteLength: number;
@@ -27,8 +45,10 @@ export interface JsonV1Source {
   readonly collections: Record<string, unknown[]>;
   readonly schemaVersion: number;
   readonly unknownTopLevelKeys: string[];
-  /** Rows containing duplicate keys, keyed as collection[index]. */
-  readonly duplicateKeyRows: readonly string[];
+  /** Rows containing duplicate keys, with lossless original row slices. */
+  readonly duplicateKeyRows: readonly DuplicateKeyRowEvidence[];
+  /** Unknown top-level keys with their losslessly preserved values. */
+  readonly unknownTopLevelValues: readonly UnknownTopLevelValue[];
 }
 
 export function sha256File(path: string): string {
@@ -48,10 +68,12 @@ export function readJsonV1Source(path: string): JsonV1Source {
   const text = bytes.toString("utf8");
   let parsed: unknown;
   let duplicatePaths: readonly string[] = [];
+  let spans: ReadonlyMap<string, import("./canonical-json.js").ValueSpan> = new Map();
   try {
     const result = parseJsonWithDuplicatePaths(text);
     parsed = result.value;
     duplicatePaths = result.duplicatePaths;
+    spans = result.spans;
   } catch (error) {
     throw new SourceReadError("malformed-json: " + (error as Error).message);
   }
@@ -83,14 +105,45 @@ export function readJsonV1Source(path: string): JsonV1Source {
   // duplicate keys inside a collection row are quarantined per row; any
   // other duplicate (envelope, meta, or unknown top-level structure) makes
   // the source non-canonically serializable and fails closed
-  const duplicateKeyRows = new Set<string>();
+  const duplicateKeyRowKeys = new Set<string>();
   for (const duplicatePath of duplicatePaths) {
     const rowKey = rowKeyOf(duplicatePath);
     if (rowKey !== null) {
-      duplicateKeyRows.add(rowKey);
+      duplicateKeyRowKeys.add(rowKey);
     } else {
       throw new SourceReadError("malformed-json: duplicate key outside collection rows at " + duplicatePath);
     }
+  }
+  const duplicateKeyRows: DuplicateKeyRowEvidence[] = [];
+  for (const rowKey of [...duplicateKeyRowKeys].sort()) {
+    const match = /^(.*?)\[(\d+)\]$/.exec(rowKey);
+    if (!match) continue;
+    const collection = match[1] as string;
+    const ordinal = Number(match[2]);
+    const span = spans.get('$["' + collection + '"][' + ordinal + "]");
+    if (!span) {
+      throw new SourceReadError("malformed-json: missing span for duplicate-key row " + rowKey);
+    }
+    const rawText = text.slice(span.start, span.end);
+    duplicateKeyRows.push({
+      collection,
+      ordinal,
+      rawText,
+      rawSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
+      byteLength: Buffer.byteLength(rawText, "utf8"),
+    });
+  }
+  const unknownTopLevelValues: UnknownTopLevelValue[] = [];
+  for (const key of unknownTopLevelKeys) {
+    const span = spans.get('$["' + key + '"]');
+    const rawText = span ? text.slice(span.start, span.end) : JSON.stringify(record[key]);
+    unknownTopLevelValues.push({
+      key,
+      rawText,
+      rawSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
+      byteLength: Buffer.byteLength(rawText, "utf8"),
+      value: record[key],
+    });
   }
   return {
     path,
@@ -100,6 +153,7 @@ export function readJsonV1Source(path: string): JsonV1Source {
     collections,
     schemaVersion: 1,
     unknownTopLevelKeys,
-    duplicateKeyRows: [...duplicateKeyRows].sort(),
+    duplicateKeyRows,
+    unknownTopLevelValues,
   };
 }

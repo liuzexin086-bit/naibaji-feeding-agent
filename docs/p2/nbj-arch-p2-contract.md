@@ -277,10 +277,11 @@ P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
 P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
-P2-4-F04: OPEN / P1 — correction committed
-P2-4-F05: OPEN / P1 — correction committed
+P2-4-F04: CLOSED / PASS
+P2-4-F05.1: OPEN / P1 — correction committed
 P2-4-F06: OPEN / P1 — correction committed
-P2-4-F07: OPEN / P1 — correction committed
+P2-4-F07.1: OPEN / P1 — correction committed
+P2-4-F08: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
@@ -415,4 +416,16 @@ identity evidence and pre-commit post-import integrity acceptance with
 automatic rollback, persisted through forward migration v15
 `registered-schema-v15-import-evidence` while the published v14
 identity stays immutable). The findings remain OPEN until the independent
+narrow re-review closes them; the P2-4 Gate stays CLOSED.
+
+The narrow re-review closed F04 and the original F05 tenant isolation, then
+registered four P1 items that the second correction commit closes:
+`P2-4-F05.1` (replay digest now binds complete trace/quarantine/
+manifest provenance with tamper tests), `P2-4-F06` (duplicate-key
+rows now keep the ORIGINAL source row slice losslessly and unknown top-level
+values are preserved with their text), `P2-4-F07.1` (restore emits
+a frozen receipt binding backup SHA, pre/post-restore content digests,
+integrity/FK result, and restore log), and `P2-4-F08` (v15 is
+pinned to literal 15 with `SEALED_V15_CHECKSUM` and a runtime drift
+assert, exactly like the v12 seal). The findings stay OPEN until the final
 narrow re-review closes them; the P2-4 Gate stays CLOSED.

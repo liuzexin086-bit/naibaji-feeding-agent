@@ -219,7 +219,17 @@ export interface ImportPersistencePort {
   queryTargetRowsByImportKeys(
     keys: readonly string[],
   ): TargetRowDigestEntry[];
-  querySourceDigest(sourceKind: string, sourceSha256: string, targetUserId: string): string;
+  querySourceDigest(
+    sourceKind: string,
+    sourceSha256: string,
+    targetUserId: string,
+    manifestFacts: {
+      countersJson: string;
+      unknownTopLevelKeysJson: string | null;
+      ownerMappingSha256: string;
+      runState: string;
+    },
+  ): string;
   createBackup(): BackupEvidence;
   insertBackupEvidence(row: ImportBackupEvidenceRow): void;
   findBackupEvidenceByRunId(importRunId: string): ImportBackupEvidenceRow | null;

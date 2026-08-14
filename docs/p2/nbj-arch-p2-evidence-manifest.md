@@ -837,6 +837,44 @@ P2-4-F06: OPEN / P1 — correction committed
 P2-4-F07: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 ```
+## 18.8 P2-4 Implementation Re-review — REQUEST CHANGES and Second Correction
+
+Independent narrow re-review of
+`cdded43c56926921155c6eb9a64761c8521ff593` closed `P2-4-F04`
+(CLOSED / PASS) and confirmed the F05 tenant isolation and F07 runtime
+transactional acceptance, then returned `REQUEST CHANGES` with four
+P1 items: `P2-4-F05.1` (digest did not bind complete
+provenance), `P2-4-F06` (duplicate-key quarantine not lossless;
+unknown top-level values not preserved), `P2-4-F07.1` (restore
+receipt missing post-restore digest evidence), and `P2-4-F08`
+(v15 migration identity still used CURRENT_MIGRATION_VERSION and could
+drift on a future v16 bump).
+
+The second correction commit closes all four: the replay digest now binds
+manifest acceptance facts plus complete trace and quarantine semantic
+evidence (tamper tests for field_paths_json, quarantine reason_code, and
+manifest counters); duplicate-key rows keep the ORIGINAL source row slice
+as their raw payload and unknown top-level keys are preserved with value
+and original text; restore emits a frozen receipt (backup SHA, pre/
+post-restore content digests with digestMatch, integrity/FK result, restore
+log, backup-tamper abort); v15 is pinned to literal 15 with
+`SEALED_V15_CHECKSUM` (`22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F`)
+and a runtime drift assert. Local gates at the second correction
+checkpoint: P2-4 gate 107 passed; full suite green; P2-1 20, P2-2 9, P2-3A
+35, P2-3B 46, P0 100, P1 197; build and clean-source PASS. The findings
+stay OPEN until the independent final narrow re-review closes them; the
+P2-4 Gate stays CLOSED.
+
+```text
+P2-4 Implementation Authorization: OPEN
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
+P2-4-F04: CLOSED / PASS
+P2-4-F05.1: OPEN / P1 — correction committed
+P2-4-F06: OPEN / P1 — correction committed
+P2-4-F07.1: OPEN / P1 — correction committed
+P2-4-F08: OPEN / P1 — correction committed
+P2-4 Gate: CLOSED
+```
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 
 After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three

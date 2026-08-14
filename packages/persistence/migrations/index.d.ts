@@ -7,6 +7,7 @@ export declare const SEALED_V12_CHECKSUM = "0B204D099EA0661A836F2F0DD34207A6CEF3
 export declare const CURRENT_MIGRATION_VERSION = 15;
 export declare const SEALED_V14_NAME = "registered-schema-v14-import";
 export declare const SEALED_V15_NAME = "registered-schema-v15-import-evidence";
+export declare const SEALED_V15_CHECKSUM = "22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F";
 
 export interface MigrationDefinition {
   readonly version: number;

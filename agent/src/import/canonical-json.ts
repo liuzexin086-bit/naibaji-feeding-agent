@@ -116,9 +116,10 @@ const NUMBER_TOKEN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 function parseJsonInternal(
   text: string,
   onDuplicateKey: ((path: string, key: string) => void) | null,
-): unknown {
+): { value: unknown; spans: Map<string, ValueSpan> } {
   let index = 0;
   const input = text;
+  const spans = new Map<string, { start: number; end: number }>();
 
   function skipWhitespace(): void {
     while (index < input.length) {
@@ -134,25 +135,32 @@ function parseJsonInternal(
   function parseValue(depth: number, path: string): unknown {
     if (depth > 512) throw new CanonicalJsonError("JSON nesting too deep");
     skipWhitespace();
+    const start = index;
     const ch = input[index];
+    let value: unknown;
     if (ch === undefined) throw new CanonicalJsonError("unexpected end of JSON");
-    if (ch === "{") return parseObject(depth + 1, path);
-    if (ch === "[") return parseArray(depth + 1, path);
-    if (ch === '"') return parseString();
-    if (ch === "-" || (ch >= "0" && ch <= "9")) return parseNumber();
-    if (input.startsWith("true", index)) {
+    if (ch === "{") {
+      value = parseObject(depth + 1, path);
+    } else if (ch === "[") {
+      value = parseArray(depth + 1, path);
+    } else if (ch === '"') {
+      value = parseString();
+    } else if (ch === "-" || (ch >= "0" && ch <= "9")) {
+      value = parseNumber();
+    } else if (input.startsWith("true", index)) {
       index += 4;
-      return true;
-    }
-    if (input.startsWith("false", index)) {
+      value = true;
+    } else if (input.startsWith("false", index)) {
       index += 5;
-      return false;
-    }
-    if (input.startsWith("null", index)) {
+      value = false;
+    } else if (input.startsWith("null", index)) {
       index += 4;
-      return null;
+      value = null;
+    } else {
+      throw new CanonicalJsonError("unexpected token at offset " + index);
     }
-    throw new CanonicalJsonError("unexpected token at offset " + index);
+    spans.set(path, { start, end: index });
+    return value;
   }
 
   function parseString(): string {
@@ -274,7 +282,12 @@ function parseJsonInternal(
   const result = parseValue(0, "$");
   skipWhitespace();
   if (index !== input.length) throw new CanonicalJsonError("trailing content at offset " + index);
-  return result;
+  return { value: result, spans };
+}
+
+export interface ValueSpan {
+  readonly start: number;
+  readonly end: number;
 }
 
 /**
@@ -283,13 +296,20 @@ function parseJsonInternal(
  * canonical encoding ambiguous) and enforces the JSON number grammar.
  */
 export function parseStrictJson(text: string): unknown {
-  return parseJsonInternal(text, null);
+  return parseJsonInternal(text, null).value;
 }
 
 export interface ParsedJsonWithDuplicatePaths {
   readonly value: unknown;
   /** Canonical paths of duplicate keys, for example $["batches"][3]["id"]. */
   readonly duplicatePaths: readonly string[];
+  /**
+   * Byte offsets of every parsed value keyed by canonical path. The importer
+   * uses them to preserve the ORIGINAL source row/value text (including any
+   * duplicate keys) as lossless evidence instead of re-serializing the
+   * last-value-wins parse.
+   */
+  readonly spans: ReadonlyMap<string, ValueSpan>;
 }
 
 /**
@@ -300,8 +320,8 @@ export interface ParsedJsonWithDuplicatePaths {
  */
 export function parseJsonWithDuplicatePaths(text: string): ParsedJsonWithDuplicatePaths {
   const duplicatePaths: string[] = [];
-  const value = parseJsonInternal(text, (path) => {
+  const { value, spans } = parseJsonInternal(text, (path) => {
     duplicatePaths.push(path);
   });
-  return { value, duplicatePaths };
+  return { value, duplicatePaths, spans };
 }

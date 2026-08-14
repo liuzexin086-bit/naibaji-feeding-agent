@@ -8,6 +8,7 @@ import {
   SEALED_V12_CHECKSUM,
   SEALED_V12_NAME,
   SEALED_V14_NAME,
+  SEALED_V15_CHECKSUM,
   SEALED_V15_NAME,
   defineNaibajiMigrationChain,
   runNaibajiMigrations,
@@ -39,8 +40,10 @@ describe("P2-4 v14 import schema migration", () => {
         { version: 15, name: SEALED_V15_NAME },
       ]);
       expect(chain[0]?.checksum).toBe(SEALED_V12_CHECKSUM);
-      // the published v14 identity stays immutable even after v15 was added
+      // published identities stay immutable: v14 and v15 are pinned exactly,
+      // independently of CURRENT_MIGRATION_VERSION
       expect(chain[2]?.checksum).toBe("0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33");
+      expect(chain[3]?.checksum).toBe(SEALED_V15_CHECKSUM);
       expect(CURRENT_MIGRATION_VERSION).toBe(15);
     } finally {
       database.close();

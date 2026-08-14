@@ -108,6 +108,12 @@ function computeSourceDigest(
   sourceKind: string,
   sourceSha256: string,
   targetUserId: string,
+  manifestFacts: {
+    countersJson: string;
+    unknownTopLevelKeysJson: string | null;
+    ownerMappingSha256: string;
+    runState: string;
+  },
 ): string {
   // tenant safety: the authority key of the target tables is (user_id, id),
   // so target rows are always read scoped to the accepted target user
@@ -125,13 +131,18 @@ function computeSourceDigest(
     }
     targets.push({ table, id, dataJson: String(content.data_json) });
   }
-  // raw evidence: every trace record (identity, ordinal, disposition, and
-  // content-bearing payload) plus every quarantine record is bound to the digest
+  // complete provenance evidence: every trace record (identity, ordinal,
+  // disposition, reason, parent, field paths, and content-bearing payload),
+  // every quarantine record (reason, field paths, resolution status, payload),
+  // and the manifest acceptance facts are bound to the digest
   const traces = (statements.traceDigestRows.all(sourceKind, sourceSha256) as Row[]).map((row) => ({
     collection: String(row.collection),
     identity: String(row.record_identity),
     ordinal: Number(row.source_ordinal),
     disposition: String(row.disposition),
+    reasonCode: row.reason_code == null ? null : String(row.reason_code),
+    parentIdentity: row.parent_identity == null ? null : String(row.parent_identity),
+    fieldPathsJson: String(row.field_paths_json),
     rawPayloadSha256: String(row.raw_payload_sha256),
     rawPayloadJson: String(row.raw_payload_json),
   }));
@@ -139,10 +150,24 @@ function computeSourceDigest(
     (row) => ({
       collection: String(row.collection),
       identity: String(row.source_record_identity),
+      reasonCode: String(row.reason_code),
+      fieldPathsJson: String(row.field_paths_json),
+      resolutionStatus: String(row.resolution_status),
       rawPayloadSha256: String(row.raw_payload_sha256),
     }),
   );
-  return sha256Text(JSON.stringify({ targetUserId, targets, traces, quarantine }));
+  return sha256Text(
+    JSON.stringify({
+      targetUserId,
+      ownerMappingSha256: manifestFacts.ownerMappingSha256,
+      runState: manifestFacts.runState,
+      countersJson: manifestFacts.countersJson,
+      unknownTopLevelKeysJson: manifestFacts.unknownTopLevelKeysJson,
+      targets,
+      traces,
+      quarantine,
+    }),
+  );
 }
 
 export function createImportPersistence(
@@ -213,7 +238,8 @@ export function createImportPersistence(
       " ORDER BY target_table, target_id",
     ),
     quarantineDigestRows: database.prepare(
-      "SELECT collection, source_record_identity, raw_payload_sha256 FROM import_quarantine" +
+      "SELECT collection, source_record_identity, reason_code, field_paths_json," +
+      " resolution_status, raw_payload_sha256 FROM import_quarantine" +
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_record_identity",
     ),
     batchById: database.prepare(
@@ -226,6 +252,7 @@ export function createImportPersistence(
     ),
     traceDigestRows: database.prepare(
       "SELECT collection, record_identity, source_ordinal, disposition," +
+      " reason_code, parent_identity, field_paths_json," +
       " raw_payload_sha256, raw_payload_json FROM import_record_traces" +
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_ordinal",
     ),
@@ -391,8 +418,14 @@ export function createImportPersistence(
       }
       return entries.sort((a, b) => (a.table + a.id < b.table + b.id ? -1 : 1));
     },
-    querySourceDigest(sourceKind, sourceSha256, targetUserId) {
-      return computeSourceDigest(statements, sourceKind, sourceSha256, targetUserId);
+    querySourceDigest(sourceKind, sourceSha256, targetUserId, manifestFacts) {
+      return computeSourceDigest(
+        statements,
+        sourceKind,
+        sourceSha256,
+        targetUserId,
+        manifestFacts,
+      );
     },
     createBackup(): BackupEvidence {
       const directory = mkdtempSync(join(tmpdir(), "naibaji-import-backup-"));
@@ -487,15 +520,83 @@ export function createImportPersistence(
 }
 
 /**
- * Restore a database file from an import backup snapshot. The caller must
- * close the live connection first; stale WAL/SHM sidecar files are removed
- * so the restored file is authoritative.
+ * Content-bearing digest of the complete destination state (users, target
+ * business rows, and all import provenance tables). Used by the restore
+ * receipt to prove that the post-restore destination is byte-equivalent to
+ * the pre-import destination (frozen contract 11).
  */
-export function restoreDatabaseFromBackup(databasePath: string, backupPath: string): void {
+export function computeDestinationDigest(databasePath: string): string {
+  const database = new DatabaseSync(databasePath, { readOnly: true });
+  try {
+    const rows = (table: string) =>
+      database.prepare("SELECT * FROM " + table + " ORDER BY rowid").all() as Row[];
+    const state = {
+      users: rows("users"),
+      batches: rows("batches"),
+      daily_observations: rows("daily_observations"),
+      import_manifests: rows("import_manifests"),
+      import_record_traces: rows("import_record_traces"),
+      import_quarantine: rows("import_quarantine"),
+      import_backup_evidence: rows("import_backup_evidence"),
+    };
+    return sha256Text(JSON.stringify(state));
+  } finally {
+    database.close();
+  }
+}
+
+export interface RestoreReceipt {
+  readonly backupSha256: string;
+  readonly preImportDigest: string;
+  readonly postRestoreDigest: string;
+  readonly digestMatch: boolean;
+  readonly integrity: string;
+  readonly foreignKeyViolations: number;
+  readonly restoredAt: string;
+  readonly restoreSource: string;
+  readonly restoreTarget: string;
+}
+
+/**
+ * Restore a database file from an import backup snapshot and produce the
+ * frozen rollback receipt: backup identity, pre-import content digest,
+ * post-restore content digest, integrity and foreign-key result, and restore
+ * log. The caller must close the live connection first; stale WAL/SHM
+ * sidecar files are removed so the restored file is authoritative.
+ */
+export function restoreDatabaseFromBackup(
+  databasePath: string,
+  backupPath: string,
+  input: { preImportDigest: string; backupSha256: string },
+): RestoreReceipt {
   if (!existsSync(backupPath)) throw new ImportError("backup file missing: " + backupPath);
+  if (sha256File(backupPath) !== input.backupSha256) {
+    throw new ImportError("restore aborted: backup SHA-256 mismatch");
+  }
   copyFileSync(backupPath, databasePath);
   for (const suffix of ["-wal", "-shm"]) {
     const sidecar = databasePath + suffix;
     if (existsSync(sidecar)) rmSync(sidecar);
   }
+  const restored = new DatabaseSync(databasePath, { readOnly: true });
+  let integrity = "ok";
+  let foreignKeyViolations = 0;
+  try {
+    integrity = String(restored.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "");
+    foreignKeyViolations = (restored.prepare("PRAGMA foreign_key_check").all() as Row[]).length;
+  } finally {
+    restored.close();
+  }
+  const postRestoreDigest = computeDestinationDigest(databasePath);
+  return {
+    backupSha256: input.backupSha256,
+    preImportDigest: input.preImportDigest,
+    postRestoreDigest,
+    digestMatch: postRestoreDigest === input.preImportDigest,
+    integrity,
+    foreignKeyViolations,
+    restoredAt: new Date().toISOString(),
+    restoreSource: backupPath,
+    restoreTarget: databasePath,
+  };
 }

@@ -62,6 +62,43 @@ manifest, the P2-4 gate wiring, and exact-SHA CI (run 31761100591,
 The correction commit records these closures; the findings stay OPEN until
 the independent narrow re-review closes them. The P2-4 Gate remains CLOSED.
 
+### 18.7 Implementation re-review — REQUEST CHANGES (P2-4-F05.1 / F06 / F07.1 / F08)
+
+Independent narrow re-review of
+`cdded43c56926921155c6eb9a64761c8521ff593` (1 commit / 21 files)
+closed `P2-4-F04` (CLOSED / PASS) and the original F05 tenant
+isolation, and confirmed runtime transactional acceptance and exact-SHA CI
+(run 31762710620; Full Agent 468 passed + 1 skipped = 469 total; P2-4 gate
+104/104). It then returned `REQUEST CHANGES` with four P1
+items:
+
+- `P2-4-F05.1` - the replay digest did not bind complete
+  provenance (trace field paths/reason/parent, quarantine reason/field
+  paths/resolution status, manifest counters and unknown-key evidence).
+  Fixed: the digest now binds manifest acceptance facts plus the complete
+  trace and quarantine semantic evidence, with tamper tests for
+  field_paths_json, quarantine reason_code, and manifest counters.
+- `P2-4-F06` - duplicate-key quarantine was not lossless
+  (last-wins parse lost the original malformed row) and unknown top-level
+  values were not preserved. Fixed: the parser records byte spans;
+  duplicate-key rows keep the ORIGINAL source row slice (both duplicate
+  occurrences) as raw payload, and unknown top-level keys are preserved
+  with their value and original text slice in the manifest.
+- `P2-4-F07.1` - rollback evidence lacked a frozen restore
+  receipt. Fixed: restore now emits a receipt binding backup SHA, pre-
+  import content digest, post-restore content digest (must match),
+  integrity/FK result, and restore log; backup tamper aborts the restore.
+- `P2-4-F08` - the v15 migration identity still used
+  `version: CURRENT_MIGRATION_VERSION`, so a future v16 bump
+  would silently change v15's checksum. Fixed: v15 is pinned to literal 15
+  with `SEALED_V15_CHECKSUM` (`22DAC823...`) and a
+  runtime drift assert like v12; tests pin v14 and v15 checksums exactly.
+
+The correction commit records these closures; the findings stay OPEN until
+the independent final narrow re-review closes them. The P2-4 Gate remains
+CLOSED.
+
+
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -607,10 +644,11 @@ P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only; fixed by this checkpoint)
 P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
-P2-4-F04: OPEN / P1 — correction committed
-P2-4-F05: OPEN / P1 — correction committed
+P2-4-F04: CLOSED / PASS
+P2-4-F05.1: OPEN / P1 — correction committed
 P2-4-F06: OPEN / P1 — correction committed
-P2-4-F07: OPEN / P1 — correction committed
+P2-4-F07.1: OPEN / P1 — correction committed
+P2-4-F08: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 
 Independent architecture pre-review: PASS
