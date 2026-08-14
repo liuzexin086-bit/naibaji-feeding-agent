@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-4 CONTRACT CORRECTION (F01.1) — RE-REVIEW PENDING`
+Status: `P2-4 CONTRACT REGISTRATION — PASS / IMPLEMENTATION AUTHORIZATION OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -65,6 +65,8 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-4 registration remote CI | run `31691085082`, `agent-safety`, success | Exact registration checkpoint CI evidence |
 | P2-4 first correction checkpoint | `ce16798b0b989b6a403082e8d0c9b917882a84f2` | Independent re-review: `REQUEST CHANGES` (`P2-4-F01.1`; `P2-4-F02` CLOSED / PASS) |
 | P2-4 first correction remote CI | run `31757368178`, `agent-safety`, success | Exact correction checkpoint CI evidence |
+| P2-4 second correction checkpoint | `f921b4f67187494b6d91965d176a3a85857ee938` | Independent re-review: `PASS` (P2-4-F01 / F01.1 / F02 CLOSED / PASS) |
+| P2-4 second correction remote CI | run `31758897344`, `agent-safety`, success | Exact correction checkpoint CI evidence |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -553,9 +555,12 @@ candidate does not claim a domain verdict.
 
 ```text
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
-P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
-P2-4 Implementation Authorization: CLOSED
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
 
@@ -620,9 +625,12 @@ Implementation Authorization may open; this candidate does not certify itself.
 
 ```text
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
-P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
-P2-4 Implementation Authorization: CLOSED
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
 
@@ -667,9 +675,60 @@ open; this candidate does not certify itself.
 
 ```text
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
-P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
-P2-4 Implementation Authorization: CLOSED
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
+P2-4 Implementation: NOT STARTED
+P2-4 Gate: CLOSED
+
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+## 18.5 P2-4 Second Correction Re-review — PASS
+
+Independent remote re-review of second correction checkpoint
+`f921b4f67187494b6d91965d176a3a85857ee938` (sole parent
+`ce16798b0b989b6a403082e8d0c9b917882a84f2`) confirmed remote identity/scope
+(ahead 1 / behind 0, exactly 1 commit, exactly the three `docs/p2/**` files),
+independently recomputed V5/V6 and matched the committed vectors, and closed
+`P2-4-F01.1` (`CLOSED / PASS`) together with `P2-4-F01` and `P2-4-F02`
+(`CLOSED / PASS`). Exact-SHA
+[agent-safety run 31758897344](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31758897344)
+(`push`, `head_sha = f921b4f67187494b6d91965d176a3a85857ee938`, `success`;
+413 passed / 1 skipped / 414 total; P2-1 20/20, P2-2 9/9, P2-3A 35/35, P2-3B
+46/46, P0 100/100, P1 197/197, optimizer 12/12) was confirmed. The review
+returned `PASS` with P0 = 0 and P1 = 0, formally closed the P2-4 Contract
+Registration Review (`CLOSED / PASS`), set `P2-4 Contract Registration:
+PASS`, and opened `P2-4 Implementation Authorization: OPEN`.
+
+One non-blocking P2 item was recorded: `P2-4-F03` — audit wording only (a
+sentence still generically said the re-review may close F01/F02 although F02
+had already closed). No behavioral or authorization ambiguity; no further
+correction was required, and the current-state wording is fixed by the
+verdict-recording checkpoint while the historical audit sections remain
+unchanged.
+
+This checkpoint records the independent verdict and does not certify its own
+commit. P2-4 Implementation remains NOT STARTED, the P2-4 Gate remains CLOSED,
+and P2-6, runtime/cutover, Compose replacement, merge, tag, PR, deployment,
+and real-device control remain unauthorized.
+
+```text
+P2-4 Legacy JSON Import Authorization: OPEN
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
 

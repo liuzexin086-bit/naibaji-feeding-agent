@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Contract Registration
 
-Status: `P2-4 CONTRACT CORRECTION — RE-REVIEW PENDING`
+Status: `P2-4 CONTRACT REGISTRATION — PASS / IMPLEMENTATION AUTHORIZATION OPEN`
 
 Registration baseline: `2fb45b25f6880f03f563fd472d8143bfed8699b5`
 
@@ -8,11 +8,15 @@ Registration checkpoint: `138b1ae6782615022eefb743537f0781eee9f330` — `P2-4 re
 
 First correction checkpoint: `ce16798b0b989b6a403082e8d0c9b917882a84f2` — `P2-4 freeze canonical identity and migration-bound import schema`
 
+Second correction checkpoint: `f921b4f67187494b6d91965d176a3a85857ee938` — `P2-4 bind quarantine identity to source and add separation vector`
+
 Independent contract review of the registration checkpoint: `REQUEST CHANGES` — `P2-4-F01` / `P2-4-F02` (audit history in §18)
 
 First correction re-review: `REQUEST CHANGES` — `P2-4-F01.1`; `P2-4-F02` closed (audit history in §18)
 
-This checkpoint is the narrow docs-only second correction that makes the quarantine identity source-bound (F01.1). Re-review of this correction SHA is pending.
+Second correction re-review: `PASS` — `P2-4-F01` / `P2-4-F01.1` / `P2-4-F02` closed (audit history in §18)
+
+This checkpoint records the independent PASS verdict and opens no authority by itself: P2-4 Implementation Authorization was opened only by that independent review. P2-4 Implementation remains NOT STARTED and the P2-4 Gate remains CLOSED.
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -20,7 +24,7 @@ P2-3 Seal exact-SHA CI: [agent-safety run 31680852943](https://github.com/liuzex
 
 P2-4 Legacy JSON Import Authorization: `OPEN`
 
-P2-4 Implementation Authorization: `CLOSED — INDEPENDENT CONTRACT REVIEW: REQUEST CHANGES (P2-4-F01.1) / RE-REVIEW PENDING`
+P2-4 Implementation Authorization: `OPEN — INDEPENDENT CONTRACT REVIEW: PASS (P2-4-F01 / P2-4-F01.1 / P2-4-F02 CLOSED)`
 
 ## 1. Registration boundary
 
@@ -551,9 +555,12 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
-P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
-P2-4 Implementation Authorization: CLOSED
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only; fixed by this checkpoint)
+P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
 
@@ -568,10 +575,11 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
-This candidate does not review or certify its own docs commit. It records the
-already completed independent P2-3 Seal decision and the audit history in §18.
-Only an independent re-review of this correction may close P2-4-F01 /
-P2-4-F02 and open P2-4 Implementation Authorization.
+This checkpoint records the independent P2-3 Seal decision and the audit
+history in §18. It does not review or certify its own docs commit, and it
+opens no authority by itself: P2-4 Implementation Authorization was opened
+only by the independent PASS recorded in §18.5. P2-4 Implementation remains
+NOT STARTED and the P2-4 Gate remains CLOSED.
 
 ## 18. Audit history
 
@@ -643,3 +651,32 @@ exactly the three registered `docs/p2/**` files and does not implement the
 importer, change schema or runtime, or open P2-4 Implementation Authorization.
 This checkpoint does not review or certify its own commit; only the
 independent re-review of this correction SHA can close F01.1.
+
+### 18.5 Second re-review — PASS
+
+Independent remote re-review of second correction checkpoint
+`f921b4f67187494b6d91965d176a3a85857ee938` (sole parent
+`ce16798b0b989b6a403082e8d0c9b917882a84f2`) confirmed remote identity/scope
+(ahead 1 / behind 0, exactly 1 commit, exactly the three `docs/p2/**` files),
+independently recomputed V5/V6 and matched the committed vectors, and closed
+`P2-4-F01.1` (`CLOSED / PASS`) together with `P2-4-F01` and `P2-4-F02`
+(`CLOSED / PASS`). Exact-SHA
+[agent-safety run 31758897344](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31758897344)
+(`push`, `head_sha = f921b4f67187494b6d91965d176a3a85857ee938`, `success`;
+413 passed / 1 skipped / 414 total; P2-1 20/20, P2-2 9/9, P2-3A 35/35, P2-3B
+46/46, P0 100/100, P1 197/197, optimizer 12/12) was confirmed. The review
+returned `PASS` with P0 = 0 and P1 = 0, formally closed the P2-4 Contract
+Registration Review (`CLOSED / PASS`), set `P2-4 Contract Registration:
+PASS`, and opened `P2-4 Implementation Authorization: OPEN`.
+
+One non-blocking P2 item was recorded: `P2-4-F03` — a sentence in this
+contract still generically said the re-review may close F01/F02 although F02
+had already closed. It is wording only, without behavioral or authorization
+ambiguity; the reviewer required no further correction, and this checkpoint
+fixes the current-state wording while leaving the historical audit sections
+unchanged.
+
+This checkpoint records the independent verdict and does not certify its own
+commit. P2-4 Implementation remains NOT STARTED, the P2-4 Gate remains CLOSED,
+and P2-6, runtime/cutover, Compose replacement, merge, tag, PR, deployment,
+and real-device control remain unauthorized.

@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-4 CONTRACT CORRECTION (F01.1) — RE-REVIEW PENDING`
+Status: `P2-4 CONTRACT REGISTRATION — PASS / IMPLEMENTATION AUTHORIZATION OPEN`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -270,9 +270,12 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
-P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
-P2-4 Implementation Authorization: CLOSED
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
 
@@ -372,3 +375,13 @@ raw_row_canonical_sha256, source_ordinal`), updates V5, adds the cross-source
 separation vector V6, and records F01.1 in the audit history. It changes
 exactly the three registered `docs/p2/**` files; P2-4 Implementation
 Authorization remains CLOSED until independent re-review closes F01.1.
+
+Independent re-review of second correction checkpoint
+`f921b4f67187494b6d91965d176a3a85857ee938` returned `PASS` with P0 = 0 and
+P1 = 0. `P2-4-F01`, `P2-4-F01.1`, and `P2-4-F02` are `CLOSED / PASS`;
+the P2-4 Contract Registration Review is `CLOSED / PASS`; and P2-4
+Implementation Authorization is `OPEN`. One non-blocking P2 item
+(`P2-4-F03`, audit wording only) was recorded without requiring a further
+correction. P2-4 Implementation remains NOT STARTED and the P2-4 Gate remains
+CLOSED; P2-6, runtime/cutover, Compose replacement, merge, tag, PR,
+deployment, and real-device control remain unauthorized.
