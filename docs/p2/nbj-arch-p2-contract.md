@@ -276,7 +276,11 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
+P2-4-F04: OPEN / P1 — correction committed
+P2-4-F05: OPEN / P1 — correction committed
+P2-4-F06: OPEN / P1 — correction committed
+P2-4-F07: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
@@ -398,3 +402,17 @@ gate results (P2-4 93/93; full suite 60 files / 458 passed; P2-1/P2-2/P2-3A/
 P2-3B/P0/P1, build, and clean-source all green). The candidate does not
 self-certify: exact-SHA CI and independent implementation review remain
 required before the P2-4 Gate may open.
+
+Independent implementation review of the candidate returned `REQUEST
+CHANGES` with four P1 contract-conformance findings. The correction
+checkpoint closes them: `P2-4-F04` (Unicode code-point key
+ordering and NFC-before-duplicate-detection in CJSON), `P2-4-F05`
+(tenant-scoped replay digest now binding target rows, all trace/
+preserved_raw evidence, and quarantine records), `P2-4-F06` (per-row
+duplicate-key quarantine, unknown top-level keys recorded in the manifest,
+real field-level dispositions), and `P2-4-F07` (full backup
+identity evidence and pre-commit post-import integrity acceptance with
+automatic rollback, persisted through forward migration v15
+`registered-schema-v15-import-evidence` while the published v14
+identity stays immutable). The findings remain OPEN until the independent
+narrow re-review closes them; the P2-4 Gate stays CLOSED.

@@ -40,6 +40,7 @@ interface RowDecision {
   targetTable: string | null;
   targetId: string | null;
   parentIdentity: string | null;
+  offendingFields: readonly string[];
 }
 
 function sha256Text(value: string): string {
@@ -59,6 +60,43 @@ function isRequiredNumber(value: unknown, field: string): value is number {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" ? value : null;
+}
+
+/**
+ * Frozen zero-loss field semantics (contract 10): every source field must be
+ * traceable as mapped, preserved raw, or the reason for quarantine. Rows with
+ * a field-specific reason (invalid-field, ambiguous-omission-null-zero) mark
+ * only the offending fields as quarantined; all other fields stay preserved
+ * raw inside the quarantine payload.
+ */
+function buildFieldDispositions(
+  rawRow: Record<string, unknown>,
+  collection: string,
+  ordinal: number,
+  disposition: "mapped" | "preserved_raw" | "quarantined",
+  reasonCode: string | null,
+  offendingFields: readonly string[] = [],
+): string | null {
+  const entries = Object.keys(rawRow).map((field) => {
+    const path = "$[\"" + collection + "\"][" + ordinal + "][\"" + field + "\"]";
+    if (disposition !== "quarantined") {
+      return { path, disposition };
+    }
+    if (offendingFields.length > 0) {
+      return offendingFields.includes(field)
+        ? { path, disposition: "quarantined", reasonCode }
+        : { path, disposition: "preserved_raw" };
+    }
+    return { path, disposition: "quarantined", reasonCode };
+  });
+  return JSON.stringify(entries);
+}
+
+function fieldNameFromReason(message: string): string {
+  // messages are "invalid-field:<field> must be..." or
+  // "ambiguous-omission-null-zero:<field> is null"
+  const colon = message.indexOf(":");
+  return colon >= 0 ? message.slice(colon + 1).split(" ")[0] ?? "" : "";
 }
 
 /**
@@ -115,20 +153,32 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
     const currentDigest = input.persistence.querySourceDigest(
       SOURCE_KIND_JSON_DATABASE_V1,
       source.sha256,
+      existing.targetUserId,
     );
     if (currentDigest !== existing.payloadDigest) {
       throw new ImportError(
         "target-drift: replay detected changed payload digest for " + source.sha256,
       );
     }
+    const persistedBackup = input.persistence.findBackupEvidenceByRunId(existing.id);
     return {
       runId: existing.id,
       state: existing.runState,
       replay: true,
       counters: JSON.parse(existing.countersJson) as ZeroLossCounters,
-      backup: existing.backupSha256
-        ? { sha256: existing.backupSha256, restoreLocation: existing.restoreLocation ?? "" }
-        : { sha256: "", restoreLocation: "" },
+      backup: persistedBackup
+        ? persistedBackup
+        : {
+            sha256: existing.backupSha256 ?? "",
+            restoreLocation: existing.restoreLocation ?? "",
+            schemaDigest: "",
+            migrationLedgerSha256: "",
+            applicationVersion: "",
+            importerContractVersion: "",
+            integrity: "",
+            foreignKeyViolations: 0,
+            createdAt: "",
+          },
       payloadDigest: existing.payloadDigest,
       targetUserId: existing.targetUserId,
       ownerMappingSha256: existing.ownerMappingSha256,
@@ -172,10 +222,26 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
         const rawPayloadSha256 = sha256Text(rawPayloadJson);
         const canonicalSha256 = rawRowCanonicalSha256(raw);
         const idValue = raw.id;
+        const duplicateKeyRow = source.duplicateKeyRows.includes(
+          collection + "[" + ordinal + "]",
+        );
         let identity: string;
         let disposition: RowDecision["disposition"];
         let reasonCode: string | null = null;
-        if (!isProvableSourceId(idValue)) {
+        if (duplicateKeyRow) {
+          // a row with duplicate keys is not canonically serializable and is
+          // quarantined (contract 5.1); the source-bound quarantine identity
+          // is computed from the last-wins parsed payload
+          identity = quarantineIdentity({
+            sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
+            sourceSha256: source.sha256,
+            collection,
+            rawRowCanonicalSha256: canonicalSha256,
+            sourceOrdinal: ordinal,
+          });
+          disposition = "quarantined";
+          reasonCode = "duplicate-key";
+        } else if (!isProvableSourceId(idValue)) {
           identity = quarantineIdentity({
             sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
             sourceSha256: source.sha256,
@@ -216,6 +282,7 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
           targetTable: null,
           targetId: null,
           parentIdentity: null,
+          offendingFields: [],
         });
       }
       // rows whose identity is in conflict are ALL quarantined (no target mutation)
@@ -246,20 +313,27 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
               );
             }
             input.persistence.insertQuarantine({
-            importRunId: runId,
-            sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
-            sourceSha256: source.sha256,
-            collection,
-            sourceRecordIdentity: decision.identity,
-            sourceOrdinal: decision.ordinal,
-            rawPayloadBytes: decision.rawPayloadBytes,
-            rawPayloadSha256: decision.rawPayloadSha256,
-            rawPayloadJson: decision.rawPayloadJson,
-            reasonCode: decision.reasonCode ?? "unprovable-evidence",
-            fieldPathsJson: null,
-            parentSourceIdentity: parentIdentity,
-            ownerMappingSha256: mapping.sha256,
-            createdAt: now(),
+              importRunId: runId,
+              sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
+              sourceSha256: source.sha256,
+              collection,
+              sourceRecordIdentity: decision.identity,
+              sourceOrdinal: decision.ordinal,
+              rawPayloadBytes: decision.rawPayloadBytes,
+              rawPayloadSha256: decision.rawPayloadSha256,
+              rawPayloadJson: decision.rawPayloadJson,
+              reasonCode: decision.reasonCode ?? "unprovable-evidence",
+              fieldPathsJson: buildFieldDispositions(
+                raw,
+                collection,
+                decision.ordinal,
+                "quarantined",
+                decision.reasonCode ?? "unprovable-evidence",
+                decision.offendingFields,
+              ),
+              parentSourceIdentity: parentIdentity,
+              ownerMappingSha256: mapping.sha256,
+              createdAt: now(),
               resolutionStatus: "unresolved",
             });
             quarantinedThisRun.add(decision.identity);
@@ -312,7 +386,13 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
               rawPayloadSha256: decision.rawPayloadSha256,
               rawPayloadJson: decision.rawPayloadJson,
               reasonCode: "missing-parent",
-              fieldPathsJson: null,
+              fieldPathsJson: buildFieldDispositions(
+                raw,
+                collection,
+                decision.ordinal,
+                "quarantined",
+                "missing-parent",
+              ),
               parentSourceIdentity: batchId,
               ownerMappingSha256: mapping.sha256,
               createdAt: now(),
@@ -345,6 +425,8 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
               decision.reasonCode = error.message.startsWith("invalid-field")
                 ? "invalid-field"
                 : "ambiguous-omission-null-zero";
+              const offendingField = fieldNameFromReason(error.message);
+              decision.offendingFields = offendingField ? [offendingField] : [];
               input.persistence.insertQuarantine({
                 importRunId: runId,
                 sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
@@ -356,7 +438,14 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
                 rawPayloadSha256: decision.rawPayloadSha256,
                 rawPayloadJson: decision.rawPayloadJson,
                 reasonCode: decision.reasonCode,
-                fieldPathsJson: null,
+                fieldPathsJson: buildFieldDispositions(
+                  raw,
+                  collection,
+                  decision.ordinal,
+                  "quarantined",
+                  decision.reasonCode,
+                  decision.offendingFields,
+                ),
                 parentSourceIdentity: batchId,
                 ownerMappingSha256: mapping.sha256,
                 createdAt: now(),
@@ -394,7 +483,10 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
           }
         }
 
-        // every row receives a trace record
+        // every row receives a trace record with field-level dispositions
+        const traceDisposition = decision.disposition === "exact_duplicate"
+          ? "preserved_raw"
+          : decision.disposition;
         input.persistence.insertTrace({
           importRunId: runId,
           sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
@@ -409,7 +501,14 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
           rawPayloadSha256: decision.rawPayloadSha256,
           rawPayloadJson: decision.rawPayloadJson,
           reasonCode: decision.reasonCode,
-          fieldPathsJson: null,
+          fieldPathsJson: buildFieldDispositions(
+            raw,
+            collection,
+            decision.ordinal,
+            traceDisposition,
+            decision.reasonCode,
+            decision.offendingFields,
+          ),
           parentIdentity: decision.parentIdentity,
           ownerMappingSha256: mapping.sha256,
           createdAt: now(),
@@ -430,6 +529,7 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
     const payloadDigest = input.persistence.querySourceDigest(
       SOURCE_KIND_JSON_DATABASE_V1,
       source.sha256,
+      mapping.manifest.targetUserId,
     );
     const state: RunState = counters.quarantined === 0 ? "COMPLETE" : "PRESERVED_WITH_QUARANTINE";
     input.persistence.insertManifest({
@@ -449,8 +549,28 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       payloadDigest,
       backupSha256: backup.sha256,
       restoreLocation: backup.restoreLocation,
+      unknownTopLevelKeysJson: source.unknownTopLevelKeys.length > 0
+        ? JSON.stringify(source.unknownTopLevelKeys)
+        : null,
       createdAt: now(),
     });
+    // frozen contract 11: the full backup identity (source/owner hashes,
+    // schema, migration ledger, application identity, integrity/FK proof) is
+    // persisted with the run
+    input.persistence.insertBackupEvidence({
+      id: "backup-" + runId,
+      importRunId: runId,
+      ...backup,
+    });
+    // runtime acceptance: a post-import integrity/foreign-key failure rolls
+    // the whole run back so the destination stays at the prior reviewed state
+    const postImport = input.persistence.integrity();
+    if (postImport.integrity !== "ok" || postImport.foreignKeyViolations !== 0) {
+      throw new ImportError(
+        "post-import integrity failure: " + postImport.integrity +
+        " fk=" + postImport.foreignKeyViolations,
+      );
+    }
     return {
       runId,
       state,

@@ -86,7 +86,7 @@ describe("P2-4 legacy JSON import application service", () => {
   it("replays the same source and owner mapping with zero new records", () => {
     const ctx = context();
     const first = runImport(ctx, "legacy-json-v1-sanitized.json");
-    const digestBefore = ctx.persistence.querySourceDigest("json-database-v1", fixtureSha256(manifest, "legacy-json-v1-sanitized.json"));
+    const digestBefore = ctx.persistence.querySourceDigest("json-database-v1", fixtureSha256(manifest, "legacy-json-v1-sanitized.json"), "fixture-user");
     const replay = runImport(ctx, "legacy-json-v1-sanitized.json");
     expect(replay.replay).toBe(true);
     expect(replay.state).toBe("COMPLETE");
@@ -94,7 +94,7 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(rowCount(ctx.database, "daily_observations")).toBe(19);
     expect(rowCount(ctx.database, "import_manifests")).toBe(1);
     expect(rowCount(ctx.database, "import_record_traces")).toBe(47);
-    expect(ctx.persistence.querySourceDigest("json-database-v1", fixtureSha256(manifest, "legacy-json-v1-sanitized.json"))).toBe(digestBefore);
+    expect(ctx.persistence.querySourceDigest("json-database-v1", fixtureSha256(manifest, "legacy-json-v1-sanitized.json"), "fixture-user")).toBe(digestBefore);
     expect(replay.payloadDigest).toBe(first.payloadDigest);
   });
 
@@ -257,10 +257,40 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(rowCount(ctx.database, "import_record_traces")).toBe(0);
   });
 
-  it("fails closed on malformed JSON (duplicate keys) with zero writes", () => {
+  it("quarantines a row with duplicate keys instead of failing the whole source", () => {
+    const ctx = context();
+    const path = join(ctx.dir, "duplicate-key-row.json");
+    writeFileSync(path, '{"meta":{"schemaVersion":1},"batches":[{"id":"a","id":"b","status":"active","currentDayIndex":0,"createdAt":"2026-08-01T00:00:00.000Z","updatedAt":"2026-08-01T00:00:00.000Z"}],"dailyRecords":[],"weighSamples":[],"recommendations":[],"approvals":[],"executions":[],"sceneStates":[],"modelRegistry":[],"auditLogs":[]}');
+    const mapping = writeOwnerMapping(ctx.dir, sha256File(path));
+    const result = importLegacyJson({
+      sourcePath: path,
+      ownerMappingPath: mapping.path,
+      persistence: ctx.persistence,
+      now: () => "2026-08-01T00:00:00.000Z",
+    });
+    expect(result.state).toBe("PRESERVED_WITH_QUARANTINE");
+    expect(result.counters.perCollection.batches).toMatchObject({
+      sourceRows: 1,
+      mappedNew: 0,
+      quarantined: 1,
+    });
+    expect(rowCount(ctx.database, "import_quarantine")).toBe(1);
+    const quarantine = ctx.persistence.listQuarantine();
+    expect(quarantine[0]?.reasonCode).toBe("duplicate-key");
+    // the quarantined row's field dispositions are recorded (contract 10)
+    const fieldPaths = JSON.parse(quarantine[0]?.fieldPathsJson ?? "[]") as Array<{
+      path: string;
+      disposition: string;
+    }>;
+    expect(fieldPaths.length).toBeGreaterThan(0);
+    expect(fieldPaths.every((entry) => entry.disposition === "quarantined")).toBe(true);
+    expect(rowCount(ctx.database, "batches")).toBe(0);
+  });
+
+  it("fails closed on envelope-level duplicate keys with zero writes", () => {
     const ctx = context();
     const path = join(ctx.dir, "malformed.json");
-    writeFileSync(path, '{"meta":{"schemaVersion":1},"batches":[{"id":"a","id":"b"}],"dailyRecords":[],"weighSamples":[],"recommendations":[],"approvals":[],"executions":[],"sceneStates":[],"modelRegistry":[],"auditLogs":[]}');
+    writeFileSync(path, '{"meta":{"schemaVersion":1},"batches":[],"dailyRecords":[],"weighSamples":[],"recommendations":[],"approvals":[],"executions":[],"sceneStates":[],"modelRegistry":[],"auditLogs":[],"batches":[]}');
     const mapping = writeOwnerMapping(ctx.dir, sha256File(path));
     expect(() =>
       importLegacyJson({
@@ -320,5 +350,135 @@ describe("P2-4 legacy JSON import application service", () => {
     expect(result.state).toBe("COMPLETE");
     expect(result.ownerMappingSha256).toBe(good?.sha256);
     expect(result.targetUserId).toBe("fixture-user");
+  });
+
+  it("scopes the replay digest to the accepted target user", () => {
+    const ctx = context();
+    const sha = fixtureSha256(manifest, "legacy-json-v1-sanitized.json");
+    const result = runImport(ctx, "legacy-json-v1-sanitized.json");
+    // a second tenant holds a row with the same business id but different content
+    ctx.database.prepare("INSERT INTO users (id, email, role, created_at) VALUES ('tenant-b', 'tenant-b@example.invalid', 'operator', '2026-08-01T00:00:00.000Z')").run();
+    const parsed = JSON.parse(readFileSync(fixturePath("legacy-json-v1-sanitized.json"), "utf8")) as { batches: Array<{ id: string }> };
+    const firstBatchId = parsed.batches[0]?.id as string;
+    ctx.database.prepare(
+      "INSERT INTO batches (user_id, id, revision, current_day, status, data_json, idempotency_key, created_at, updated_at) VALUES ('tenant-b', ?, 0, 0, 'active', '{\"tenant\":\"b\"}', 'tenant-b-key', '2026-08-01T00:00:00.000Z', '2026-08-01T00:00:00.000Z')",
+    ).run(firstBatchId);
+    // replay must not see tenant-b's row: the digest is unchanged and replay passes
+    const replay = runImport(ctx, "legacy-json-v1-sanitized.json");
+    expect(replay.replay).toBe(true);
+    expect(ctx.persistence.querySourceDigest("json-database-v1", sha, "fixture-user")).toBe(
+      result.payloadDigest,
+    );
+    // the same source under tenant-b's scope fails closed: the trace targets
+    // belong to fixture-user and must not be resolvable as tenant-b's rows
+    expect(() => ctx.persistence.querySourceDigest("json-database-v1", sha, "tenant-b")).toThrow(
+      /missing target row/,
+    );
+  });
+
+  it("fails replay with target-drift when preserved_raw trace payload is mutated", () => {
+    const ctx = context();
+    runImport(ctx, "legacy-json-v1-sanitized.json");
+    ctx.database.prepare(
+      "UPDATE import_record_traces SET raw_payload_json = '{\"tampered\":true}' WHERE disposition = 'preserved_raw'",
+    ).run();
+    expect(() => runImport(ctx, "legacy-json-v1-sanitized.json")).toThrow(/target-drift/);
+  });
+
+  it("records unknown top-level keys in the import manifest", () => {
+    const ctx = context();
+    const path = join(ctx.dir, "with-unknown-keys.json");
+    const base = readFileSync(fixturePath("legacy-json-v1-sanitized.json"), "utf8");
+    const withUnknown = base.slice(0, base.length - 2) + ',"futureExtension":{"a":1}}' + "\n";
+    writeFileSync(path, withUnknown);
+    const mapping = writeOwnerMapping(ctx.dir, sha256File(path));
+    const result = importLegacyJson({
+      sourcePath: path,
+      ownerMappingPath: mapping.path,
+      persistence: ctx.persistence,
+      now: () => "2026-08-01T00:00:00.000Z",
+    });
+    expect(result.state).toBe("COMPLETE");
+    const manifestRow = ctx.persistence.findManifestBySource("json-database-v1", sha256File(path));
+    expect(manifestRow?.unknownTopLevelKeysJson).toContain("futureExtension");
+  });
+
+  it("records field-level dispositions for mapped and preserved rows", () => {
+    const ctx = context();
+    runImport(ctx, "legacy-json-v1-sanitized.json");
+    const mappedTrace = ctx.database.prepare(
+      "SELECT field_paths_json FROM import_record_traces WHERE disposition = 'mapped' AND collection = 'dailyRecords' LIMIT 1",
+    ).get() as { field_paths_json: string };
+    const mappedFields = JSON.parse(mappedTrace.field_paths_json) as Array<{ path: string; disposition: string }>;
+    expect(mappedFields.length).toBeGreaterThan(0);
+    expect(mappedFields.every((entry) => entry.disposition === "mapped")).toBe(true);
+    expect(mappedFields[0]?.path).toMatch(/^\$\["dailyRecords"\]\[\d+\]\["/);
+    const preservedTrace = ctx.database.prepare(
+      "SELECT field_paths_json FROM import_record_traces WHERE disposition = 'preserved_raw' LIMIT 1",
+    ).get() as { field_paths_json: string };
+    const preservedFields = JSON.parse(preservedTrace.field_paths_json) as Array<{ disposition: string }>;
+    expect(preservedFields.length).toBeGreaterThan(0);
+    expect(preservedFields.every((entry) => entry.disposition === "preserved_raw")).toBe(true);
+    // field-specific quarantine: only the offending field is quarantined
+    runImport(ctx, "legacy-json-v1-invalid-observations.json");
+    const quarantine = ctx.persistence.listQuarantine();
+    const fieldSpecific = quarantine.find((row) => row.reasonCode === "ambiguous-omission-null-zero");
+    const fieldPaths = JSON.parse(fieldSpecific?.fieldPathsJson ?? "[]") as Array<{
+      path: string;
+      disposition: string;
+      reasonCode?: string;
+    }>;
+    const diarrheaField = fieldPaths.find((entry) => entry.path.includes("diarrheaMild"));
+    expect(diarrheaField).toMatchObject({
+      disposition: "quarantined",
+      reasonCode: "ambiguous-omission-null-zero",
+    });
+    const otherFields = fieldPaths.filter((entry) => !entry.path.includes("diarrheaMild"));
+    expect(otherFields.length).toBeGreaterThan(0);
+    expect(otherFields.every((entry) => entry.disposition === "preserved_raw")).toBe(true);
+  });
+
+  it("persists full backup identity evidence with the run", () => {
+    const ctx = context();
+    const result = runImport(ctx, "legacy-json-v1-sanitized.json");
+    expect(result.backup.schemaDigest).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.backup.migrationLedgerSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(result.backup.applicationVersion).toBe("0.1.0");
+    expect(result.backup.integrity).toBe("ok");
+    expect(result.backup.foreignKeyViolations).toBe(0);
+    const persisted = ctx.persistence.findBackupEvidenceByRunId(result.runId);
+    expect(persisted).not.toBeNull();
+    expect(persisted?.schemaDigest).toBe(result.backup.schemaDigest);
+    expect(persisted?.migrationLedgerSha256).toBe(result.backup.migrationLedgerSha256);
+    // the backup itself opens and passes integrity/FK checks
+    const backupDb = new DatabaseSync(persisted?.restoreLocation as string, { readOnly: true });
+    try {
+      expect(backupDb.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
+      expect(backupDb.prepare("PRAGMA foreign_key_check").all()).toHaveLength(0);
+    } finally {
+      backupDb.close();
+    }
+  });
+
+  it("rolls back automatically when post-import integrity acceptance fails", () => {
+    const ctx = context();
+    const failing = Object.create(ctx.persistence) as typeof ctx.persistence;
+    failing.integrity = () => ({ integrity: "ok", foreignKeyViolations: 1 });
+    const sha = fixtureSha256(manifest, "legacy-json-v1-sanitized.json");
+    const mapping = writeOwnerMapping(ctx.dir, sha);
+    expect(() =>
+      importLegacyJson({
+        sourcePath: fixturePath("legacy-json-v1-sanitized.json"),
+        ownerMappingPath: mapping.path,
+        persistence: failing,
+        now: () => "2026-08-01T00:00:00.000Z",
+      }),
+    ).toThrow(/post-import integrity failure/);
+    // the transaction rolled back: the destination is unchanged
+    expect(rowCount(ctx.database, "import_manifests")).toBe(0);
+    expect(rowCount(ctx.database, "import_record_traces")).toBe(0);
+    expect(rowCount(ctx.database, "import_backup_evidence")).toBe(0);
+    expect(rowCount(ctx.database, "batches")).toBe(0);
+    expect(rowCount(ctx.database, "daily_observations")).toBe(0);
   });
 });

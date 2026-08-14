@@ -4,8 +4,9 @@ export declare const AGENT_APPLICATION_VERSION = "0.1.0";
 export declare const LEGACY_APPLICATION_VERSION = "legacy-unknown";
 export declare const SEALED_V12_NAME = "audited-schema-v12-baseline";
 export declare const SEALED_V12_CHECKSUM = "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E";
-export declare const CURRENT_MIGRATION_VERSION = 14;
+export declare const CURRENT_MIGRATION_VERSION = 15;
 export declare const SEALED_V14_NAME = "registered-schema-v14-import";
+export declare const SEALED_V15_NAME = "registered-schema-v15-import-evidence";
 
 export interface MigrationDefinition {
   readonly version: number;

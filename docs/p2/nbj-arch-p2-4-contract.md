@@ -18,6 +18,51 @@ Second correction re-review: `PASS` — `P2-4-F01` / `P2-4-F01.1` / `P2-4-F02` c
 
 This checkpoint records the independent PASS verdict and opens no authority by itself: P2-4 Implementation Authorization was opened only by that independent review. The implementation candidate is recorded in `nbj-arch-p2-4-implementation.md`; the P2-4 Gate remains CLOSED.
 
+### 18.6 Implementation review — REQUEST CHANGES (P2-4-F04 / F05 / F06 / F07)
+
+Independent remote implementation review of
+`87dab7d333f815b9579168a836bd5ce3ca0a0b2b` (2 commits / 40 files)
+accepted the v14 migration authority, the real sanitized fixture and
+manifest, the P2-4 gate wiring, and exact-SHA CI (run 31761100591,
+457 passed + 1 skipped = 458 total, P2-4 gate 93/93), then returned
+`REQUEST CHANGES` with four P1 contract-conformance findings:
+
+- `P2-4-F04` (OPEN / P1) - CJSON key semantics: JS default sort is
+  UTF-16 code-unit order, not Unicode code-point order, and duplicate
+  detection ran before NFC normalization, so NFC-equivalent keys could
+  produce repeated canonical keys. Fixed: code-point comparator, keys
+  NFC-normalized before sorting and duplicate detection (parse and
+  serialize), with U+E000-vs-U+10000 ordering and NFC-equivalent collision
+  tests.
+- `P2-4-F05` (OPEN / P1) - replay payload digest was not
+  tenant-safe (target tables are keyed (user_id, id) but rows were read by
+  id alone) and did not bind preserved_raw trace evidence. Fixed: digest is
+  scoped to the accepted target user, and now binds target rows, every
+  trace identity/ordinal/disposition with content-bearing raw payloads,
+  and quarantine records; blocking tests cover two users with the same
+  business ID and preserved_raw payload mutation replay-drift.
+- `P2-4-F06` (OPEN / P1) - duplicate-key rows failed the whole
+  source instead of being quarantined; unknown top-level keys were detected
+  but not recorded; field-level dispositions were not implemented. Fixed:
+  per-row duplicate-key quarantine (envelope-level duplicates still fail
+  closed), unknown top-level keys recorded in the manifest, and real
+  field-level dispositions (field_paths_json) for mapped, preserved_raw,
+  and quarantined rows with field-specific reasons.
+- `P2-4-F07` (OPEN / P1) - backup evidence lacked schema/
+  ledger/application identity and FK proof, and post-import integrity
+  failure did not trigger automatic rollback. Fixed: backup evidence now
+  records schema digest, migration-ledger digest, application/importer
+  identity, integrity and FK proof, persisted per run via forward migration
+  v15 (`registered-schema-v15-import-evidence`, checksum
+  `22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F`)
+  without touching the published v14 identity (`0711127C...`);
+  post-import integrity acceptance runs inside the transaction so any
+  failure rolls the destination back to the prior reviewed state.
+
+The correction commit records these closures; the findings stay OPEN until
+the independent narrow re-review closes them. The P2-4 Gate remains CLOSED.
+
+
 P2-3 Final Closure Seal review: `PASS`
 
 P2-3 Seal exact-SHA CI: [agent-safety run 31680852943](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31680852943)
@@ -561,7 +606,11 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only; fixed by this checkpoint)
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
+P2-4-F04: OPEN / P1 — correction committed
+P2-4-F05: OPEN / P1 — correction committed
+P2-4-F06: OPEN / P1 — correction committed
+P2-4-F07: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 
 Independent architecture pre-review: PASS

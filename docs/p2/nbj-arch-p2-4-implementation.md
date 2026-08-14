@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Implementation
 
-Status: `IMPLEMENTATION CANDIDATE — INDEPENDENT REVIEW PENDING`
+Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F04 / F05 / F06 / F07) — RE-REVIEW PENDING`
 
 Contract registration: `PASS` (independent re-review of `f921b4f67187494b6d91965d176a3a85857ee938`)
 
@@ -170,6 +170,51 @@ independent SHA-256 implementation during fixture construction. Local
 evidence does not self-certify this candidate: exact-SHA CI and independent
 implementation review remain required.
 
+## Independent review — REQUEST CHANGES and correction
+
+Independent implementation review returned `REQUEST CHANGES` with four P1
+findings. The correction closes them as follows.
+
+### P2-4-F04 — canonical key semantics
+
+`canonical-json.ts` now sorts object keys with a real Unicode code-point
+comparator (JS default sort is UTF-16 code-unit order and differs for
+supplementary-plane keys), NFC-normalizes keys before sorting and before
+duplicate detection in both the strict parser and the serializer, and
+rejects NFC-equivalent duplicate canonical keys. Tests cover U+E000 vs
+U+10000 ordering and NFC-equivalent key collision.
+
+### P2-4-F05 — tenant-safe content-bearing replay digest
+
+`computeSourceDigest` now reads target rows scoped to the accepted target
+user (the authority key of batches/daily_observations is (user_id, id)) and
+binds target rows plus every trace record (identity, ordinal, disposition,
+raw payload SHA, raw payload content) plus quarantine records. Blocking
+tests: two users with the same business ID (digest reads only the accepted
+user; other-scope reads fail closed) and preserved_raw payload mutation
+fails replay with target-drift.
+
+### P2-4-F06 — per-row duplicate-key quarantine and field-level zero-loss
+
+The tolerant parser reports duplicate-key paths; a row with duplicate keys
+is quarantined with reason `duplicate-key` (envelope-level duplicates still
+fail the whole source closed). Unknown top-level keys are recorded in the
+import manifest. Every trace and quarantine row now carries real
+field-level dispositions (`field_paths_json`): mapped, preserved_raw, or
+the quarantine reason; field-specific reasons (invalid-field,
+ambiguous-omission-null-zero) mark only the offending fields.
+
+### P2-4-F07 — backup identity evidence and runtime acceptance
+
+Backup evidence now records schema digest, migration-ledger digest,
+application/importer identity, integrity, and foreign-key proof, and is
+persisted per run through forward migration v15
+`registered-schema-v15-import-evidence` (checksum
+`22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F`); the
+published v14 identity (`0711127C...`) is unchanged. Post-import integrity
+acceptance runs inside the transaction: any integrity or foreign-key
+failure rolls the destination back to the prior reviewed state (test
+proves automatic rollback with zero residual writes).
 ## Candidate state
 
 ```text
@@ -180,7 +225,7 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED (P2-4-F04 / F05 / F06 / F07 — correction committed)
 P2-4 Gate: CLOSED
 
 Runtime/Cutover Gate: CLOSED

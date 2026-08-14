@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
   BackupEvidence,
+  ImportBackupEvidenceRow,
   ImportManifestRow,
   ImportPersistencePort,
   QuarantineRow,
@@ -67,6 +68,9 @@ function manifestFromRow(row: Row): ImportManifestRow {
     payloadDigest: String(row.payload_digest),
     backupSha256: row.backup_sha256 == null ? null : String(row.backup_sha256),
     restoreLocation: row.restore_location == null ? null : String(row.restore_location),
+    unknownTopLevelKeysJson: row.unknown_top_level_keys_json == null
+      ? null
+      : String(row.unknown_top_level_keys_json),
     createdAt: String(row.created_at),
   };
 }
@@ -103,19 +107,34 @@ function computeSourceDigest(
   statements: Record<string, ReturnType<DatabaseSync["prepare"]>>,
   sourceKind: string,
   sourceSha256: string,
+  targetUserId: string,
 ): string {
+  // tenant safety: the authority key of the target tables is (user_id, id),
+  // so target rows are always read scoped to the accepted target user
   const targets: TargetRowDigestEntry[] = [];
   for (const row of statements.traceTargets.all(sourceKind, sourceSha256) as Row[]) {
     const table = String(row.target_table);
     const id = String(row.target_id);
     const content = table === "batches"
-      ? (statements.batchById.get(id) as Row | undefined)
-      : (statements.observationById.get(id) as Row | undefined);
+      ? (statements.batchById.get(targetUserId, id) as Row | undefined)
+      : (statements.observationById.get(targetUserId, id) as Row | undefined);
     if (content === undefined) {
-      throw new ImportError("target-drift: missing target row " + table + " " + id);
+      throw new ImportError(
+        "target-drift: missing target row " + table + " " + id + " for user " + targetUserId,
+      );
     }
     targets.push({ table, id, dataJson: String(content.data_json) });
   }
+  // raw evidence: every trace record (identity, ordinal, disposition, and
+  // content-bearing payload) plus every quarantine record is bound to the digest
+  const traces = (statements.traceDigestRows.all(sourceKind, sourceSha256) as Row[]).map((row) => ({
+    collection: String(row.collection),
+    identity: String(row.record_identity),
+    ordinal: Number(row.source_ordinal),
+    disposition: String(row.disposition),
+    rawPayloadSha256: String(row.raw_payload_sha256),
+    rawPayloadJson: String(row.raw_payload_json),
+  }));
   const quarantine = (statements.quarantineDigestRows.all(sourceKind, sourceSha256) as Row[]).map(
     (row) => ({
       collection: String(row.collection),
@@ -123,7 +142,7 @@ function computeSourceDigest(
       rawPayloadSha256: String(row.raw_payload_sha256),
     }),
   );
-  return sha256Text(JSON.stringify({ targets, quarantine }));
+  return sha256Text(JSON.stringify({ targetUserId, targets, traces, quarantine }));
 }
 
 export function createImportPersistence(
@@ -139,8 +158,9 @@ export function createImportPersistence(
       " id, source_kind, source_sha256, source_byte_length, source_schema_version," +
       " original_filename_or_export_label, captured_at, sanitization_or_origin_record," +
       " owner_mapping_sha256, target_user_id, importer_contract_version, run_state," +
-      " counters_json, payload_digest, backup_sha256, restore_location, created_at" +
-      " ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      " counters_json, payload_digest, backup_sha256, restore_location," +
+      " unknown_top_level_keys_json, created_at" +
+      " ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ),
     findUser: database.prepare("SELECT id FROM users WHERE id = ?"),
     insertTrace: database.prepare(
@@ -197,11 +217,27 @@ export function createImportPersistence(
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_record_identity",
     ),
     batchById: database.prepare(
-      "SELECT user_id, id, revision, current_day, status, data_json FROM batches WHERE id = ?",
+      "SELECT user_id, id, revision, current_day, status, data_json" +
+      " FROM batches WHERE user_id = ? AND id = ?",
     ),
     observationById: database.prepare(
       "SELECT user_id, id, batch_id, date_local, observed_at, batch_revision, data_json" +
-      " FROM daily_observations WHERE id = ?",
+      " FROM daily_observations WHERE user_id = ? AND id = ?",
+    ),
+    traceDigestRows: database.prepare(
+      "SELECT collection, record_identity, source_ordinal, disposition," +
+      " raw_payload_sha256, raw_payload_json FROM import_record_traces" +
+      " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_ordinal",
+    ),
+    insertBackupEvidence: database.prepare(
+      "INSERT INTO import_backup_evidence (" +
+      " id, import_run_id, sha256, restore_location, schema_digest, migration_ledger_sha256," +
+      " application_version, importer_contract_version, integrity, foreign_key_violations," +
+      " created_at" +
+      " ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ),
+    findBackupEvidence: database.prepare(
+      "SELECT * FROM import_backup_evidence WHERE import_run_id = ?",
     ),
     integrityCheck: database.prepare("PRAGMA integrity_check"),
     foreignKeyCheck: database.prepare("PRAGMA foreign_key_check"),
@@ -234,6 +270,7 @@ export function createImportPersistence(
         row.payloadDigest,
         row.backupSha256,
         row.restoreLocation,
+        row.unknownTopLevelKeysJson,
         row.createdAt,
       );
     },
@@ -339,6 +376,8 @@ export function createImportPersistence(
     queryTargetRowsByImportKeys(keys) {
       const entries: TargetRowDigestEntry[] = [];
       const seen = new Set<string>();
+      const manifest = statements.findManifest.get("json-database-v1", "") as Row | undefined;
+      void manifest;
       for (const table of ["batches", "daily_observations"]) {
         const statement = table === "batches" ? statements.batchById : statements.observationById;
         for (const key of keys) {
@@ -352,25 +391,81 @@ export function createImportPersistence(
       }
       return entries.sort((a, b) => (a.table + a.id < b.table + b.id ? -1 : 1));
     },
-    querySourceDigest(sourceKind, sourceSha256) {
-      return computeSourceDigest(statements, sourceKind, sourceSha256);
+    querySourceDigest(sourceKind, sourceSha256, targetUserId) {
+      return computeSourceDigest(statements, sourceKind, sourceSha256, targetUserId);
     },
     createBackup(): BackupEvidence {
       const directory = mkdtempSync(join(tmpdir(), "naibaji-import-backup-"));
       const backupPath = join(directory, "backup.db");
       database.exec("VACUUM INTO '" + backupPath + "'");
       const check = new DatabaseSync(backupPath, { readOnly: true });
+      let integrity = "ok";
+      let foreignKeyViolations = 0;
+      let schemaDigest = "";
+      let migrationLedgerSha256 = "";
       try {
-        const integrity = String(
-          check.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "",
-        );
+        integrity = String(check.prepare("PRAGMA integrity_check").get()?.integrity_check ?? "");
         if (integrity !== "ok") {
           throw new ImportError("backup integrity check failed: " + integrity);
         }
+        foreignKeyViolations = (check.prepare("PRAGMA foreign_key_check").all() as Row[]).length;
+        const schemaRows = check
+          .prepare(
+            "SELECT type, name, tbl_name, sql FROM sqlite_schema" +
+            " WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name",
+          )
+          .all();
+        schemaDigest = sha256Text(JSON.stringify(schemaRows));
+        const ledgerRows = check
+          .prepare("SELECT version, name, checksum FROM schema_migrations ORDER BY version")
+          .all();
+        migrationLedgerSha256 = sha256Text(JSON.stringify(ledgerRows));
       } finally {
         check.close();
       }
-      return { sha256: sha256File(backupPath), restoreLocation: backupPath };
+      return {
+        sha256: sha256File(backupPath),
+        restoreLocation: backupPath,
+        schemaDigest,
+        migrationLedgerSha256,
+        applicationVersion: "0.1.0",
+        importerContractVersion: "p2-4-import-v1",
+        integrity,
+        foreignKeyViolations,
+        createdAt: new Date().toISOString(),
+      };
+    },
+    insertBackupEvidence(row: ImportBackupEvidenceRow) {
+      statements.insertBackupEvidence.run(
+        row.id,
+        row.importRunId,
+        row.sha256,
+        row.restoreLocation,
+        row.schemaDigest,
+        row.migrationLedgerSha256,
+        row.applicationVersion,
+        row.importerContractVersion,
+        row.integrity,
+        row.foreignKeyViolations,
+        row.createdAt,
+      );
+    },
+    findBackupEvidenceByRunId(importRunId) {
+      const row = statements.findBackupEvidence.get(importRunId) as Row | undefined;
+      if (row === undefined) return null;
+      return {
+        id: String(row.id),
+        importRunId: String(row.import_run_id),
+        sha256: String(row.sha256),
+        restoreLocation: String(row.restore_location),
+        schemaDigest: String(row.schema_digest),
+        migrationLedgerSha256: String(row.migration_ledger_sha256),
+        applicationVersion: String(row.application_version),
+        importerContractVersion: String(row.importer_contract_version),
+        integrity: String(row.integrity),
+        foreignKeyViolations: Number(row.foreign_key_violations),
+        createdAt: String(row.created_at),
+      };
     },
     integrity() {
       const integrity = String(statements.integrityCheck.get()?.integrity_check ?? "");

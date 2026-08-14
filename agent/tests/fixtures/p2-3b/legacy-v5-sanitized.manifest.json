@@ -42,7 +42,8 @@
     "migrationVersions": [
       12,
       13,
-      14
+      14,
+      15
     ],
     "legacyArchiveVersions": [
       1,
@@ -75,9 +76,15 @@
         "name": "registered-schema-v14-import",
         "checksum": "0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33",
         "applicationVersion": "0.1.0"
+      },
+      {
+        "version": 15,
+        "name": "registered-schema-v15-import-evidence",
+        "checksum": "22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F",
+        "applicationVersion": "0.1.0"
       }
     ],
-    "schemaDigest": "4E90FCE0B9C1BFFD75DE5EAF237E8203C6866E0E8174D0F788E6A366524B90F5",
+    "schemaDigest": "50974534C04CC186EFE8793EFFCFE614909A27EC466606D575FAB6FF6E8D2708",
     "tableInventory": [
       "agent_messages",
       "agent_sessions",
@@ -90,6 +97,7 @@
       "daily_operation_confirmations",
       "daily_operation_plans",
       "feeding_decisions",
+      "import_backup_evidence",
       "import_manifests",
       "import_quarantine",
       "import_record_traces",
@@ -116,6 +124,7 @@
       "feeding_decisions_active_idx",
       "feeding_decisions_batch_date_revision_idx",
       "feeding_decisions_one_active_idx",
+      "import_backup_evidence_run_idx",
       "import_quarantine_resolution_idx",
       "import_quarantine_run_idx",
       "import_record_traces_identity_idx",

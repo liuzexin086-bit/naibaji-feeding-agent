@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { IMPORT_SCHEMA_V14, INITIAL_SCHEMA } from "./schema.js";
+import { IMPORT_SCHEMA_V14, IMPORT_SCHEMA_V15, INITIAL_SCHEMA } from "./schema.js";
 import {
   applyAuditedSchemaV12Structure,
   backfillLegacyFrozenSnapshots,
@@ -11,8 +11,9 @@ export const LEGACY_APPLICATION_VERSION = "legacy-unknown";
 export const SEALED_V12_NAME = "audited-schema-v12-baseline";
 export const SEALED_V12_CHECKSUM =
   "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E";
-export const CURRENT_MIGRATION_VERSION = 14;
+export const CURRENT_MIGRATION_VERSION = 15;
 export const SEALED_V14_NAME = "registered-schema-v14-import";
+export const SEALED_V15_NAME = "registered-schema-v15-import-evidence";
 
 const LEDGER_COLUMNS = [
   "version",
@@ -233,7 +234,7 @@ export function defineNaibajiMigrationChain(database) {
     apply: () => applyAuditedSchemaV12Structure(database),
   });
   const v14 = defineMigration({
-    version: CURRENT_MIGRATION_VERSION,
+    version: 14,
     name: SEALED_V14_NAME,
     canonicalBody: [
       "NBJ-ARCH-P2/P2-4",
@@ -247,7 +248,32 @@ export function defineNaibajiMigrationChain(database) {
       database.exec(IMPORT_SCHEMA_V14);
     },
   });
-  return Object.freeze([v12, v13, v14]);
+  const v15 = defineMigration({
+    version: CURRENT_MIGRATION_VERSION,
+    name: SEALED_V15_NAME,
+    canonicalBody: [
+      "NBJ-ARCH-P2/P2-4",
+      "schema-version=15",
+      "import-evidence=backup-evidence,unknown-top-level-keys",
+      "alter-unknown-top-level-keys=guarded-by-column-inspection",
+      "import-schema-v15-sql:",
+      IMPORT_SCHEMA_V15,
+      "startup-repair=prohibited-when-pending-zero",
+    ].join("\n"),
+    apply: () => {
+      const columns = database
+        .prepare("PRAGMA table_info(import_manifests)")
+        .all()
+        .map((row) => String(row.name));
+      if (!columns.includes("unknown_top_level_keys_json")) {
+        database.exec(
+          "ALTER TABLE import_manifests ADD COLUMN unknown_top_level_keys_json TEXT",
+        );
+      }
+      database.exec(IMPORT_SCHEMA_V15);
+    },
+  });
+  return Object.freeze([v12, v13, v14, v15]);
 }
 
 export function runNaibajiMigrations(input) {

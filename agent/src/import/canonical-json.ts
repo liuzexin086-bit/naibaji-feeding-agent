@@ -41,6 +41,23 @@ function escapeString(value: string): string {
   return out + '"';
 }
 
+/**
+ * Compare two strings by Unicode code point ascending. JS default comparison
+ * is UTF-16 code-unit order, which differs for supplementary-plane code
+ * points (surrogate pairs); the frozen contract requires code-point order.
+ */
+function compareCodePoints(left: string, right: string): number {
+  const leftCps = [...left];
+  const rightCps = [...right];
+  const length = Math.min(leftCps.length, rightCps.length);
+  for (let index = 0; index < length; index += 1) {
+    const a = leftCps[index]?.codePointAt(0) as number;
+    const b = rightCps[index]?.codePointAt(0) as number;
+    if (a !== b) return a < b ? -1 : 1;
+  }
+  return leftCps.length - rightCps.length;
+}
+
 function canonicalize(value: unknown): string {
   if (value === null) return "null";
   if (value === true) return "true";
@@ -58,10 +75,24 @@ function canonicalize(value: unknown): string {
   }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
+    // keys are NFC-normalized first, sorted by Unicode code point, and
+    // duplicate canonical keys (keys that normalize to the same string) are
+    // rejected so the canonical representation never contains repeated keys
+    const keyPairs = Object.keys(record)
+      .map((original) => ({ original, normalized: original.normalize("NFC") }))
+      .sort((a, b) => compareCodePoints(a.normalized, b.normalized));
+    for (let index = 1; index < keyPairs.length; index += 1) {
+      if (keyPairs[index]?.normalized === keyPairs[index - 1]?.normalized) {
+        throw new CanonicalJsonError(
+          "duplicate canonical key after NFC normalization: " + keyPairs[index]?.normalized,
+        );
+      }
+    }
     return (
       "{" +
-      keys.map((key) => escapeString(key) + ":" + canonicalize(record[key])).join(",") +
+      keyPairs
+        .map((pair) => escapeString(pair.normalized) + ":" + canonicalize(record[pair.original]))
+        .join(",") +
       "}"
     );
   }
@@ -75,12 +106,17 @@ export function canonicalJson(value: unknown): string {
 
 const NUMBER_TOKEN = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/;
 
+
 /**
- * Strict JSON parser used by the import pipeline. It rejects duplicate object
- * keys (JSON.parse silently keeps the last occurrence, which would make the
- * canonical encoding ambiguous) and enforces the JSON number grammar.
+ * Internal JSON parser with path tracking. When duplicate keys are found,
+ * the handler is invoked with the canonical path (for example
+ * $[\"batches\"][3][\"id\"]) and the LAST value wins (JSON.parse
+ * semantics); when no handler is provided, duplicate keys are rejected.
  */
-export function parseStrictJson(text: string): unknown {
+function parseJsonInternal(
+  text: string,
+  onDuplicateKey: ((path: string, key: string) => void) | null,
+): unknown {
   let index = 0;
   const input = text;
 
@@ -95,13 +131,13 @@ export function parseStrictJson(text: string): unknown {
     }
   }
 
-  function parseValue(depth: number): unknown {
+  function parseValue(depth: number, path: string): unknown {
     if (depth > 512) throw new CanonicalJsonError("JSON nesting too deep");
     skipWhitespace();
     const ch = input[index];
     if (ch === undefined) throw new CanonicalJsonError("unexpected end of JSON");
-    if (ch === "{") return parseObject(depth + 1);
-    if (ch === "[") return parseArray(depth + 1);
+    if (ch === "{") return parseObject(depth + 1, path);
+    if (ch === "[") return parseArray(depth + 1, path);
     if (ch === '"') return parseString();
     if (ch === "-" || (ch >= "0" && ch <= "9")) return parseNumber();
     if (input.startsWith("true", index)) {
@@ -178,7 +214,7 @@ export function parseStrictJson(text: string): unknown {
     return Number(token);
   }
 
-  function parseArray(depth: number): unknown[] {
+  function parseArray(depth: number, path: string): unknown[] {
     index += 1; // [
     const out: unknown[] = [];
     skipWhitespace();
@@ -186,8 +222,10 @@ export function parseStrictJson(text: string): unknown {
       index += 1;
       return out;
     }
+    let elementIndex = 0;
     for (;;) {
-      out.push(parseValue(depth));
+      out.push(parseValue(depth, path + "[" + elementIndex + "]"));
+      elementIndex += 1;
       skipWhitespace();
       if (input[index] === "]") {
         index += 1;
@@ -198,7 +236,7 @@ export function parseStrictJson(text: string): unknown {
     }
   }
 
-  function parseObject(depth: number): Record<string, unknown> {
+  function parseObject(depth: number, path: string): Record<string, unknown> {
     index += 1; // {
     const out: Record<string, unknown> = {};
     skipWhitespace();
@@ -208,14 +246,21 @@ export function parseStrictJson(text: string): unknown {
     }
     for (;;) {
       skipWhitespace();
-      const key = parseString();
+      // keys are NFC-normalized before the duplicate check so NFC-equivalent
+      // keys ("\u00e9" vs "e\u0301") cannot both pass and later collide in CJSON
+      const key = parseString().normalize("NFC");
+      const keyPath = path + "[\"" + key + "\"]";
       if (Object.prototype.hasOwnProperty.call(out, key)) {
-        throw new CanonicalJsonError("duplicate object key \"" + key + "\"");
+        if (onDuplicateKey) {
+          onDuplicateKey(keyPath, key);
+        } else {
+          throw new CanonicalJsonError("duplicate object key \"" + key + "\"");
+        }
       }
       skipWhitespace();
       if (input[index] !== ":") throw new CanonicalJsonError("expected ':'");
       index += 1;
-      out[key] = parseValue(depth);
+      out[key] = parseValue(depth, keyPath);
       skipWhitespace();
       if (input[index] === "}") {
         index += 1;
@@ -226,8 +271,37 @@ export function parseStrictJson(text: string): unknown {
     }
   }
 
-  const result = parseValue(0);
+  const result = parseValue(0, "$");
   skipWhitespace();
   if (index !== input.length) throw new CanonicalJsonError("trailing content at offset " + index);
   return result;
+}
+
+/**
+ * Strict JSON parser used by the import pipeline. It rejects duplicate object
+ * keys (JSON.parse silently keeps the last occurrence, which would make the
+ * canonical encoding ambiguous) and enforces the JSON number grammar.
+ */
+export function parseStrictJson(text: string): unknown {
+  return parseJsonInternal(text, null);
+}
+
+export interface ParsedJsonWithDuplicatePaths {
+  readonly value: unknown;
+  /** Canonical paths of duplicate keys, for example $["batches"][3]["id"]. */
+  readonly duplicatePaths: readonly string[];
+}
+
+/**
+ * Tolerant parser for source documents: keeps the last value for duplicate
+ * keys (JSON.parse semantics) while reporting every duplicate-key path so the
+ * importer can quarantine the affected row (contract 5.1) instead of failing
+ * the whole source.
+ */
+export function parseJsonWithDuplicatePaths(text: string): ParsedJsonWithDuplicatePaths {
+  const duplicatePaths: string[] = [];
+  const value = parseJsonInternal(text, (path) => {
+    duplicatePaths.push(path);
+  });
+  return { value, duplicatePaths };
 }

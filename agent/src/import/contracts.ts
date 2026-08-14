@@ -107,6 +107,7 @@ export interface ImportManifestRow {
   readonly payloadDigest: string;
   readonly backupSha256: string | null;
   readonly restoreLocation: string | null;
+  readonly unknownTopLevelKeysJson: string | null;
   readonly createdAt: string;
 }
 
@@ -182,6 +183,18 @@ export interface TargetRowDigestEntry {
 export interface BackupEvidence {
   readonly sha256: string;
   readonly restoreLocation: string;
+  readonly schemaDigest: string;
+  readonly migrationLedgerSha256: string;
+  readonly applicationVersion: string;
+  readonly importerContractVersion: string;
+  readonly integrity: string;
+  readonly foreignKeyViolations: number;
+  readonly createdAt: string;
+}
+
+export interface ImportBackupEvidenceRow extends BackupEvidence {
+  readonly id: string;
+  readonly importRunId: string;
 }
 
 export interface ImportPersistencePort {
@@ -206,8 +219,10 @@ export interface ImportPersistencePort {
   queryTargetRowsByImportKeys(
     keys: readonly string[],
   ): TargetRowDigestEntry[];
-  querySourceDigest(sourceKind: string, sourceSha256: string): string;
+  querySourceDigest(sourceKind: string, sourceSha256: string, targetUserId: string): string;
   createBackup(): BackupEvidence;
+  insertBackupEvidence(row: ImportBackupEvidenceRow): void;
+  findBackupEvidenceByRunId(importRunId: string): ImportBackupEvidenceRow | null;
   integrity(): { integrity: string; foreignKeyViolations: number };
   transaction<T>(operation: () => T): T;
 }

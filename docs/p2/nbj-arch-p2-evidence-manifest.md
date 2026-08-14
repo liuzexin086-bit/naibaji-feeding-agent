@@ -792,6 +792,51 @@ Architecture Unification Gate: CLOSED
 Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
+## 18.7 P2-4 Implementation Review — REQUEST CHANGES and Correction
+
+Independent remote implementation review of
+`87dab7d333f815b9579168a836bd5ce3ca0a0b2b` (2 commits / 40 files)
+accepted migration v14 authority, fixture provenance, gate wiring, and
+exact-SHA CI (run 31761100591; full suite 457 + 1 skipped = 458; P2-4 gate
+93/93), then returned `REQUEST CHANGES` with four P1 findings:
+
+- `P2-4-F04` — CJSON key semantics (code-point order; NFC before
+  duplicate detection).
+- `P2-4-F05` — replay digest tenant safety and preserved_raw
+  evidence binding.
+- `P2-4-F06` — per-row duplicate-key quarantine, unknown top-level
+  keys, field-level dispositions.
+- `P2-4-F07` — backup identity evidence and post-import integrity
+  acceptance with automatic rollback.
+
+The correction commit closes all four: CJSON now sorts by Unicode code
+point and rejects NFC-equivalent duplicate keys; the replay digest is
+scoped to the accepted target user and binds target rows plus every trace
+and quarantine record (content-bearing); duplicate-key rows are
+quarantined per row (envelope-level duplicates fail closed); unknown
+top-level keys are recorded in the manifest; every trace and quarantine
+row carries real field-level dispositions; backup evidence records schema,
+migration-ledger, and application identity with integrity/FK proof and is
+persisted per run through forward migration v15
+(`registered-schema-v15-import-evidence`, checksum
+`22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F`);
+the published v14 identity (`0711127C...`) is unchanged, and
+post-import integrity acceptance runs inside the transaction so any
+failure rolls the destination back. Local gates at the correction
+checkpoint: P2-4 gate 104 passed; full suite green; P2-1 20, P2-2 9, P2-3A
+35, P2-3B 46, P0 100, P1 197; build and clean-source PASS. The findings
+remain OPEN until the independent narrow re-review closes them; the P2-4
+Gate stays CLOSED.
+
+```text
+P2-4 Implementation Authorization: OPEN
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED
+P2-4-F04: OPEN / P1 — correction committed
+P2-4-F05: OPEN / P1 — correction committed
+P2-4-F06: OPEN / P1 — correction committed
+P2-4-F07: OPEN / P1 — correction committed
+P2-4 Gate: CLOSED
+```
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 
 After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three

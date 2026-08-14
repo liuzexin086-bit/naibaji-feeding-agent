@@ -8,6 +8,7 @@ import {
   SEALED_V12_CHECKSUM,
   SEALED_V12_NAME,
   SEALED_V14_NAME,
+  SEALED_V15_NAME,
   defineNaibajiMigrationChain,
   runNaibajiMigrations,
 } from "@naibaji/persistence/migrations";
@@ -35,9 +36,12 @@ describe("P2-4 v14 import schema migration", () => {
         { version: 12, name: SEALED_V12_NAME },
         { version: 13, name: "registered-schema-v13-repair" },
         { version: 14, name: SEALED_V14_NAME },
+        { version: 15, name: SEALED_V15_NAME },
       ]);
       expect(chain[0]?.checksum).toBe(SEALED_V12_CHECKSUM);
-      expect(CURRENT_MIGRATION_VERSION).toBe(14);
+      // the published v14 identity stays immutable even after v15 was added
+      expect(chain[2]?.checksum).toBe("0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33");
+      expect(CURRENT_MIGRATION_VERSION).toBe(15);
     } finally {
       database.close();
     }
@@ -51,10 +55,12 @@ describe("P2-4 v14 import schema migration", () => {
       try {
         runNaibajiMigrations({ database });
         const ledger = database.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all();
-        expect(ledger.map((row) => Number(row.version))).toEqual([12, 13, 14]);
+        expect(ledger.map((row) => Number(row.version))).toEqual([12, 13, 14, 15]);
         expect(ledger[2]).toMatchObject({ version: 14, name: SEALED_V14_NAME });
+        expect(ledger[3]).toMatchObject({ version: 15, name: SEALED_V15_NAME });
         const tables = names(database, "table");
         for (const table of IMPORT_TABLES) expect(tables).toContain(table);
+        expect(tables).toContain("import_backup_evidence");
         expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
       } finally {
         database.close();

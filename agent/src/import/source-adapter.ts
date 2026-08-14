@@ -1,10 +1,15 @@
 /**
  * P2-4 read-only JSON Database v1 source adapter (contract 3, 4, 13).
+ *
  * The source file is never modified: it is read, byte-hashed, and parsed.
+ * Duplicate object keys are detected per row: a row with duplicate keys is
+ * not canonically serializable and is quarantined by the importer (contract
+ * 5.1); duplicate keys outside a collection row (envelope, meta, unknown
+ * top-level structure) make the whole source malformed and fail closed.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { parseStrictJson, CanonicalJsonError } from "./canonical-json.js";
+import { parseJsonWithDuplicatePaths } from "./canonical-json.js";
 import { JSON_V1_COLLECTIONS } from "./contracts.js";
 
 export class SourceReadError extends Error {
@@ -22,23 +27,33 @@ export interface JsonV1Source {
   readonly collections: Record<string, unknown[]>;
   readonly schemaVersion: number;
   readonly unknownTopLevelKeys: string[];
+  /** Rows containing duplicate keys, keyed as collection[index]. */
+  readonly duplicateKeyRows: readonly string[];
 }
 
 export function sha256File(path: string): string {
   return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
+function rowKeyOf(duplicatePath: string): string | null {
+  const match = /^\$\["([^"]+)"\]\[(\d+)\](?:\[|$)/.exec(duplicatePath);
+  if (!match) return null;
+  const collection = match[1] as string;
+  if (!(JSON_V1_COLLECTIONS as readonly string[]).includes(collection)) return null;
+  return collection + "[" + match[2] + "]";
+}
+
 export function readJsonV1Source(path: string): JsonV1Source {
   const bytes = readFileSync(path);
   const text = bytes.toString("utf8");
   let parsed: unknown;
+  let duplicatePaths: readonly string[] = [];
   try {
-    parsed = parseStrictJson(text);
+    const result = parseJsonWithDuplicatePaths(text);
+    parsed = result.value;
+    duplicatePaths = result.duplicatePaths;
   } catch (error) {
-    if (error instanceof CanonicalJsonError) {
-      throw new SourceReadError("malformed-json: " + error.message);
-    }
-    throw error;
+    throw new SourceReadError("malformed-json: " + (error as Error).message);
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new SourceReadError("invalid-envelope: top-level value must be an object");
@@ -65,6 +80,18 @@ export function readJsonV1Source(path: string): JsonV1Source {
   const unknownTopLevelKeys = Object.keys(record).filter(
     (key) => key !== "meta" && !(JSON_V1_COLLECTIONS as readonly string[]).includes(key),
   );
+  // duplicate keys inside a collection row are quarantined per row; any
+  // other duplicate (envelope, meta, or unknown top-level structure) makes
+  // the source non-canonically serializable and fails closed
+  const duplicateKeyRows = new Set<string>();
+  for (const duplicatePath of duplicatePaths) {
+    const rowKey = rowKeyOf(duplicatePath);
+    if (rowKey !== null) {
+      duplicateKeyRows.add(rowKey);
+    } else {
+      throw new SourceReadError("malformed-json: duplicate key outside collection rows at " + duplicatePath);
+    }
+  }
   return {
     path,
     byteLength: bytes.byteLength,
@@ -73,5 +100,6 @@ export function readJsonV1Source(path: string): JsonV1Source {
     collections,
     schemaVersion: 1,
     unknownTopLevelKeys,
+    duplicateKeyRows: [...duplicateKeyRows].sort(),
   };
 }
