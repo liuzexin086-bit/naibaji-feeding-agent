@@ -1,0 +1,107 @@
+{
+  "formatVersion": 1,
+  "baseRealFixture": {
+    "fixture": "legacy-json-v1-sanitized.json",
+    "sha256": "d33eb1618067209368b3cc5f50c91b00bef3e5511c7219f17f5212ba36c23340",
+    "byteSize": 35051,
+    "sourceApplication": "naibaji Electron legacy JSON Database v1 runtime",
+    "sourceOrigin": {
+      "kind": "real local Electron userData JSON Database v1 file",
+      "path": "C:\\Users\\scsw\\AppData\\Roaming\\naibaji\\data\\naibaji-db.json",
+      "capturedPurpose": "real operator JSON Database v1 source for the P2-4 import fixture",
+      "capturedDate": "2026-07-07"
+    },
+    "rawSourceSha256": "2f276e5d1a4b1ec3b828227cbf0110c6c66e4d41a91e6ea364a65067070e13e2",
+    "rawSourceByteSize": 36290,
+    "observedSourceState": "meta.schemaVersion=1; batches 5, dailyRecords 19, weighSamples 0, recommendations 19, approvals 0, executions 0, sceneStates 2, modelRegistry 2, auditLogs 0",
+    "sanitizationRecord": {
+      "method": "deterministic transform of the raw committed source bytes: id-reference field values (id, batchId, dailyRecordId, recommendationId, roomId, sceneId, modelVersion) mapped to fixture-id-* in first-seen order; any string equal to a mapped value replaced everywhere; ISO timestamps replaced with deterministic 2026-08-01+ sequence; date-only strings replaced with deterministic 2026-08 dates; CJK text replaced with fixture-cjk-*; email-like strings replaced with fixture-email-*@example.invalid; long free text replaced with fixture-note-*; serialized with JSON.stringify(value, null, 2) plus trailing newline, matching the legacy save format",
+      "removed": [
+        "all original batch/recommendation/scene/model identifiers",
+        "all original ISO timestamps and date values",
+        "all CJK free text (reasons, labels, notes)",
+        "any email-like strings"
+      ],
+      "replaced": [
+        "identifiers with deterministic fixture-id-* values preserving cross-collection references",
+        "timestamps with deterministic 2026-08-01+ audit values",
+        "CJK and free text with deterministic fixture-cjk-* / fixture-note-* values"
+      ],
+      "retained": [
+        "complete envelope and all nine collection arrays",
+        "all numeric values and boolean flags",
+        "enum statuses (active, completed, default, normal, MODEL_FALLBACK, model name feeding-model)",
+        "object/array shapes including config, state, paramsJson, learningResult",
+        "relationship graph through the deterministic id map"
+      ],
+      "secretsPresent": false,
+      "personalDataPresent": false,
+      "liveEndpointsPresent": false,
+      "deviceControlAuthorityPresent": false
+    }
+  },
+  "variants": [
+    {
+      "fixture": "legacy-json-v1-duplicates.json",
+      "sha256": "dd426b5da1d2c6c397e3436cdf1b193de856c97023302780db31e15b569cd8b1",
+      "byteSize": 36329,
+      "constructedFrom": "legacy-json-v1-sanitized.json",
+      "transformation": "insert byte-identical copies of dailyRecords[0] and recommendations[0] directly after the originals",
+      "purpose": "exact-duplicate occurrences: counted and mapped once, every occurrence traceable"
+    },
+    {
+      "fixture": "legacy-json-v1-conflict.json",
+      "sha256": "6131f7e5a44194887179513584ed7725a91d6c2a924a2ba212bdc63213587f1a",
+      "byteSize": 35445,
+      "constructedFrom": "legacy-json-v1-sanitized.json",
+      "transformation": "increment totalMilkG of dailyRecords[0] keeping its id",
+      "purpose": "same collection/source ID with different canonical content: conflict quarantine before target mutation"
+    },
+    {
+      "fixture": "legacy-json-v1-missing-ids.json",
+      "sha256": "99a960696c62b38e63905e9c1c7c4bc86612a2ab3d3a6928b7cc328df8934468",
+      "byteSize": 34993,
+      "constructedFrom": "legacy-json-v1-sanitized.json",
+      "transformation": "delete the id field from dailyRecords[2] and recommendations[3]",
+      "purpose": "rows without a provable source ID: source-bound quarantine identity path"
+    },
+    {
+      "fixture": "legacy-json-v1-orphan.json",
+      "sha256": "7e63010702317815f2e10f61db5dab98f2722b634bec70751feceff82c7ecd30",
+      "byteSize": 35456,
+      "constructedFrom": "legacy-json-v1-sanitized.json",
+      "transformation": "append a dailyRecord whose batchId references a non-existent batch",
+      "purpose": "parent/child orphan attempt: quarantined, no target orphan"
+    },
+    {
+      "fixture": "legacy-json-v1-invalid-observations.json",
+      "sha256": "2d304ed21faca319e6a2a2d464e5b79d90d9f91b2cb56d3453cfa8a6a37e9f72",
+      "byteSize": 1772,
+      "constructedFrom": "deterministic constructed envelope (no real row data)",
+      "transformation": "rows exercising omitted diarrheaMild, explicit zero, null diarrheaMild, and an empty collection",
+      "purpose": "null / omission / explicit none / zero / empty-collection remain distinct through import"
+    },
+    {
+      "fixture": "legacy-json-v1-unsupported.json",
+      "sha256": "854f8e83dd766d80f053411d0f527773ba92c713e62ed2ce34e2249662e99354",
+      "byteSize": 35051,
+      "constructedFrom": "legacy-json-v1-sanitized.json",
+      "transformation": "set meta.schemaVersion to 2",
+      "purpose": "unsupported schema: preflight fails closed with zero destination writes"
+    }
+  ],
+  "ownerMappings": [
+    {
+      "fixture": "owner-mapping-good.json",
+      "sha256": "ec50026293b7ef6f646fea3651636f85dda20a7a9ac60e5c55983faa10044143",
+      "byteSize": 308,
+      "purpose": "accepted owner mapping binding the base sanitized source to fixture-user"
+    },
+    {
+      "fixture": "owner-mapping-conflict.json",
+      "sha256": "39460bce5e5d6b46a47a85ee53a0d18ba023e759e1ea1590dcbaa6ada3329bc4",
+      "byteSize": 294,
+      "purpose": "same source with a different targetUserId: owner-mapping-mismatch fail-closed proof"
+    }
+  ]
+}

@@ -16,7 +16,7 @@ First correction re-review: `REQUEST CHANGES` — `P2-4-F01.1`; `P2-4-F02` close
 
 Second correction re-review: `PASS` — `P2-4-F01` / `P2-4-F01.1` / `P2-4-F02` closed (audit history in §18)
 
-This checkpoint records the independent PASS verdict and opens no authority by itself: P2-4 Implementation Authorization was opened only by that independent review. P2-4 Implementation remains NOT STARTED and the P2-4 Gate remains CLOSED.
+This checkpoint records the independent PASS verdict and opens no authority by itself: P2-4 Implementation Authorization was opened only by that independent review. The implementation candidate is recorded in `nbj-arch-p2-4-implementation.md`; the P2-4 Gate remains CLOSED.
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -561,7 +561,7 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only; fixed by this checkpoint)
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: NOT STARTED
+P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
 P2-4 Gate: CLOSED
 
 Independent architecture pre-review: PASS

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { INITIAL_SCHEMA } from "./schema.js";
+import { IMPORT_SCHEMA_V14, INITIAL_SCHEMA } from "./schema.js";
 import {
   applyAuditedSchemaV12Structure,
   backfillLegacyFrozenSnapshots,
@@ -11,7 +11,8 @@ export const LEGACY_APPLICATION_VERSION = "legacy-unknown";
 export const SEALED_V12_NAME = "audited-schema-v12-baseline";
 export const SEALED_V12_CHECKSUM =
   "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E";
-export const CURRENT_MIGRATION_VERSION = 13;
+export const CURRENT_MIGRATION_VERSION = 14;
+export const SEALED_V14_NAME = "registered-schema-v14-import";
 
 const LEDGER_COLUMNS = [
   "version",
@@ -217,7 +218,7 @@ export function defineNaibajiMigrationChain(database) {
     throw new Error(`sealed v12 migration identity drift: ${v12.checksum}`);
   }
   const v13 = defineMigration({
-    version: CURRENT_MIGRATION_VERSION,
+    version: 13,
     name: "registered-schema-v13-repair",
     canonicalBody: [
       "NBJ-ARCH-P2/P2-3B",
@@ -231,7 +232,22 @@ export function defineNaibajiMigrationChain(database) {
     ].join("\n"),
     apply: () => applyAuditedSchemaV12Structure(database),
   });
-  return Object.freeze([v12, v13]);
+  const v14 = defineMigration({
+    version: CURRENT_MIGRATION_VERSION,
+    name: SEALED_V14_NAME,
+    canonicalBody: [
+      "NBJ-ARCH-P2/P2-4",
+      "schema-version=14",
+      "import-schema=manifest,record-trace,quarantine",
+      "import-schema-sql:",
+      IMPORT_SCHEMA_V14,
+      "startup-repair=prohibited-when-pending-zero",
+    ].join("\n"),
+    apply: () => {
+      database.exec(IMPORT_SCHEMA_V14);
+    },
+  });
+  return Object.freeze([v12, v13, v14]);
 }
 
 export function runNaibajiMigrations(input) {

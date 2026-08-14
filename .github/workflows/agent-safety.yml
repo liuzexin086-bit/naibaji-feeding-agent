@@ -68,6 +68,10 @@ jobs:
         working-directory: agent
         run: npm run p2-3b-migration-ownership-gate
 
+      - name: P2-4 Legacy JSON Import gate
+        working-directory: agent
+        run: npm run p2-4-legacy-json-import-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

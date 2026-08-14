@@ -25,6 +25,7 @@
     "p2-2-persistence-gate": "npm run check && vitest run tests/persistence tests/architecture",
     "p2-3a-migration-gate": "npm run check && vitest run tests/migration tests/local-db/local-store.test.ts",
     "p2-3b-migration-ownership-gate": "npm run check && vitest run tests/p2-3b tests/migration tests/local-db/local-store.test.ts tests/provenance-contract.test.ts tests/ci-contract.test.ts",
+    "p2-4-legacy-json-import-gate": "npm run check && vitest run tests/p2-4 tests/p2-3b tests/migration tests/architecture tests/local-db/local-store.test.ts tests/provenance-contract.test.ts tests/ci-contract.test.ts",
     "test:watch": "vitest",
     "prepare:assets": "node scripts/prepare-assets.mjs",
     "start:container": "node dist/container/server.js"

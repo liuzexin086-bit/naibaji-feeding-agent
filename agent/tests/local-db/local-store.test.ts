@@ -139,7 +139,7 @@ describe("SQLite local store", () => {
       "agent_messages",
       "audit_events",
     ]));
-    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count).toBe(2);
+    expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count).toBe(3);
     expect(database.prepare("PRAGMA table_info(schema_migrations)").all()
       .map((row) => String(row.name))).toEqual([
         "version",
@@ -160,6 +160,11 @@ describe("SQLite local store", () => {
       {
         version: 13,
         name: "registered-schema-v13-repair",
+        application_version: AGENT_APPLICATION_VERSION,
+      },
+      {
+        version: 14,
+        name: "registered-schema-v14-import",
         application_version: AGENT_APPLICATION_VERSION,
       },
     ]);
@@ -226,7 +231,9 @@ describe("SQLite local store", () => {
     store.close();
 
     const damaged = new DatabaseSync(filename);
-    damaged.exec("DELETE FROM schema_migrations WHERE version = 13;");
+    // removing the v13 and v14 ledger rows makes [12] an exact registered
+    // prefix again, so the retained v13 repair re-applies on restart
+    damaged.exec("DELETE FROM schema_migrations WHERE version IN (13, 14);");
     damaged.exec("ALTER TABLE users DROP COLUMN password_salt;");
     damaged.close();
 
@@ -238,7 +245,7 @@ describe("SQLite local store", () => {
     expect(database.prepare("PRAGMA table_info(users)").all()
       .map((row) => String(row.name))).toContain("password_salt");
     expect(database.prepare("SELECT count(*) AS count FROM schema_migrations").get()?.count)
-      .toBe(2);
+      .toBe(3);
     database.close();
   });
 
@@ -678,7 +685,7 @@ describe("SQLite local store", () => {
       .map((row) => String(row.name));
     expect(indexes).toContain("daily_operation_amendments_batch_date_idx");
     expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
-      .toBe(13);
+      .toBe(14);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     database.close();
     upgraded.close();
@@ -1057,7 +1064,7 @@ describe("SQLite local store", () => {
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
     expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version)
-      .toBe(13);
+      .toBe(14);
     database.close();
     upgraded.close();
   });
@@ -1270,7 +1277,7 @@ describe("SQLite local store", () => {
     expect(indexes).toContain("feeding_decisions_one_active_idx");
     expect(database.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
     expect(database.prepare("PRAGMA integrity_check").get()?.integrity_check).toBe("ok");
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(13);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(14);
     expect(database.prepare("SELECT * FROM schema_migrations_legacy").all())
       .toEqual([{ version: 11, applied_at: "2026-08-08T00:00:00.000Z" }]);
     database.close();
@@ -1742,7 +1749,7 @@ describe("SQLite local store", () => {
     ]));
     expect(amendmentTables).toHaveLength(1);
     expect(actionTables).toHaveLength(1);
-    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(13);
+    expect(database.prepare("SELECT MAX(version) AS version FROM schema_migrations").get()?.version).toBe(14);
     database.close();
     upgraded.close();
   });

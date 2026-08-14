@@ -1,0 +1,72 @@
+{
+  "meta": {
+    "schemaVersion": 1,
+    "createdAt": "2026-08-01T00:00:00.000Z"
+  },
+  "batches": [
+    {
+      "id": "fixture-id-9101",
+      "config": {},
+      "configLocked": true,
+      "controlStartDay": 1,
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "currentDayIndex": 0,
+      "modelVersion": "fixture-id-9000",
+      "status": "active",
+      "updatedAt": "2026-08-01T00:00:00.000Z"
+    }
+  ],
+  "dailyRecords": [
+    {
+      "id": "fixture-id-9102",
+      "batchId": "fixture-id-9101",
+      "dayAge": 3,
+      "dayIndex": 0,
+      "recordDate": "2026-08-01",
+      "headCount": 10,
+      "totalMilkG": 500,
+      "totalCreepG": 100,
+      "diarrheaMild": 0,
+      "diarrheaModerate": 0,
+      "diarrheaSevere": 0,
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "id": "fixture-id-9103",
+      "batchId": "fixture-id-9101",
+      "dayAge": 4,
+      "dayIndex": 1,
+      "recordDate": "2026-08-02",
+      "headCount": 10,
+      "totalMilkG": 520,
+      "totalCreepG": 110,
+      "diarrheaModerate": 0,
+      "diarrheaSevere": 0,
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-01T00:00:00.000Z"
+    },
+    {
+      "id": "fixture-id-9104",
+      "batchId": "fixture-id-9101",
+      "dayAge": 5,
+      "dayIndex": 2,
+      "recordDate": "2026-08-03",
+      "headCount": 10,
+      "totalMilkG": 540,
+      "totalCreepG": 120,
+      "diarrheaMild": null,
+      "diarrheaModerate": 0,
+      "diarrheaSevere": 0,
+      "createdAt": "2026-08-01T00:00:00.000Z",
+      "updatedAt": "2026-08-01T00:00:00.000Z"
+    }
+  ],
+  "weighSamples": [],
+  "recommendations": [],
+  "approvals": [],
+  "executions": [],
+  "sceneStates": [],
+  "modelRegistry": [],
+  "auditLogs": []
+}

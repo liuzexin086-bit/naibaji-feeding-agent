@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "sourceKind": "json-database-v1",
+  "sourceSha256": "d33eb1618067209368b3cc5f50c91b00bef3e5511c7219f17f5212ba36c23340",
+  "targetUserId": "fixture-user",
+  "mappingNote": "deterministic P2-4 fixture owner mapping to seeded fixture-user",
+  "createdAt": "2026-08-01T00:00:00.000Z"
+}

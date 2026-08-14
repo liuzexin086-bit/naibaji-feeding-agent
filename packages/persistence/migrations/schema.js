@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 13;
+export const MIGRATION_VERSION = 14;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -303,4 +303,85 @@ CREATE INDEX IF NOT EXISTS sop_knowledge_chunks_digest_idx
   ON sop_knowledge_chunks(source_sha256, collection_revision);
 CREATE INDEX IF NOT EXISTS sop_edit_tasks_created_idx
   ON sop_edit_tasks(created_at DESC);
+`;
+
+export const IMPORT_SCHEMA_V14 = `
+CREATE TABLE IF NOT EXISTS import_manifests (
+  id TEXT PRIMARY KEY,
+  source_kind TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  source_byte_length INTEGER NOT NULL CHECK (source_byte_length >= 0),
+  source_schema_version TEXT NOT NULL,
+  original_filename_or_export_label TEXT,
+  captured_at TEXT,
+  sanitization_or_origin_record TEXT,
+  owner_mapping_sha256 TEXT NOT NULL,
+  target_user_id TEXT NOT NULL,
+  importer_contract_version TEXT NOT NULL,
+  run_state TEXT NOT NULL CHECK (run_state IN ('COMPLETE', 'PRESERVED_WITH_QUARANTINE', 'INCOMPLETE', 'FAILED_ROLLED_BACK')),
+  counters_json TEXT NOT NULL CHECK (json_valid(counters_json)),
+  payload_digest TEXT NOT NULL,
+  backup_sha256 TEXT,
+  restore_location TEXT,
+  created_at TEXT NOT NULL,
+  UNIQUE (source_kind, source_sha256, owner_mapping_sha256)
+) STRICT;
+
+CREATE TABLE IF NOT EXISTS import_record_traces (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_run_id TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  record_identity TEXT NOT NULL,
+  source_ordinal INTEGER NOT NULL CHECK (source_ordinal >= 0),
+  disposition TEXT NOT NULL CHECK (disposition IN ('mapped', 'preserved_raw', 'exact_duplicate', 'quarantined')),
+  target_table TEXT,
+  target_id TEXT,
+  raw_payload_bytes INTEGER NOT NULL CHECK (raw_payload_bytes >= 0),
+  raw_payload_sha256 TEXT NOT NULL,
+  raw_payload_json TEXT NOT NULL CHECK (json_valid(raw_payload_json)),
+  reason_code TEXT,
+  field_paths_json TEXT,
+  parent_identity TEXT,
+  owner_mapping_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (import_run_id) REFERENCES import_manifests(id) ON DELETE CASCADE
+    DEFERRABLE INITIALLY DEFERRED
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS import_record_traces_run_idx
+  ON import_record_traces(import_run_id);
+
+CREATE INDEX IF NOT EXISTS import_record_traces_identity_idx
+  ON import_record_traces(record_identity);
+
+CREATE INDEX IF NOT EXISTS import_record_traces_source_idx
+  ON import_record_traces(source_kind, source_sha256, collection);
+
+CREATE TABLE IF NOT EXISTS import_quarantine (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  import_run_id TEXT NOT NULL,
+  source_kind TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  collection TEXT NOT NULL,
+  source_record_identity TEXT NOT NULL,
+  source_ordinal INTEGER NOT NULL CHECK (source_ordinal >= 0),
+  raw_payload_bytes INTEGER NOT NULL CHECK (raw_payload_bytes >= 0),
+  raw_payload_sha256 TEXT NOT NULL,
+  raw_payload_json TEXT NOT NULL CHECK (json_valid(raw_payload_json)),
+  reason_code TEXT NOT NULL,
+  field_paths_json TEXT,
+  parent_source_identity TEXT,
+  owner_mapping_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  resolution_status TEXT NOT NULL DEFAULT 'unresolved' CHECK (resolution_status IN ('unresolved', 'resolved')),
+  UNIQUE (source_kind, source_sha256, collection, source_record_identity)
+) STRICT;
+
+CREATE INDEX IF NOT EXISTS import_quarantine_run_idx
+  ON import_quarantine(import_run_id);
+
+CREATE INDEX IF NOT EXISTS import_quarantine_resolution_idx
+  ON import_quarantine(resolution_status);
 `;

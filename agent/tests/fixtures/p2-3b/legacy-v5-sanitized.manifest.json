@@ -39,8 +39,18 @@
   },
   "expectedStartVersion": 5,
   "expectedOutcome": {
-    "migrationVersions": [12, 13],
-    "legacyArchiveVersions": [1, 2, 3, 4, 5],
+    "migrationVersions": [
+      12,
+      13,
+      14
+    ],
+    "legacyArchiveVersions": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
     "integrityCheck": "ok",
     "foreignKeyViolations": 0,
     "preserveBusinessRelations": true,
@@ -59,9 +69,15 @@
         "name": "registered-schema-v13-repair",
         "checksum": "5AE20DC37B6E3B292FBA9F67A8A55B08CC44916B094147267B7D06D9B632CD64",
         "applicationVersion": "0.1.0"
+      },
+      {
+        "version": 14,
+        "name": "registered-schema-v14-import",
+        "checksum": "0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33",
+        "applicationVersion": "0.1.0"
       }
     ],
-    "schemaDigest": "3C84C1A08658681D750A9FB3314839091379C5354D16495D0D980BB49C2569EE",
+    "schemaDigest": "4E90FCE0B9C1BFFD75DE5EAF237E8203C6866E0E8174D0F788E6A366524B90F5",
     "tableInventory": [
       "agent_messages",
       "agent_sessions",
@@ -74,6 +90,9 @@
       "daily_operation_confirmations",
       "daily_operation_plans",
       "feeding_decisions",
+      "import_manifests",
+      "import_quarantine",
+      "import_record_traces",
       "operation_results",
       "schema_migrations",
       "schema_migrations_legacy",
@@ -97,6 +116,11 @@
       "feeding_decisions_active_idx",
       "feeding_decisions_batch_date_revision_idx",
       "feeding_decisions_one_active_idx",
+      "import_quarantine_resolution_idx",
+      "import_quarantine_run_idx",
+      "import_record_traces_identity_idx",
+      "import_record_traces_run_idx",
+      "import_record_traces_source_idx",
       "sop_edit_tasks_created_idx",
       "sop_knowledge_chunks_digest_idx",
       "sop_templates_created_idx",
@@ -126,14 +150,62 @@
       "snapshotSha256": "4C04269BD5FF2A723D8C8F6451C6D798878866B6B6B97225678E4F72387A1930",
       "devicePlanSnapshotSha256": "613A2BC7AC57C35A9CEED911FDB91277191355B182090FA3AF4876A41F63C6B4",
       "freeFeedingSlots": [
-        { "slot": 1, "enabled": true, "label": "自由采食时段 1", "startLocal": "09:00", "endLocal": "18:00" },
-        { "slot": 2, "enabled": false, "label": "自由采食时段 2", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 3, "enabled": false, "label": "自由采食时段 3", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 4, "enabled": false, "label": "自由采食时段 4", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 5, "enabled": false, "label": "自由采食时段 5", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 6, "enabled": false, "label": "自由采食时段 6", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 7, "enabled": false, "label": "自由采食时段 7", "startLocal": "09:00", "endLocal": "10:00" },
-        { "slot": 8, "enabled": false, "label": "自由采食时段 8", "startLocal": "09:00", "endLocal": "10:00" }
+        {
+          "slot": 1,
+          "enabled": true,
+          "label": "自由采食时段 1",
+          "startLocal": "09:00",
+          "endLocal": "18:00"
+        },
+        {
+          "slot": 2,
+          "enabled": false,
+          "label": "自由采食时段 2",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 3,
+          "enabled": false,
+          "label": "自由采食时段 3",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 4,
+          "enabled": false,
+          "label": "自由采食时段 4",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 5,
+          "enabled": false,
+          "label": "自由采食时段 5",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 6,
+          "enabled": false,
+          "label": "自由采食时段 6",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 7,
+          "enabled": false,
+          "label": "自由采食时段 7",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        },
+        {
+          "slot": 8,
+          "enabled": false,
+          "label": "自由采食时段 8",
+          "startLocal": "09:00",
+          "endLocal": "10:00"
+        }
       ],
       "dailyOperationPlan": {
         "id": "fixture-plan",

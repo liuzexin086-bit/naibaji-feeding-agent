@@ -1,0 +1,8 @@
+{
+  "formatVersion": 1,
+  "sourceKind": "json-database-v1",
+  "sourceSha256": "d33eb1618067209368b3cc5f50c91b00bef3e5511c7219f17f5212ba36c23340",
+  "targetUserId": "fixture-other-user",
+  "mappingNote": "conflicting owner mapping for mismatch test",
+  "createdAt": "2026-08-01T00:00:00.000Z"
+}

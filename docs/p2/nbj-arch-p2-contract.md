@@ -276,7 +276,7 @@ P2-4-F01.1: CLOSED / PASS
 P2-4-F02: CLOSED / PASS
 P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
 P2-4 Implementation Authorization: OPEN
-P2-4 Implementation: NOT STARTED
+P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
 P2-4 Gate: CLOSED
 
 P2 Runtime/Cutover Gate: CLOSED
@@ -385,3 +385,16 @@ Implementation Authorization is `OPEN`. One non-blocking P2 item
 correction. P2-4 Implementation remains NOT STARTED and the P2-4 Gate remains
 CLOSED; P2-6, runtime/cutover, Compose replacement, merge, tag, PR,
 deployment, and real-device control remain unauthorized.
+
+The P2-4 implementation candidate is recorded in
+`nbj-arch-p2-4-implementation.md`: the frozen CJSON/identity
+modules with V1-V6 vectors, the import application service with
+source-bound identities, owner-mapping hash binding and mismatch
+fail-closed, manifest/trace/durable-quarantine persistence through forward
+migration v14 (`registered-schema-v14-import`) with zero runtime
+DDL, the sanitized real JSON Database v1 fixture set and manifest, the
+`p2-4-legacy-json-import-gate` wired into the safety workflow, and local
+gate results (P2-4 93/93; full suite 60 files / 458 passed; P2-1/P2-2/P2-3A/
+P2-3B/P0/P1, build, and clean-source all green). The candidate does not
+self-certify: exact-SHA CI and independent implementation review remain
+required before the P2-4 Gate may open.

@@ -230,13 +230,14 @@ describe("P2-3B migration ownership", () => {
       expect(chain.map(({ version, name }) => ({ version, name }))).toEqual([
         { version: 12, name: SEALED_V12_NAME },
         { version: 13, name: "registered-schema-v13-repair" },
+        { version: 14, name: "registered-schema-v14-import" },
       ]);
       expect(chain[0]?.checksum).toBe(SEALED_V12_CHECKSUM);
       expect(chain[1]?.checksum).toBe(manifest.expectedPostMigration.ledger[1]?.checksum);
       expect(SEALED_V12_CHECKSUM).toBe(
         "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E",
       );
-      expect(CURRENT_MIGRATION_VERSION).toBe(13);
+      expect(CURRENT_MIGRATION_VERSION).toBe(14);
     } finally {
       database.close();
     }

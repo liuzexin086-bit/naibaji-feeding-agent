@@ -740,6 +740,58 @@ Optimizer Production Gate: CLOSED
 Real Device Control Gate: CLOSED
 ```
 
+## 18.6 P2-4 Implementation Candidate
+
+The P2-4 implementation candidate is documented in
+`nbj-arch-p2-4-implementation.md`. Local evidence recorded:
+
+```text
+npm run p2-4-legacy-json-import-gate: 93 passed
+npm test: 60 files / 458 passed
+npm run p2-1-domain-gate: 20 passed
+npm run p2-2-persistence-gate: 9 passed
+npm run p2-3a-migration-gate: 35 passed
+npm run p2-3b-migration-ownership-gate: 46 passed
+npm run p0-release-gate: 100 passed
+npm run p1-safety-gate: 197 passed
+npm run build: PASS
+npm run clean-source-gate: PASS
+```
+
+The candidate registers forward migration v14 `registered-schema-v14-import`
+(checksum `0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33`)
+owned by `packages/persistence/migrations` for the import manifest,
+record-trace, and quarantine tables; the sealed v12/v13 identities are
+unchanged (the P2-3B fixture manifest was regenerated to record the new
+post-migration ledger/schema evidence and still passes 46/46). The
+sanitized real JSON Database v1 fixture binds the real Electron userData
+source (raw SHA-256 `2f276e5d1a4b1ec3b828227cbf0110c6c66e4d41a91e6ea364a65067070e13e2`)
+with a full sanitization record and constructed variants for every required
+proof; the identity vectors V1-V6 were cross-verified against an
+independent SHA-256 implementation.
+
+This candidate is local evidence and does not self-certify. Exact-SHA CI
+and the independent implementation review remain required before the P2-4
+Gate may open.
+
+```text
+P2-4 Legacy JSON Import Authorization: OPEN
+P2-4 Contract Registration: PASS
+P2-4-F01: CLOSED / PASS
+P2-4-F01.1: CLOSED / PASS
+P2-4-F02: CLOSED / PASS
+P2-4-F03: CLOSED — NON-BLOCKING / P2 (audit wording only)
+P2-4 Implementation Authorization: OPEN
+P2-4 Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING
+P2-4 Gate: CLOSED
+
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 
 After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three
