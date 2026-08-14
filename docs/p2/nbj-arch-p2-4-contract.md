@@ -6,9 +6,13 @@ Registration baseline: `2fb45b25f6880f03f563fd472d8143bfed8699b5`
 
 Registration checkpoint: `138b1ae6782615022eefb743537f0781eee9f330` — `P2-4 register legacy JSON import contract`
 
+First correction checkpoint: `ce16798b0b989b6a403082e8d0c9b917882a84f2` — `P2-4 freeze canonical identity and migration-bound import schema`
+
 Independent contract review of the registration checkpoint: `REQUEST CHANGES` — `P2-4-F01` / `P2-4-F02` (audit history in §18)
 
-This checkpoint is the narrow docs-only correction that freezes F01/F02. Re-review of the correction SHA is pending.
+First correction re-review: `REQUEST CHANGES` — `P2-4-F01.1`; `P2-4-F02` closed (audit history in §18)
+
+This checkpoint is the narrow docs-only second correction that makes the quarantine identity source-bound (F01.1). Re-review of this correction SHA is pending.
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -16,7 +20,7 @@ P2-3 Seal exact-SHA CI: [agent-safety run 31680852943](https://github.com/liuzex
 
 P2-4 Legacy JSON Import Authorization: `OPEN`
 
-P2-4 Implementation Authorization: `CLOSED — INDEPENDENT CONTRACT REVIEW: REQUEST CHANGES (P2-4-F01 / P2-4-F02) / RE-REVIEW PENDING`
+P2-4 Implementation Authorization: `CLOSED — INDEPENDENT CONTRACT REVIEW: REQUEST CHANGES (P2-4-F01.1) / RE-REVIEW PENDING`
 
 ## 1. Registration boundary
 
@@ -124,8 +128,9 @@ Each source row is addressed by:
 Source IDs, revisions, timestamps, hashes, and idempotency keys are preserved
 when valid; they are never regenerated to force a mapping. A row without a
 provable source ID receives the deterministic quarantine identity frozen in
-§5.1 (collection, canonical raw-row SHA-256, and source ordinal). That
-identity is for preservation only and must not become a Domain business ID.
+§5.1 (source_kind, source_sha256, collection, canonical raw-row SHA-256, and
+source ordinal). That identity is for preservation only and must not become a
+Domain business ID.
 
 ### 5.1 Canonical identity encoding (P2-4-F01 freeze)
 
@@ -171,17 +176,21 @@ Rows without a provable source ID receive the frozen quarantine identity:
 ```text
 raw_row_canonical_sha256 = SHA-256( UTF-8( CJSON(raw_row) ) )
 quarantine_identity =
-  SHA-256( UTF-8( CJSON([ "quarantine", collection,
-                         raw_row_canonical_sha256, source_ordinal ]) ) )
+  SHA-256( UTF-8( CJSON([ "quarantine", source_kind, source_sha256,
+                         collection, raw_row_canonical_sha256,
+                         source_ordinal ]) ) )
 ```
 
 where `raw_row` is the complete raw row value (nested fields included) and
 `source_ordinal` is the zero-based position of that row in its source
-collection array. The leading `"quarantine"` discriminator keeps the
-quarantine space disjoint from the record-key space: frozen `source_kind`
-values never equal `"quarantine"`, and the two encodings are structurally
-distinct. Quarantine identities are preservation-only and must never become a
-Domain business ID.
+collection array. The quarantine identity is source-bound: it includes
+`source_kind` and `source_sha256`, so the same raw row at the same ordinal
+in two different sources always receives different quarantine identities,
+while same-source replay reproduces the identical identity. The leading
+`"quarantine"` discriminator keeps the quarantine space disjoint from the
+record-key space: frozen `source_kind` values never equal `"quarantine"`,
+and the two encodings are structurally distinct. Quarantine identities are
+preservation-only and must never become a Domain business ID.
 
 Because the tuple is a JSON array, field boundaries are structurally encoded:
 `("ab","c")` and `("a","bc")` serialize to different byte strings, so bare
@@ -189,7 +198,9 @@ concatenation ambiguity cannot occur.
 
 The frozen known hash vectors below are asserted verbatim by the dedicated
 gate (§14.1). The gate must reproduce them from an implementation independent
-of this document. V2–V4 use the same `source_kind` / `source_sha256` as V1.
+of this document. V2–V4 use the same `source_kind` / `source_sha256` as
+V1; V5 uses that same source, and V6 uses a different source to prove
+cross-source quarantine separation.
 
 | Vector | Tuple / row | Canonical bytes | SHA-256 |
 |---|---|---|---|
@@ -198,7 +209,8 @@ of this document. V2–V4 use the same `source_kind` / `source_sha256` as V1.
 | V3 — NFC normalization | as V1, but `source_record_id="café"` (U+00E9); input `"cafe\u0301"` (e + combining acute) must produce the same identity | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","café"]` | `b25bfe4da3293e2e87bfa33633a34c59ac9f0e288679cc189f3729f6b95d0a32` |
 | V4a — boundary disambiguation | as V1, but `collection="ab"`, `source_record_id="c"` | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","ab","c"]` | `2c73d6acbae7f036f6332b81887d790bd93ed79e06c9c7082a521fcb4119944a` |
 | V4b — boundary disambiguation | as V1, but `collection="a"`, `source_record_id="bc"`; must differ from V4a | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","a","bc"]` | `d60212cc53f784f272b5271ab57a73e2ca3f08b77621eb262d7afcad7429a8b1` |
-| V5 — quarantine identity | `raw_row={"qty":2.5,"note":"乳量","id":"r-9"}`; `source_ordinal=3`; raw row bytes `{"id":"r-9","note":"乳量","qty":2.5}`; `raw_row_canonical_sha256=42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708`; tuple `["quarantine","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `["quarantine","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `66baa01f4f979307540be7d25e8379585e809c1d7848b58dba90d8ce4988ce85` |
+| V5 — source-bound quarantine identity | `source_kind="json-database-v1"`, `source_sha256` as V1, `collection="dailyRecords"`, `raw_row={"qty":2.5,"note":"乳量","id":"r-9"}`, `source_ordinal=3`; raw row bytes `{"id":"r-9","note":"乳量","qty":2.5}`; `raw_row_canonical_sha256=42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708`; tuple `["quarantine","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `["quarantine","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `e336926640a38fcc5061f098f708e6bad82a2c88da51bcca83ef0755549e4f33` |
+| V6 — cross-source quarantine separation | same raw row, collection, and ordinal as V5, but `source_sha256="6653b072ca9d89fec4eaa7e88a06bcaa6860b6ad3fd7d01020b57e0cd5b12e47"` (a different source); identity MUST differ from V5 | `["quarantine","json-database-v1","6653b072ca9d89fec4eaa7e88a06bcaa6860b6ad3fd7d01020b57e0cd5b12e47","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `6c55d8371e3befe0e3684662e94cc77bad4a932cd89ccac0df3302fed5cb5f0e` |
 
 ## 6. Owner and tenant binding
 
@@ -431,7 +443,7 @@ Implementation acceptance requires immutable, hash-bound fixtures for:
 - byte-for-byte source immutability;
 - same-source replay producing zero new Domain/quarantine records and identical
   target/raw/quarantine content digests;
-- every §5.1 known hash vector (V1–V5), asserted byte-for-byte by an
+- every §5.1 known hash vector (V1–V6), asserted byte-for-byte by an
   implementation independent of this document.
 
 Tests must exercise the real file reader, application service, repository,
@@ -484,7 +496,7 @@ The checkpoint must also pass:
 In addition to the gate coverage above, `p2-4-legacy-json-import-gate` must
 assert:
 
-- every §5.1 known hash vector byte-for-byte (V1–V5), reproduced from an
+- every §5.1 known hash vector byte-for-byte (V1–V6), reproduced from an
   implementation independent of this document;
 - the §8.1 architecture/static proofs: import modules contain no schema DDL,
   new import schema is reachable only through the canonical migration runner,
@@ -539,8 +551,8 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
-P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
+P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
 P2-4 Implementation Authorization: CLOSED
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
@@ -601,3 +613,33 @@ audit history. It does not implement the importer, add or alter schema, create
 fixtures, change runtime behavior, or open P2-4 Implementation Authorization.
 This checkpoint does not review or certify its own commit; only the
 independent re-review of the correction SHA can close F01/F02.
+
+### 18.4 First re-review — REQUEST CHANGES (P2-4-F01.1)
+
+Independent remote re-review of correction checkpoint
+`ce16798b0b989b6a403082e8d0c9b917882a84f2` (sole parent
+`138b1ae6782615022eefb743537f0781eee9f330`) confirmed remote identity/scope
+(ahead 1 / behind 0, exactly 1 commit, exactly the three `docs/p2/**` files),
+independently recomputed V1–V5 and matched every committed vector, accepted
+the owner-mapping binding, accepted `P2-4-F02` (`CLOSED / PASS`), and
+accepted the governance/audit handling (`PASS`). Exact-SHA
+[agent-safety run 31757368178](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31757368178)
+(`push`, `head_sha = ce16798b0b989b6a403082e8d0c9b917882a84f2`, `success`)
+was confirmed. The re-review then returned `REQUEST CHANGES` with one P1
+residual:
+
+- `P2-4-F01.1` (OPEN / P1) — the frozen `quarantine_identity` was not
+  source-bound: it lacked `source_kind` and `source_sha256`, so two
+  different sources containing the same raw row at the same ordinal in the
+  same collection would produce identical quarantine identities, and the
+  contract had not frozen a composite identity that would separate them.
+
+This second correction makes the quarantine identity source-bound (§5.1:
+`"quarantine", source_kind, source_sha256, collection,
+raw_row_canonical_sha256, source_ordinal`), updates V5, adds the
+cross-source separation vector V6 (same row/collection/ordinal, different
+`source_sha256` => different identity), and records this history. It changes
+exactly the three registered `docs/p2/**` files and does not implement the
+importer, change schema or runtime, or open P2-4 Implementation Authorization.
+This checkpoint does not review or certify its own commit; only the
+independent re-review of this correction SHA can close F01.1.

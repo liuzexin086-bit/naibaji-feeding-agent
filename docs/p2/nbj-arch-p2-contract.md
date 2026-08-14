@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-4 CONTRACT CORRECTION — RE-REVIEW PENDING`
+Status: `P2-4 CONTRACT CORRECTION (F01.1) — RE-REVIEW PENDING`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -270,8 +270,8 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
-P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01.1 OPEN / P1 (P2-4-F02: CLOSED / PASS)
+P2-4 Contract Correction (F01.1): COMMITTED — RE-REVIEW PENDING
 P2-4 Implementation Authorization: CLOSED
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
@@ -360,3 +360,15 @@ the forward-migration-only schema rule with zero runtime DDL, and this audit
 history, changing exactly the three registered `docs/p2/**` files. It does
 not implement the importer, and P2-4 Implementation Authorization remains
 CLOSED until independent re-review closes F01/F02.
+
+Independent re-review of correction checkpoint
+`ce16798b0b989b6a403082e8d0c9b917882a84f2` accepted `P2-4-F02`
+(`CLOSED / PASS`), matched the independently recomputed V1–V5 vectors, and
+returned `REQUEST CHANGES` with one P1 residual, `P2-4-F01.1`: the frozen
+quarantine identity was not source-bound. The narrow second correction
+recorded here freezes the source-bound quarantine identity
+(`"quarantine", source_kind, source_sha256, collection,
+raw_row_canonical_sha256, source_ordinal`), updates V5, adds the cross-source
+separation vector V6, and records F01.1 in the audit history. It changes
+exactly the three registered `docs/p2/**` files; P2-4 Implementation
+Authorization remains CLOSED until independent re-review closes F01.1.
