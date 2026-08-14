@@ -1,6 +1,8 @@
 # NBJ-ARCH-P2 P2-6 Feeding Model Single Source Contract Registration
 
-Status: `P2-6 CONTRACT REGISTRATION — CANDIDATE / INDEPENDENT REVIEW PENDING — IMPLEMENTATION NOT AUTHORIZED`
+Status: `P2-6 CONTRACT REGISTRATION — CORRECTION COMMITTED (P2-6-F01 / F02 / F03) — RE-REVIEW PENDING — IMPLEMENTATION NOT AUTHORIZED`
+
+Independent contract registration review of `19ae8322fb412304593cbdbbcc5f2968d34d312e` returned `REQUEST CHANGES` with `P2-6-F01` (target authority contradicted the frozen Authority Map; root transitional sources and V5-Lite were promoted to authority), `P2-6-F02` (missing frozen ≥100 golden-vector parity and Expected Delta pre-approval governance), and `P2-6-F03` (`.bak.*` incorrectly described as tracked). The correction is recorded in §13.2; the findings stay OPEN until an independent re-review closes them.
 
 Registration baseline: `e3148e9b327564cd7d17fc40e9de813982284ab6` (branch `nbj-arch-p2`, "P2-4 record final independent PASS and open P2-4 Gate")
 
@@ -35,8 +37,8 @@ The facts below are the verified on-disk/committed inventory at HEAD `e3148e9b32
 
 | Artifact | Verified SHA-256 at HEAD |
 |---|---|
-| `feeding-model.js` (root authoritative source) | `35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d` |
-| `v5lite-model.js` (root authoritative V5-Lite source) | `124385a11fd247013c7c4dd14fe95642ddebf0b9621a797e72eb91794ec16eae` |
+| `feeding-model.js` (root baseline production source / parity oracle — transitional per frozen Authority Map) | `35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d` |
+| `v5lite-model.js` (root V5-Lite shadow baseline source — shadow-only, never production authority) | `124385a11fd247013c7c4dd14fe95642ddebf0b9621a797e72eb91794ec16eae` |
 | `feeding-model.min.js` (root tracked minified artifact) | `00fc4c4e828901dc648548842549e14e0bfdd14f97883a78f89d0094b9208893` |
 | `.generated-models/feeding-model.cjs` | byte-equal to `feeding-model.js` |
 | `.generated-models/v5lite-model.cjs` | byte-equal to `v5lite-model.js` |
@@ -81,42 +83,68 @@ Experimental Python:
 ### 3.5 Distinct feeding-model artifacts at HEAD (count / classification)
 
 ```text
-1 root feeding-model.js                    (authoritative source)
-2 root feeding-model.min.js                (committed minified artifact)
-3 root feeding-model-simple.js             (separate minimal daily-control model, naibaji-simple-v2)
-4 root v5lite-model.js                     (V5-Lite shadow source)
-5 agent/src/model/production-model.ts      (transitional TS wrapper -> loads .generated-models)
+1 root feeding-model.js                    (BASELINE production source / parity oracle — transitional; move into package)
+2 root feeding-model.min.js                (committed minified artifact, derived from baseline source)
+3 root feeding-model-simple.js             (separate minimal daily-control model, naibaji-simple-v2, research only)
+4 root v5lite-model.js                     (V5-Lite SHADOW baseline source — shadow-only, never production authority)
+5 agent/src/model/production-model.ts      (transitional production source -> move into packages/feeding-model)
 6 backend/src/models/* + feedingPlanService.js (legacy re-export wrappers)
 7 .generated-models/*.cjs                  (byte-equal to root sources)
 8 container-models/*.cjs                   (v5lite equal; feeding DIVERGES — F1)
 9 agent/public/*                           (feeding-model.min.js DIVERGES — F2)
-10 web/lib/feeding.ts                      (ignored separate impl, MEALS=12 — F3)
+10 web/lib/feeding.ts                      (ignored separate impl, MEALS=12 — F3 business delta)
 11 optimizer/model.py                      (experimental Python surrogate)
-12 packages/feeding-model                  (TARGET authority, not yet present)
+12 packages/feeding-model                  (P2-6 TARGET authority: single TypeScript implementation + schema + golden vectors + versioned publication manifest — NOT yet present)
 ```
 
-No committed JSON or unified single model source exists at the baseline. P2-6 therefore freezes `feeding-model.js` (and `v5lite-model.js`) as the single tracked authoritative source and defines derivation + parity for every derived artifact on disk, eliminating F1/F2/F3 divergence risk in the future implementation checkpoint.
-
-## 4. Freeze item 1 — SINGLE AUTHORITATIVE SOURCE
-
-- Root `feeding-model.js` and root `v5lite-model.js` (repo root) are the ONLY authoritative implementations of feeding-model logic.
-- `backend/src/models/feedingModel.js` and `backend/src/models/v5liteModel.js` are pure re-exports (`require('../../../feeding-model')`, `require('../../../v5lite-model')`) and MUST stay re-exports — never diverging copies.
-- `feeding-model-simple.js` (+ its test `feeding-model-simple.test.js` and the `feeding-model-simple-文字公式说明.md` doc) and the `.bak.20260706_091444` tracked backups are historical/research evidence, NOT authority.
-- No other file may contain a second implementation of the same model semantics.
+No committed JSON or unified single model source exists at the baseline. P2-6 therefore distinguishes two layers (frozen Authority Map rows 46-48/57/86/88):
 
 ```text
-AUTHORITY SET (frozen at HEAD e3148e9):
-  feeding-model.js   — SHA 35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d
-  v5lite-model.js    — SHA 124385a11fd247013c7c4dd14fe95642ddebf0b9621a797e72eb91794ec16eae
-RE-EXPORT WHITELIST (backend, never a copy):
-  backend/src/models/feedingModel.js -> require('../../../feeding-model')
-  backend/src/models/v5liteModel.js  -> require('../../../v5lite-model')
-HISTORICAL / RESEARCH ONLY (not authority):
-  feeding-model-simple.js / feeding-model-simple.test.js
-  feeding-model-simple-文字公式说明.md  / .bak.20260706_091444 tracked backups
+BASELINE / PARITY SEED (current, transitional)
+  feeding-model.js    — baseline production behavior source / parity oracle
+  v5lite-model.js     — V5-Lite shadow baseline source (shadow-only)
+
+P2-6 TARGET AUTHORITY (after implementation)
+  packages/feeding-model — single TypeScript implementation
+                         + schema + golden vectors + versioned publication manifest
 ```
 
-The inventory's F1/F2/F3 divergences (§3.4) are KNOWN DIVERGENCES that the future implementation checkpoint must eliminate or explicitly register as reviewed frozen flavors (each with provenance and version identity). This contract does NOT bless them silently.
+The future implementation checkpoint must MOVE the feeding source into `packages/feeding-model`, keep V5-Lite shadow-only until separately retired/gated, derive every artifact from the single source (eliminating F1/F2), and treat F3 as a business behavior delta governed by the Expected Delta process (§8), never as a silently registered flavor.
+
+## 4. Freeze item 1 — SINGLE AUTHORITATIVE SOURCE (two layers, per frozen Authority Map)
+
+P2-6 separates the CURRENT baseline/parity seeds from the P2-6 TARGET authority. Freezing the current transitional state as the target would contradict the frozen Authority Map, which targets `packages/feeding-model` and keeps V5-Lite shadow-only.
+
+### 4.1 Baseline / parity seed (current, transitional — NOT the P2-6 target)
+
+- Root `feeding-model.js` is the baseline production behavior source and the migration **parity oracle**: candidate `packages/feeding-model` behavior must equal it by default (§8).
+- Root `v5lite-model.js` is a **shadow baseline source only**: V5-Lite remains shadow-only derived telemetry (frozen Authority Map row 57) and must NEVER become a production decision or device authority.
+- `backend/src/models/feedingModel.js` and `backend/src/models/v5liteModel.js` are pure re-exports (`require('../../../feeding-model')`, `require('../../../v5lite-model')`) and MUST stay re-exports — never diverging copies.
+- `feeding-model-simple.js` (+ its test `feeding-model-simple.test.js` and the root `feeding-model-simple-文字公式说明.md` doc) and the ignored on-disk `.bak.*` backups, if present, are historical/research evidence, NOT authority (`.bak.*` is NOT git-tracked — root `.gitignore:45`).
+- `agent/src/model/production-model.ts` is a transitional production source (frozen Authority Map row 88); the implementation checkpoint must move it into `packages/feeding-model`.
+- No other file may contain a second implementation of the same model semantics.
+
+### 4.2 P2-6 TARGET authority (after implementation)
+
+```text
+packages/feeding-model (frozen Authority Map rows 46-47):
+  single TypeScript implementation
+  + schema
+  + golden vectors (>= 100, §8)
+  + versioned model publication manifest (version + source/artifact SHA-256)
+  -> dist/Web/CJS artifacts are DERIVED, never independently edited
+```
+
+The future implementation checkpoint must MOVE the feeding source into the package; once the package is the registered publication authority, the root `feeding-model.js` baseline file may remain only as a parity/reference fixture and must no longer be an independent production authority.
+
+### 4.3 Divergence governance (F1/F2/F3)
+
+The inventory's F1/F2/F3 divergences (§3.4) are KNOWN DIVERGENCES with distinct governance:
+
+- `F1` (container-models feeding CJS) and `F2` (agent/public min): deterministically generated artifacts in the future implementation checkpoint — each must be produced BY the single-source generation pipeline (§5/§7), byte-verifiable against provenance; elimination of the divergent copies is the default; no independently hand-edited flavor may remain.
+- `F3` (`web/lib/feeding.ts`, MEALS=12 vs the 10-meal cap): this is a **business behavior delta**, not a cosmetic flavor. It may NOT be legalized by registering a "reviewed frozen flavor". It must be either eliminated (Web consumes the single source / its derived artifact) or — if the 12-meal behavior is genuinely intended — approved ONLY through the frozen Expected Delta registry (compatibility contract §5) with an independent pre-approval BEFORE implementation, a version identity bump, and provenance regeneration (§8).
+
+This contract does NOT bless F1/F2/F3 silently.
 
 ## 5. Freeze item 2 — GENERATION / DERIVATION DIRECTION
 
@@ -140,12 +168,12 @@ Rules:
 - Generation runs ONLY through the preparation scripts (`prepare-model-assets.mjs`, `prepare-web-model-assets.mjs`).
 - Derived artifacts are gitignored EXCEPT the tracked root `feeding-model.min.js`.
 
-At the baseline the byte-parity holds for `.generated-models/*.cjs` and the root min (F5, §3.4); the `container-models` feeding flavor (F1) and `agent/public` min (F2) are the divergences the implementation checkpoint must eliminate or register (§4).
+At the baseline the byte-parity holds for `.generated-models/*.cjs` and the root min (F5, §3.4); the `container-models` feeding flavor (F1) and `agent/public` min (F2) are the divergences the implementation checkpoint must eliminate or deterministically regenerate from the single source (§4.3).
 
 ## 6. Freeze item 3 — CONSUMPTION BOUNDARIES
 
 - Agent container consumes `.generated-models/*.cjs` only.
-- Web (Next.js app: `web/app/dashboard.tsx`, `web/app/api/batches/[id]/export/route.ts`) consumes `web/lib/feeding.ts` — which is the F3 DIVERGENT separate implementation (`MEALS=12`, §3.4), NOT the tracked/generated min. At this baseline the Web production path does not consume the authoritative source; this divergence must be eliminated or registered with provenance as part of the future implementation checkpoint (§4).
+- Web (Next.js app: `web/app/dashboard.tsx`, `web/app/api/batches/[id]/export/route.ts`) consumes `web/lib/feeding.ts` — which is the F3 DIVERGENT separate implementation (`MEALS=12`, §3.4), NOT the tracked/generated min. At this baseline the Web production path does not consume the authoritative source; F3 is a business behavior delta that must be eliminated or pre-approved through the frozen Expected Delta registry (§4.3, §8), never silently registered.
 - The static gitignored `agent/public/index.html:8` (and `agent/public/admin.html:8`) load `feeding-model.min.js`, which on disk is the F2 DIVERGENT `agent/public/feeding-model.min.js` (SHA `3bfef506...`, §3.4) — not the tracked root min `00fc4c4e...`. This is likewise a known divergence to be eliminated or registered; `web/index.html` does not exist.
 - Backend consumes the root sources via re-export only (§4).
 - The optimizer (`optimizer/model.py` "可微前向传播 V3" + `optimizer/contracts.py` + `optimizer/search.py` `MODEL_VERSION="feeding-model+v5-lite@optimizer-v3"`) is a SEPARATE Python optimization surrogate — it may optimize against the model but is NOT a production decision authority and must NEVER be imported by agent/backend/web runtime (the inventory's import grep confirms it is used only experimentally; see §8.e gate assertion).
@@ -154,9 +182,9 @@ At the baseline the byte-parity holds for `.generated-models/*.cjs` and the root
 ```text
 Agent container  -> /app/.generated-models/*.cjs only
 Web (Next.js)    -> web/lib/feeding.ts ONLY (F3 DIVERGENT impl, MEALS=12)
-                   -- DIVERGENCE to eliminate/register, NOT the authoritative source
+                   -- business delta: eliminate or Expected-Delta pre-approval (§4.3/§8)
 agent/public html -> loads agent/public/feeding-model.min.js (F2 DIVERGENT min)
-                   -- DIVERGENCE to eliminate/register
+                   -- divergence to eliminate / deterministically regenerate (§4.3)
 Backend          -> root sources via re-export only
 Optimizer        -> separate Python surrogate, NOT a decision authority,
                     NEVER imported by agent/backend/web runtime
@@ -189,27 +217,74 @@ The gate must cover the FULL artifact inventory including the ignored directorie
 
 Gate wiring follows the P2-4 pattern (`agent/package.json` script `p2-4-legacy-json-import-gate` + `P2-4 Legacy JSON Import gate` step in the `agent-safety` workflow). For P2-6 the equivalent would be a `p2-6-feeding-model-single-source-gate` script plus an `agent-safety` step — to be implemented ONLY after contract registration PASS.
 
-## 8. Freeze item 5 — MODEL VERSION / HASH / PROVENANCE AND BACKWARD COMPATIBILITY
+## 8. Freeze item 5 — MODEL VERSION / HASH / PROVENANCE, BEHAVIORAL PARITY AND BACKWARD COMPATIBILITY
 
-Version identity comes from the authoritative sources:
-- `feeding-model.js` self-version `'naibaji-v2'`;
-- `v5lite-model.js` identity;
-- optimizer `MODEL_VERSION` string must reference the source model identity (surrogate is not a decision authority, §6).
+### 8.1 Version and provenance identity
 
-Every model artifact and source is SHA-256 bound through `write-provenance.mjs` and verified by `ci-runtime-check.mjs` (including `agentVersion.schemaVersion === 16`) and the `provenance-contract` tests (incl. `provenance-contract.test.ts`, `ci-contract.test.ts`).
+Version identity comes from the sources:
+- baseline `feeding-model.js` self-version `'naibaji-v2'`;
+- baseline `v5lite-model.js` identity (shadow-only);
+- optimizer `MODEL_VERSION` string must reference the source model identity (surrogate is not a decision authority, §6);
+- the P2-6 TARGET authority (`packages/feeding-model`) must own the versioned model publication manifest (frozen Authority Map row 47).
 
-Rules:
-- Any semantic change to model logic requires a version identity bump AND full provenance regeneration.
+Provenance (TARGET REQUIREMENT, not a description of today's state): at the implementation checkpoint, EVERY artifact in the §3.5 inventory — including each divergence (F1/F2/F3) and every derived artifact — must carry its own SHA-256 identity, bound through the provenance pipeline (`write-provenance.mjs` / `agent-provenance.json` / `web-provenance.json`) and verified by `ci-runtime-check.mjs` (including `agentVersion.schemaVersion === 16`) and the `provenance-contract` tests. Today `write-provenance.mjs` binds the core path (root source, generated CJS, generated/gitignored Web min); the implementation checkpoint must extend it to cover the full inventory so no divergence exists without a provenance identity.
+
+### 8.2 Behavioral parity and golden vectors (frozen Compatibility Contract §4)
+
+The implementation checkpoint MUST execute the frozen golden-vector parity suite and prove the default result:
+
+```text
+P2-6 default business delta = 0
+
+>= 100 representative + boundary golden vectors
+baseline root production model (feeding-model.js)
+vs
+packages/feeding-model candidate
+
+accepted input domain: identical
+units: identical
+rounding: identical
+caps: identical
+control-start behavior: identical
+output fields: identical
+deterministic result: identical
+
+baseline output == candidate output
+delta count = 0
+missing rows = 0
+unexpected duplicates = 0
+orphans = 0
+```
+
+Hash equality is required where ordering and serialization are contractually canonical; otherwise compare normalized typed values and separately prove canonical reserialization (compatibility contract §4).
+
+### 8.3 Expected Delta governance
+
+A version identity bump IDENTIFIES an already-approved semantic change; it does NOT authorize one. The frozen chain is:
+
+```text
+semantic change
+  -> Expected Delta registry entry MUST already exist (compatibility contract §5)
+  -> independent approval BEFORE implementation
+  -> version identity bump
+  -> provenance regeneration
+```
+
+Without a pre-approved Expected Delta entry, the default rule is: semantic change = 0. In particular, F3's `MEALS=12` vs the 10-meal cap can never become an allowed P2-6 delta merely by bumping `naibaji-v2` -> v3 (§4.3). Convenience, cleanup, performance, or a preferable new business rule is not an approved delta (compatibility contract §5).
+
+### 8.4 Rules
+
+- Any semantic change to model logic requires: pre-approved Expected Delta entry + version identity bump + full provenance regeneration.
 - Patch/build-only changes must NOT change semantics; derivation stays byte-reproducible.
 - A provenance mismatch fails closed at runtime/CI.
-- Backward compatibility: consumers may rely on the frozen artifact contract (fields, modes, API surface) until a new version identity is explicitly registered.
+- Backward compatibility: consumers may rely on the frozen artifact contract (fields, modes, API surface) until a new version identity is explicitly registered through the publication manifest.
 - No silent dual-write or copy-paste of model logic.
 
 ```text
-source SHA-256 (root/frozen) --write-provenance.mjs--> provenance JSON
+source SHA-256 --write-provenance.mjs--> provenance JSON (per-artifact, full inventory)
   --ci-runtime-check.mjs (schemaVersion===16)--> fail-closed check
   --provenance-contract tests--> reproducible at the checkpoint
-semantic change  => version identity bump + full provenance regeneration
+semantic change => Expected Delta pre-approval => version bump => provenance regeneration
 build/patch only => derivation stays byte-reproducible (no semantic change)
 mismatch         => fails closed at runtime/CI
 consumers        => rely on frozen artifact contract until a new identity is registered
@@ -221,7 +296,9 @@ The following are future implementation-acceptance requirements recorded by this
 
 - byte-reproducible generation at a pinned commit;
 - tracked min equals generated min;
-- provenance JSON regenerated;
+- provenance JSON regenerated with a PER-ARTIFACT SHA-256 identity for every item of the §3.5 inventory (incl. each divergence);
+- **behavioral parity suite: >= 100 representative + boundary golden vectors, baseline (`feeding-model.js`) vs candidate (`packages/feeding-model`), default delta count = 0** (compatibility contract §4, §8.2);
+- **Expected Delta registry: zero unapproved semantic deltas; every intentional change has a pre-approved entry BEFORE implementation (§8.3)**;
 - zero orphan model copies;
 - optimizer-runtime-import negative test;
 - version-bump migration of provenance (as applicable).
@@ -237,7 +314,7 @@ This registration does not authorize any of the following:
 - merge / tag / PR / deploy;
 - optimizer production;
 - real-device control;
-- silent blessing of the F1/F2/F3 divergences (§3.4) without a reviewed, provenance-bound frozen-flavor registration (§4).
+- silent blessing of the F1/F2/F3 divergences (§3.4): F1/F2 only through deterministic single-source regeneration (§4.3), F3 only through a pre-approved Expected Delta entry (§8.3) — a "frozen flavor" registration alone can never legalize a business behavior delta.
 
 ## 11. Registration acceptance
 
@@ -267,3 +344,13 @@ Real Device Control Gate: CLOSED
 ### 13.1 Registration checkpoint
 
 This checkpoint records the P2-6 contract registration candidate at baseline `e3148e9b327564cd7d17fc40e9de813982284ab6`, scoped to `docs/p2/nbj-arch-p2-6-contract.md` only (docs-only). It freezes the five items in §4–§8, binds the verified inventory (§3) including the F1/F2/F3 divergences, and requires the §7 no-duplication gate. It does not self-certify: registration acceptance requires the independent review of §11 with P0 = 0 and P1 = 0.
+
+### 13.2 First independent registration review — REQUEST CHANGES and correction (P2-6-F01 / F02 / F03)
+
+Independent contract registration review of `19ae8322fb412304593cbdbbcc5f2968d34d312e` returned `REQUEST CHANGES` with:
+
+- `P2-6-F01` (P1) — target authority contradicted the frozen Authority Map (rows 46-48/57/86/88): the draft froze the root transitional sources (and V5-Lite) as the authority set. Fixed: §4 now separates the baseline/parity seed (`feeding-model.js` as parity oracle, `v5lite-model.js` as shadow-only baseline) from the P2-6 TARGET authority (`packages/feeding-model` single TypeScript source + schema + golden vectors + versioned publication manifest); `agent/src/model/production-model.ts` is transitional; F1/F2 become deterministically generated artifacts and F3 is governed as a business behavior delta, not a flavor (§4.3).
+- `P2-6-F02` (P1) — missing the frozen >= 100 golden-vector parity suite and Expected Delta pre-approval governance, and the "version bump authorizes semantic change" ambiguity. Fixed: §8 now freezes default business delta = 0, the >= 100 golden-vector parity dimensions, the Expected Delta pre-approval chain (registry entry -> independent approval BEFORE implementation -> version bump -> provenance regeneration), and states provenance as a per-artifact TARGET requirement covering the full §3.5 inventory (§8.1-§8.3); §9 lists the parity suite and Expected Delta proofs.
+- `P2-6-F03` (P2) — `.bak.*` described as tracked. Fixed: §4.1 now says the ignored on-disk `.bak.*` backups, if present, are NOT git-tracked (root `.gitignore:45`).
+
+The correction stays docs-only (only `docs/p2/nbj-arch-p2-6-contract.md`); the findings stay OPEN until an independent re-review closes them. Implementation authorization and the P2-6 Gate remain CLOSED.
