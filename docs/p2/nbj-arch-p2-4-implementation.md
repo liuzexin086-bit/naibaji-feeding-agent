@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Implementation
 
-Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F05.1 / F07.1 / F09) — THIRD CORRECTION COMMITTED — RE-REVIEW PENDING`
+Status: `P2-4 IMPLEMENTATION — PASS / P2-4 GATE OPEN (independent final narrow re-review of 9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e, run 31781315375 attempt 2)`
 
 Contract registration: `PASS` (independent re-review of `f921b4f67187494b6d91965d176a3a85857ee938`)
 
@@ -334,6 +334,64 @@ P2-4 Implementation Authorization: OPEN
 P2-4 Implementation: CANDIDATE / CHANGES REQUIRED (P2-4-F05.1 / F06 / F07.1 / F08 — correction committed)
 P2-4 Gate: CLOSED
 
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+## Final independent review — PASS and P2-4 Gate OPEN
+
+Independent final narrow re-review of the correction chain
+`08046ce3380ec7ad5714acf929cc57f8292e3511 -> fb27065f39f1cce4d80bb1e4a604ccca47c076e6`
+(5 files: contracts.ts, importer.ts, source-adapter.ts, sqlite-adapters.ts,
+importer.test.ts; +193/-48) `-> 9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e`
+(1 file: agent/vitest.config.ts, `testTimeout 20_000`, non-semantic) returned
+`PASS`. The three open P1 items are closed:
+
+- `P2-4-F09.1` — the nested duplicate key named `id` no longer triggers
+  Rule 2: source-adapter records `sourceIdFieldDuplicated`, true ONLY for
+  the exact top-level path `$["<collection>"][ordinal]["id"]`; nested
+  `{"id":"stable-id","nested":{"id":"x","id":"y"}}` keeps
+  `record_identity` with disposition `quarantined`.
+- `P2-4-F05.1` — the mapped target digest now binds batches
+  idempotency_key/created_at/updated_at and daily_observations
+  idempotency_key/created_at; the broken `queryTargetRowsByImportKeys` is
+  deleted from port and adapter (zero references); tamper tests for batch
+  idempotency/updated_at and observation idempotency all produce
+  target-drift.
+- `P2-4-F07.1` — `preImportCommit` is now REQUIRED and validated with
+  `/^[0-9a-fA-F]{40}$/` before any source read/backup/mutation, rejecting
+  empty and "unknown" with zero writes; `createBackup` throws `ImportError`
+  when `foreignKeyViolations !== 0` before import mutation; the
+  failure-injection test proves zero import writes.
+
+The vitest `testTimeout` follow-up commit is accepted as non-semantic
+(infrastructure only).
+
+Exact-SHA CI: agent-safety run `31781315375`, event push, head_sha
+`9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e`, attempt 2, completed, success
+(attempt 1 failed on an infrastructure pip step only; rerun succeeded).
+Counts: Full Agent 60 files / 485 passed + 1 skipped = 486 total; P2-1 20/20;
+P2-2 9/9; P2-3A 35/35; P2-3B 46/46; P2-4 121/121; P0 100/100; P1 197/197;
+optimizer 12/12; typecheck/build/clean-source/Agent image/Web image/Compose/
+runtime provenance and UI E2E all PASS.
+
+Dispositions: P2-4-F04 CLOSED/PASS; P2-4-F05.1 CLOSED/PASS; P2-4-F06
+CLOSED/PASS; P2-4-F07.1 CLOSED/PASS; P2-4-F08 CLOSED/PASS; P2-4-F09
+CLOSED/PASS; P2-4-F09.1 CLOSED/PASS; P2-4-F10 CLOSED/P2; v16 migration
+identity PASS/SEALED; 9184c22 test-infrastructure follow-up PASS. New P0: 0;
+Open P1: 0.
+
+```text
+P2-4 Contract Registration: CLOSED / PASS
+P2-4 Implementation: PASS
+P2-4 Gate: OPEN
+P2-4 overall: CLOSED / PASS
+
+P2-6 stage / contract registration authorization: OPEN (implementation not authorized)
 Runtime/Cutover Gate: CLOSED
 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED

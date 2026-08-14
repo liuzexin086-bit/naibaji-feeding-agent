@@ -946,7 +946,59 @@ P2-4-F05.1: OPEN / P1 — correction committed
 P2-4-F07.1: OPEN / P1 — correction committed
 P2-4-F09: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
+## 18.10 P2-4 Final Implementation Review — PASS and Gate OPEN
+
+The independent final narrow re-review of `08046ce3380ec7ad5714acf929cc57f8292e3511` -> `fb27065f39f1cce4d80bb1e4a604ccca47c076e6` (5 files:
+contracts.ts, importer.ts, source-adapter.ts, sqlite-adapters.ts, importer.test.ts; +193/-48) closed
+the final three P1 items and returned PASS; the chain then landed
+`9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e` (agent/vitest.config.ts, testTimeout
+20_000, non-semantic, test-infrastructure follow-up PASS).
+
+`P2-4-F09.1` is closed: a nested duplicate key named id no longer triggers Rule 2.
+source-adapter records sourceIdFieldDuplicated true ONLY for the exact top-level path
+`$[\"<collection>\"][<ordinal>][\"id\"]`; a nested
+`{\"id\":\"stable-id\",\"nested\":{\"id\":\"x\",\"id\":\"y\"}}` keeps
+record_identity with disposition quarantined.
+
+`P2-4-F05.1` is closed: the mapped target digest now binds batches
+idempotency_key/created_at/updated_at and daily_observations
+idempotency_key/created_at; the broken queryTargetRowsByImportKeys was deleted from both port
+and adapter with zero references, and the batch idempotency/updated_at and observation
+idempotency tamper tests all produce target-drift.
+
+`P2-4-F07.1` is closed: preImportCommit is now REQUIRED with
+`^[0-9a-fA-F]{40}$` validation before any source read/backup/mutation, rejecting
+empty and "unknown" with zero writes; createBackup throws ImportError when
+foreignKeyViolations !== 0 before the import mutation; the failure-injection test proves zero
+import writes.
+
+Exact-SHA CI run `31781315375` (event push, head_sha `9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e`,
+attempt 2, completed, success; attempt 1 failed only on an infrastructure pip step and the
+rerun succeeded): Full Agent 60 files / 485 passed + 1 skipped = 486 total; P2-1 20/20, P2-2
+9/9, P2-3A 35/35, P2-3B 46/46, P2-4 121/121, P0 100/100, P1 197/197, optimizer 12/12; and
+typecheck, build, clean-source, Agent image, Web image, Compose, runtime provenance and UI
+E2E all PASS.
+
+Formal dispositions: P2-4-F04 CLOSED / PASS; P2-4-F05.1 CLOSED / PASS; P2-4-F06 CLOSED /
+PASS; P2-4-F07.1 CLOSED / PASS; P2-4-F08 CLOSED / PASS; P2-4-F09 CLOSED / PASS;
+P2-4-F09.1 CLOSED / PASS; P2-4-F10 CLOSED / P2; v16 migration identity PASS / SEALED;
+`9184c22` test-infrastructure follow-up PASS. New P0: 0; Open P1: 0.
+
+```text
+P2-4 Contract Registration: CLOSED / PASS
+P2-4 Implementation: PASS
+P2-4 Gate: OPEN
+P2-4 overall: CLOSED / PASS
+
+P2-6 stage / contract registration authorization: OPEN (implementation not authorized)
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
 ```
+
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 
 After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three

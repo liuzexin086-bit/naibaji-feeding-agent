@@ -144,6 +144,64 @@ records the implementation closures in the implementation document; the
 findings stay OPEN until an independent re-review of the correction closes
 them. The P2-4 Gate remains CLOSED.
 
+### 18.9 Final implementation narrow re-review — PASS (P2-4 Gate OPEN)
+
+Independent final narrow re-review of
+`08046ce3380ec7ad5714acf929cc57f8292e3511` -> `fb27065f39f1cce4d80bb1e4a604ccca47c076e6` (5
+files: contracts.ts, importer.ts, source-adapter.ts, sqlite-adapters.ts,
+importer.test.ts; +193/-48) -> `9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e` (1
+file: agent/vitest.config.ts, testTimeout 20_000, non-semantic) returned
+`PASS`. The three residual P1 groups from §18.8 were closed as follows:
+
+- `P2-4-F09.1` (CLOSED / PASS) - a nested duplicate-key named `id` no
+  longer triggers Rule 2: source-adapter records `sourceIdFieldDuplicated`
+  true ONLY for the exact top-level path
+  `$["<collection>"][ordinal]["id"]`; nested
+  `{"id":"stable-id","nested":{"id":"x","id":"y"}}` keeps
+  `record_identity` with disposition quarantined.
+- `P2-4-F05.1` (CLOSED / PASS) - the mapped target digest now binds batches
+  `idempotency_key/created_at/updated_at` and daily_observations
+  `idempotency_key/created_at`; the broken
+  `queryTargetRowsByImportKeys` was deleted from port and adapter (zero
+  references); tamper tests for batch idempotency/updated_at and observation
+  idempotency all produce target-drift.
+- `P2-4-F07.1` (CLOSED / PASS) - `preImportCommit` is now REQUIRED with
+  /^[0-9a-fA-F]{40}$/ validation before any source read/backup/mutation,
+  rejecting empty and "unknown" with zero writes; `createBackup` throws
+  ImportError when `foreignKeyViolations` != 0 before import mutation; the
+  failure-injection test proves zero import writes.
+
+The `9184c22` vitest test-timeout follow-up was accepted as non-semantic
+test infrastructure. Exact-SHA CI confirmed
+[agent-safety run 31781315375](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31781315375)
+(`push`, `head_sha = 9184c22f81c3bd05f06f71dd1ea0ab50fc6d6d4e`, attempt 2,
+`success`; attempt 1 failed on an infrastructure `pip` step only and the
+rerun succeeded). Full Agent 60 files / 485 passed + 1 skipped = 486 total;
+P2-1 20/20; P2-2 9/9; P2-3A 35/35; P2-3B 46/46; P2-4 121/121; P0 100/100;
+P1 197/197; optimizer 12/12; typecheck/build/clean-source/Agent image/Web
+image/Compose/runtime provenance and UI E2E all PASS.
+
+Formal dispositions: `P2-4-F04` CLOSED / PASS; `P2-4-F05.1` CLOSED / PASS;
+`P2-4-F06` CLOSED / PASS; `P2-4-F07.1` CLOSED / PASS; `P2-4-F08` CLOSED /
+PASS; `P2-4-F09` CLOSED / PASS; `P2-4-F09.1` CLOSED / PASS; `P2-4-F10`
+CLOSED / P2; v16 migration identity PASS / SEALED; `9184c22`
+test-infrastructure follow-up PASS. New P0: 0; Open P1: 0.
+
+```text
+P2-4 Contract Registration: CLOSED / PASS
+P2-4 Implementation: PASS
+P2-4 Gate: OPEN
+P2-4 overall: CLOSED / PASS
+
+P2-6 stage / contract registration authorization: OPEN (implementation not authorized)
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
 P2-3 Final Closure Seal review: `PASS`
 
 P2-3 Seal exact-SHA CI: [agent-safety run 31680852943](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31680852943)
