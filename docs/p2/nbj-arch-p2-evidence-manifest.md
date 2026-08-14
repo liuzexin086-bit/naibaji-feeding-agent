@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-4 CONTRACT REGISTRATION — PENDING INDEPENDENT REVIEW`
+Status: `P2-4 CONTRACT CORRECTION — RE-REVIEW PENDING`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -60,6 +60,9 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-2B reviewed implementation checkpoint | `ae4edf7c209ec951d6d13dad0df47e3cf0ad9c1e` | Independent P2-2B review: `PASS` |
 | P2-2B reviewed checkpoint parent | `b4b1921858aac464ce1382594cd1825a37bf780c` | Exact reviewed parent |
 | P2-2B remote CI | run `31581143939`, `agent-safety`, success | Exact reviewed checkpoint CI evidence; full suite was 393 passed / 1 skipped / 394 total |
+| P2-4 registration checkpoint | `138b1ae6782615022eefb743537f0781eee9f330` | Independent contract review: `REQUEST CHANGES` (`P2-4-F01` / `P2-4-F02`) |
+| P2-4 registration checkpoint parent | `2fb45b25f6880f03f563fd472d8143bfed8699b5` | `git rev-parse 138b1ae^` |
+| P2-4 registration remote CI | run `31691085082`, `agent-safety`, success | Exact registration checkpoint CI evidence |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
 The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
@@ -548,7 +551,8 @@ candidate does not claim a domain verdict.
 
 ```text
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: PENDING INDEPENDENT REVIEW
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
+P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
 P2-4 Implementation Authorization: CLOSED
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
@@ -568,6 +572,65 @@ tag, or deployment is included.
 At the P2-3A Seal checkpoint, the bound contract had no P2-3B definition. That
 Seal did not create or authorize one, complete P2-3 overall, or authorize P2-4.
 The later registration below preserves that historical boundary.
+
+## 18.3 P2-4 Contract Review — REQUEST CHANGES and Correction
+
+Independent remote review of registration checkpoint
+`138b1ae6782615022eefb743537f0781eee9f330` (sole parent
+`2fb45b25f6880f03f563fd472d8143bfed8699b5`) confirmed remote identity/scope
+(ahead 1 / behind 0, exactly 1 commit, exactly the three `docs/p2/**` files),
+legacy source inventory, and exact-SHA [agent-safety run 31691085082](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31691085082)
+(`push`, `head_sha = 138b1ae6782615022eefb743537f0781eee9f330`,
+`success`), then returned `REQUEST CHANGES` with P0 = 0 and two P1 findings:
+
+- `P2-4-F01 — OPEN / P1` — stable identity encoding and owner-map rebinding
+  semantics under-specified: tuple byte encoding, field separation/length
+  encoding, UTF-8/Unicode normalization, `source_record_id` type rule,
+  raw-row canonical JSON, and same-source/different-owner-map behavior were
+  not frozen.
+- `P2-4-F02 — OPEN / P1` — import manifest/trace/quarantine persistence
+  schema was not explicitly bound to the sealed
+  `packages/persistence/migrations` authority, and the importer/runtime
+  zero-DDL requirement was not frozen.
+
+The docs-only correction checkpoint recorded by this manifest freezes:
+
+- the canonical CJSON tuple encoding, NFC/number/escape rules, the
+  `source_record_id` type rule, the quarantine identity encoding, and five
+  committed known hash vectors (contract §5.1, gate §14.1);
+- accepted source identity `(source_kind, source_sha256)` and accepted owner
+  mapping `owner_mapping_sha256` bound to that source/import result; the
+  same source with a different owner mapping fails closed as
+  `owner-mapping-mismatch` — never replay, never tenant rebind, never silent
+  remap; corrections require an independently reviewed forward
+  remap/amendment contract (contract §6.1);
+- all import schema additions as new forward registered migrations owned by
+  `packages/persistence/migrations`, with zero schema DDL in importer/runtime
+  code and immutable v12/v13 identities; gate proofs: import modules contain
+  no schema DDL, new schema reachable only through the canonical migration
+  runner, zero-pending restart DDL count = 0, P2-3A/P2-3B gates green
+  (contract §8.1).
+
+The correction changes exactly the three registered `docs/p2/**` files and
+contains no implementation, schema, test, fixture, runtime, or workflow
+change. Re-review of the correction SHA must close F01/F02 before P2-4
+Implementation Authorization may open; this candidate does not certify itself.
+
+```text
+P2-4 Legacy JSON Import Authorization: OPEN
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
+P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
+P2-4 Implementation Authorization: CLOSED
+P2-4 Implementation: NOT STARTED
+P2-4 Gate: CLOSED
+
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
 
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 

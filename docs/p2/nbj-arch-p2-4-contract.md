@@ -1,8 +1,14 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Contract Registration
 
-Status: `PENDING INDEPENDENT REVIEW`
+Status: `P2-4 CONTRACT CORRECTION — RE-REVIEW PENDING`
 
 Registration baseline: `2fb45b25f6880f03f563fd472d8143bfed8699b5`
+
+Registration checkpoint: `138b1ae6782615022eefb743537f0781eee9f330` — `P2-4 register legacy JSON import contract`
+
+Independent contract review of the registration checkpoint: `REQUEST CHANGES` — `P2-4-F01` / `P2-4-F02` (audit history in §18)
+
+This checkpoint is the narrow docs-only correction that freezes F01/F02. Re-review of the correction SHA is pending.
 
 P2-3 Final Closure Seal review: `PASS`
 
@@ -10,7 +16,7 @@ P2-3 Seal exact-SHA CI: [agent-safety run 31680852943](https://github.com/liuzex
 
 P2-4 Legacy JSON Import Authorization: `OPEN`
 
-P2-4 Implementation Authorization: `CLOSED — PENDING INDEPENDENT CONTRACT REVIEW`
+P2-4 Implementation Authorization: `CLOSED — INDEPENDENT CONTRACT REVIEW: REQUEST CHANGES (P2-4-F01 / P2-4-F02) / RE-REVIEW PENDING`
 
 ## 1. Registration boundary
 
@@ -117,9 +123,82 @@ Each source row is addressed by:
 
 Source IDs, revisions, timestamps, hashes, and idempotency keys are preserved
 when valid; they are never regenerated to force a mapping. A row without a
-provable source ID receives a deterministic quarantine identity based on its
-collection, canonical raw-row SHA-256, and source ordinal. That identity is
-for preservation only and must not become a Domain business ID.
+provable source ID receives the deterministic quarantine identity frozen in
+§5.1 (collection, canonical raw-row SHA-256, and source ordinal). That
+identity is for preservation only and must not become a Domain business ID.
+
+### 5.1 Canonical identity encoding (P2-4-F01 freeze)
+
+The deterministic record identity is frozen as one canonical encoding. Every
+element is canonicalized first, then serialized, then hashed:
+
+```text
+record_identity =
+  SHA-256( UTF-8( CJSON([ source_kind, source_sha256, collection, source_record_id ]) ) )
+```
+
+`CJSON` is the frozen canonical JSON serialization:
+
+- it operates on parsed JSON values, never on raw source text; JSON escape
+  sequences in the source (for example `\u00e9`) are resolved by parsing
+  before canonicalization;
+- object keys are sorted by Unicode code point ascending; duplicate keys are
+  rejected as malformed (a row with duplicate keys is not canonically
+  serializable and is quarantined);
+- array element order is preserved;
+- each string value is Unicode NFC-normalized before serialization; no
+  normalization is applied across JSON string boundaries;
+- strings are wrapped in double quotes; only `"` (`\"`), `\` (`\\`),
+  and U+0000–U+001F (`\uXXXX` with lowercase hex) are escaped; every other
+  code point, including non-ASCII and surrogate pairs, is emitted verbatim as
+  UTF-8;
+- numbers use the ECMAScript shortest round-trip decimal representation
+  (identical to `Number::toString` / `JSON.stringify` numeric output);
+  `-0` serializes as `0`; non-finite numbers are invalid;
+- no whitespace is emitted between tokens;
+- the serialized bytes are UTF-8 encoded before hashing; the hash output is
+  lowercase hex.
+
+`source_record_id` type rule: a provable source ID is a JSON string or a JSON
+integer in the safe-integer range. Any other JSON value used as a source ID
+(fractional number, boolean, null, object, or array) is not a provable source
+ID and routes the row to the quarantine identity below. String IDs
+canonicalize through the CJSON string rule (NFC included); integer IDs
+canonicalize through the CJSON number rule.
+
+Rows without a provable source ID receive the frozen quarantine identity:
+
+```text
+raw_row_canonical_sha256 = SHA-256( UTF-8( CJSON(raw_row) ) )
+quarantine_identity =
+  SHA-256( UTF-8( CJSON([ "quarantine", collection,
+                         raw_row_canonical_sha256, source_ordinal ]) ) )
+```
+
+where `raw_row` is the complete raw row value (nested fields included) and
+`source_ordinal` is the zero-based position of that row in its source
+collection array. The leading `"quarantine"` discriminator keeps the
+quarantine space disjoint from the record-key space: frozen `source_kind`
+values never equal `"quarantine"`, and the two encodings are structurally
+distinct. Quarantine identities are preservation-only and must never become a
+Domain business ID.
+
+Because the tuple is a JSON array, field boundaries are structurally encoded:
+`("ab","c")` and `("a","bc")` serialize to different byte strings, so bare
+concatenation ambiguity cannot occur.
+
+The frozen known hash vectors below are asserted verbatim by the dedicated
+gate (§14.1). The gate must reproduce them from an implementation independent
+of this document. V2–V4 use the same `source_kind` / `source_sha256` as V1.
+
+| Vector | Tuple / row | Canonical bytes | SHA-256 |
+|---|---|---|---|
+| V1 — string source ID | `source_kind="json-database-v1"`, `source_sha256="3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c"`, `collection="dailyRecords"`, `source_record_id="legacy-2026-08-01-001"` | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","legacy-2026-08-01-001"]` | `9820db706590270d8b714764407de8d89afbddb4ed4fb95ca4973ce5d48c1e24` |
+| V2 — integer source ID | as V1, but `source_record_id=42` (JSON integer) | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords",42]` | `9b82659f32505dd4e0179d405f268c55f2310a651da96ecaeb03ea482abccbe8` |
+| V3 — NFC normalization | as V1, but `source_record_id="café"` (U+00E9); input `"cafe\u0301"` (e + combining acute) must produce the same identity | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","café"]` | `b25bfe4da3293e2e87bfa33633a34c59ac9f0e288679cc189f3729f6b95d0a32` |
+| V4a — boundary disambiguation | as V1, but `collection="ab"`, `source_record_id="c"` | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","ab","c"]` | `2c73d6acbae7f036f6332b81887d790bd93ed79e06c9c7082a521fcb4119944a` |
+| V4b — boundary disambiguation | as V1, but `collection="a"`, `source_record_id="bc"`; must differ from V4a | `["json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","a","bc"]` | `d60212cc53f784f272b5271ab57a73e2ca3f08b77621eb262d7afcad7429a8b1` |
+| V5 — quarantine identity | `raw_row={"qty":2.5,"note":"乳量","id":"r-9"}`; `source_ordinal=3`; raw row bytes `{"id":"r-9","note":"乳量","qty":2.5}`; `raw_row_canonical_sha256=42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708`; tuple `["quarantine","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `["quarantine","dailyRecords","42c04b184752e45f2be10e0ef8269708f33f264ea552e5f93b38d39de6355708",3]` | `66baa01f4f979307540be7d25e8379585e809c1d7848b58dba90d8ce4988ce85` |
 
 ## 6. Owner and tenant binding
 
@@ -138,6 +217,30 @@ The importer must never:
 
 Missing or conflicting owner evidence fails closed or quarantines the affected
 records and their dependents.
+
+### 6.1 Owner-mapping binding and rebinding rule (P2-4-F01 freeze)
+
+```text
+accepted source identity = (source_kind, source_sha256)
+accepted owner mapping   = owner_mapping_sha256, bound to that source and to
+                           that import result
+```
+
+Replay is defined only for the identical triple `(source_kind, source_sha256,
+owner_mapping_sha256)` over byte-identical source bytes. Importing the same
+source identity with a different `owner_mapping_sha256` is NOT replay. It must:
+
+- fail closed before any destination write with the deterministic reason code
+  `owner-mapping-mismatch`;
+- never rebind the tenant, never silently remap owners, and never create or
+  mutate Domain, quarantine, or manifest records;
+- leave the previously accepted import result and its mapping hash immutable.
+
+A genuine owner-mapping correction is not implementable by re-importing the
+same source with a new mapping. It requires an independently reviewed forward
+remap/amendment contract that names the old and new mappings and their hashes,
+the affected record identities, and a new deterministic identity path, and
+that preserves the historical run's evidence.
 
 ## 7. Collection mapping and disposition
 
@@ -168,16 +271,22 @@ The implementation must persist import-specific manifest, record-trace, and
 quarantine authorities in SQLite. Existing business-table idempotency keys are
 not a substitute for import provenance.
 
-Required deterministic import record key:
+Required deterministic import record key — canonical encoding frozen in §5.1:
 
 ```text
-SHA-256(source_kind || source_sha256 || collection || source_record_id)
+record_identity =
+  SHA-256( UTF-8( CJSON([ source_kind, source_sha256, collection, source_record_id ]) ) )
 ```
+
+The record key intentionally does not include `owner_mapping_sha256`: replay
+legality is enforced by the owner-mapping binding in §6.1, never by the key.
 
 Required behavior:
 
-- replay of the same source and owner mapping creates zero new Domain records,
-  zero new quarantine records, and no changed business payload;
+- replay of the same source identity and the same owner mapping (§6.1)
+  creates zero new Domain records, zero new quarantine records, and no changed
+  business payload; a different owner mapping is not replay and fails closed
+  (§6.1);
 - an exact duplicate row in one source is counted and mapped once, with every
   occurrence traceable;
 - the same collection/source ID with different canonical content is a conflict
@@ -189,6 +298,39 @@ Required behavior:
 
 An append-only replay-attempt audit receipt is permitted, but it is not a new
 Domain or quarantine record and cannot change the accepted import result.
+
+### 8.1 Import persistence schema authority (P2-4-F02 freeze)
+
+Any import-manifest, record-trace, or quarantine persistence schema change MUST
+be one or more new forward registered migrations owned by the sealed migration
+authority:
+
+```text
+packages/persistence/migrations
+  -> owns migration definitions, identity, ordering, validation, and orchestration
+
+migration runner
+  -> sole writer of schema version and migration history
+```
+
+The importer, source adapter, import application service, and import repository
+MUST execute zero schema DDL. No `CREATE TABLE`, `CREATE INDEX`,
+`ALTER TABLE`, `DROP`, schema rebuild, or `IF NOT EXISTS` structural repair
+may exist anywhere in P2-4 runtime/import code. The accepted v12
+(`audited-schema-v12-baseline`) and v13 (`registered-schema-v13-repair`)
+migration identities, names, canonical bodies, and checksums remain immutable;
+P2-4 schema must be a new forward identity (v14+) applied only by the canonical
+migration runner while pending, with its ledger row written in the same
+transaction as its schema effects.
+
+The dedicated gate must add these architecture/static proofs (§14.1):
+
+```text
+import modules contain no schema DDL
+new import schema is reachable only through the canonical migration runner
+zero-pending restart  =>  observed schema DDL count = 0
+P2-3A / P2-3B gates remain green
+```
 
 ## 9. Quarantine contract
 
@@ -288,7 +430,9 @@ Implementation acceptance requires immutable, hash-bound fixtures for:
 - import failure and destination restore;
 - byte-for-byte source immutability;
 - same-source replay producing zero new Domain/quarantine records and identical
-  target/raw/quarantine content digests.
+  target/raw/quarantine content digests;
+- every §5.1 known hash vector (V1–V5), asserted byte-for-byte by an
+  implementation independent of this document.
 
 Tests must exercise the real file reader, application service, repository,
 SQLite transaction, manifest, and quarantine seams. A mocked array-to-array
@@ -335,6 +479,19 @@ The checkpoint must also pass:
   provenance/UI checks;
 - independent P2-4 implementation review with P0 = 0 and P1 = 0.
 
+### 14.1 Canonical identity and schema-authority proofs
+
+In addition to the gate coverage above, `p2-4-legacy-json-import-gate` must
+assert:
+
+- every §5.1 known hash vector byte-for-byte (V1–V5), reproduced from an
+  implementation independent of this document;
+- the §8.1 architecture/static proofs: import modules contain no schema DDL,
+  new import schema is reachable only through the canonical migration runner,
+  zero-pending restart DDL count = 0;
+- P2-3A and P2-3B migration gates remain green at the same checkpoint;
+- P2-4-F01 / P2-4-F02 coverage passes with P0 = 0 and P1 = 0.
+
 ## 15. Explicit exclusions
 
 This registration and the future P2-4 implementation do not authorize:
@@ -348,7 +505,8 @@ This registration and the future P2-4 implementation do not authorize:
 - legacy runtime removal, Compose replacement, merge, tag, PR, deployment;
 - optimizer production or real-device control;
 - schema changes outside the minimum independently reviewed import manifest,
-  trace, and quarantine persistence required by this contract.
+  trace, and quarantine persistence required by this contract — which must be
+  new forward registered migrations under the §8.1 authority.
 
 ## 16. Registration acceptance and implementation stop conditions
 
@@ -362,7 +520,11 @@ review must accept:
 - import-specific idempotency and conflict semantics;
 - durable quarantine and zero-loss counters;
 - transaction, backup, restore, and rollback evidence;
-- required gate commands and architecture boundary.
+- required gate commands and architecture boundary;
+- the frozen canonical identity encoding and known hash vectors (§5.1);
+- the owner-mapping binding and fail-closed rebinding rule (§6.1);
+- the import persistence schema authority and zero-DDL proof requirements
+  (§8.1).
 
 Implementation must stop for an amendment if a real source contradicts this
 frozen envelope/mapping, if owner identity cannot be proven, or if any proposed
@@ -377,7 +539,8 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: PENDING INDEPENDENT REVIEW
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
+P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
 P2-4 Implementation Authorization: CLOSED
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
@@ -394,5 +557,47 @@ Real Device Control Gate: CLOSED
 ```
 
 This candidate does not review or certify its own docs commit. It records the
-already completed independent P2-3 Seal decision, but only a new independent
-review of this registration may open P2-4 Implementation Authorization.
+already completed independent P2-3 Seal decision and the audit history in §18.
+Only an independent re-review of this correction may close P2-4-F01 /
+P2-4-F02 and open P2-4 Implementation Authorization.
+
+## 18. Audit history
+
+### 18.1 Registration checkpoint
+
+Checkpoint `138b1ae6782615022eefb743537f0781eee9f330` (`P2-4 register legacy
+JSON import contract`), sole parent `2fb45b25f6880f03f563fd472d8143bfed8699b5`,
+registered this contract as a docs-only candidate. Independent verification
+confirmed ahead 1 / behind 0, exactly 1 commit, exactly 3 `docs/p2/**` files,
+and no implementation, schema, test, fixture, runtime, or workflow change.
+
+### 18.2 Independent contract review — REQUEST CHANGES
+
+Independent remote contract review of the registration checkpoint returned
+`REQUEST CHANGES` with P0 = 0 and two P1 findings, and kept P2-4
+Implementation Authorization CLOSED:
+
+- `P2-4-F01` (OPEN / P1) — stable identity encoding and owner-map rebinding
+  semantics under-specified: tuple byte encoding, field separation/length
+  encoding, UTF-8/Unicode normalization, `source_record_id` type rule,
+  raw-row canonicalization, and same-source/different-owner-map behavior were
+  not frozen. Frozen by §5.1 and §6.1 of this correction.
+- `P2-4-F02` (OPEN / P1) — import manifest/trace/quarantine persistence
+  schema was not explicitly bound to the sealed migration authority, leaving
+  `CREATE TABLE IF NOT EXISTS` in importer code possible while functional
+  tests stay green. Frozen by §8.1 of this correction.
+
+The review separately PASSed remote identity/scope, legacy source inventory,
+and exact-SHA [agent-safety run 31691085082](https://github.com/liuzexin086-bit/naibaji-feeding-agent/actions/runs/31691085082)
+(`head_sha = 138b1ae6782615022eefb743537f0781eee9f330`, `push`, `success`);
+CI green does not cover the two contract P1s.
+
+### 18.3 Correction checkpoint
+
+This docs-only correction commit changes exactly the three registered
+`docs/p2/**` files, freezes F01 (canonical encoding + known vectors,
+owner-mapping binding) and F02 (schema authority, zero DDL), and records this
+audit history. It does not implement the importer, add or alter schema, create
+fixtures, change runtime behavior, or open P2-4 Implementation Authorization.
+This checkpoint does not review or certify its own commit; only the
+independent re-review of the correction SHA can close F01/F02.

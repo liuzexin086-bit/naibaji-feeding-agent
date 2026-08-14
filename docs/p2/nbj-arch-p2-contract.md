@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Contract
 
-Status: `P2-4 CONTRACT REGISTRATION — PENDING INDEPENDENT REVIEW`
+Status: `P2-4 CONTRACT CORRECTION — RE-REVIEW PENDING`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -270,7 +270,8 @@ P2-3 Final Closure Seal: PASS
 P2-3 overall: CLOSED / PASS
 
 P2-4 Legacy JSON Import Authorization: OPEN
-P2-4 Contract Registration: PENDING INDEPENDENT REVIEW
+P2-4 Contract Registration: REQUEST CHANGES — P2-4-F01 / P2-4-F02
+P2-4 Contract Correction: COMMITTED — RE-REVIEW PENDING
 P2-4 Implementation Authorization: CLOSED
 P2-4 Implementation: NOT STARTED
 P2-4 Gate: CLOSED
@@ -346,3 +347,16 @@ unrelated JSON artifacts, and freezes source identity, owner mapping,
 collection disposition, replay/conflict semantics, durable quarantine,
 zero-loss counters, backup/rollback, fixtures, and required gates. It does not
 implement an importer or open P2-4 Implementation Authorization.
+
+Independent remote contract review of registration checkpoint
+`138b1ae6782615022eefb743537f0781eee9f330` returned `REQUEST CHANGES` with
+two P1 findings: `P2-4-F01` (canonical identity encoding, known hash vectors,
+and owner-map rebinding semantics were under-specified) and `P2-4-F02`
+(import manifest/trace/quarantine schema was not explicitly bound to the
+sealed `packages/persistence/migrations` authority). The narrow docs-only
+correction checkpoint recorded here freezes the canonical CJSON tuple encoding
+and its known vectors, the same-source/different-owner-map fail-closed rule,
+the forward-migration-only schema rule with zero runtime DDL, and this audit
+history, changing exactly the three registered `docs/p2/**` files. It does
+not implement the importer, and P2-4 Implementation Authorization remains
+CLOSED until independent re-review closes F01/F02.
