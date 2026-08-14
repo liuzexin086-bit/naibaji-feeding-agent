@@ -174,12 +174,33 @@ export interface TargetObservationInput {
   readonly createdAt: string;
 }
 
+/**
+ * Frozen ReplayDigestProjection entry for a mapped target row (contract 8/10):
+ * every authoritative persisted column of batches and daily_observations is
+ * bound, not only data_json. Columns that do not exist for the other table
+ * are null.
+ */
 export interface TargetRowDigestEntry {
-  readonly table: string;
+  readonly table: "batches" | "daily_observations";
   readonly id: string;
   readonly dataJson: string;
+  // batches authoritative columns
+  readonly revision: number | null;
+  readonly currentDay: number | null;
+  readonly status: string | null;
+  // daily_observations authoritative columns
+  readonly batchId: string | null;
+  readonly dateLocal: string | null;
+  readonly observedAt: string | null;
+  readonly batchRevision: number | null;
 }
 
+/**
+ * Backup evidence sealed by the backup authority at creation time (contract
+ * 11, P2-4-F07.1): the pre-import content digest is computed FROM the
+ * backup snapshot itself, and the pre-import commit plus source/owner
+ * hashes are sealed so a later restore can consume only this evidence.
+ */
 export interface BackupEvidence {
   readonly sha256: string;
   readonly restoreLocation: string;
@@ -189,12 +210,41 @@ export interface BackupEvidence {
   readonly importerContractVersion: string;
   readonly integrity: string;
   readonly foreignKeyViolations: number;
+  /** Complete destination content digest of the backup snapshot itself. */
+  readonly preImportContentDigest: string;
+  /** Pre-import commit of the import operation (caller-provided fact). */
+  readonly preImportCommit: string;
+  readonly sourceSha256: string;
+  readonly ownerMappingSha256: string;
   readonly createdAt: string;
 }
 
 export interface ImportBackupEvidenceRow extends BackupEvidence {
   readonly id: string;
   readonly importRunId: string;
+}
+
+/**
+ * Frozen ReplayDigestProjection manifest facts (contract 8/10, P2-4-F05.1):
+ * every immutable semantic manifest field except payload_digest itself and
+ * the audit-only created_at timestamp.
+ */
+export interface ManifestDigestFacts {
+  readonly sourceKind: string;
+  readonly sourceSha256: string;
+  readonly sourceByteLength: number;
+  readonly sourceSchemaVersion: string;
+  readonly originalFilenameOrExportLabel: string | null;
+  readonly capturedAt: string | null;
+  readonly sanitizationOrOriginRecord: string | null;
+  readonly ownerMappingSha256: string;
+  readonly targetUserId: string;
+  readonly importerContractVersion: string;
+  readonly runState: string;
+  readonly countersJson: string;
+  readonly unknownTopLevelKeysJson: string | null;
+  readonly backupSha256: string;
+  readonly restoreLocation: string;
 }
 
 export interface ImportPersistencePort {
@@ -223,14 +273,13 @@ export interface ImportPersistencePort {
     sourceKind: string,
     sourceSha256: string,
     targetUserId: string,
-    manifestFacts: {
-      countersJson: string;
-      unknownTopLevelKeysJson: string | null;
-      ownerMappingSha256: string;
-      runState: string;
-    },
+    manifestFacts: ManifestDigestFacts,
   ): string;
-  createBackup(): BackupEvidence;
+  createBackup(context: {
+    sourceSha256: string;
+    ownerMappingSha256: string;
+    preImportCommit: string;
+  }): BackupEvidence;
   insertBackupEvidence(row: ImportBackupEvidenceRow): void;
   findBackupEvidenceByRunId(importRunId: string): ImportBackupEvidenceRow | null;
   integrity(): { integrity: string; foreignKeyViolations: number };

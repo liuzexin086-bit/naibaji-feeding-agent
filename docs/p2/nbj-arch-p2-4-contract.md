@@ -106,8 +106,8 @@ Independent final narrow re-review of
 `P2-4-F06` (lossless duplicate-key raw evidence and unknown top-level value
 preservation), `P2-4-F07` (transactional rollback) and `P2-4-F08`
 (sealed v15 with literal `version: 15` and runtime drift assert), and
-confirmed exact-SHA CI (run 31763824664; Full Agent 472 passed + 1 skipped
-= 473 total; P2-4 gate 107/107). It then returned `REQUEST CHANGES` with
+confirmed exact-SHA CI (run 31763824664; Full Agent 471 passed + 1 skipped
+= 472 total; P2-4 gate 107/107). It then returned `REQUEST CHANGES` with
 three P1 items:
 
 - `P2-4-F05.1` - the replay digest projection is still incomplete:

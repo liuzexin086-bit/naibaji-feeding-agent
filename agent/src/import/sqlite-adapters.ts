@@ -14,6 +14,7 @@ import type {
   ImportBackupEvidenceRow,
   ImportManifestRow,
   ImportPersistencePort,
+  ManifestDigestFacts,
   QuarantineRow,
   RunState,
   TargetBatchInput,
@@ -108,18 +109,13 @@ function computeSourceDigest(
   sourceKind: string,
   sourceSha256: string,
   targetUserId: string,
-  manifestFacts: {
-    countersJson: string;
-    unknownTopLevelKeysJson: string | null;
-    ownerMappingSha256: string;
-    runState: string;
-  },
+  manifestFacts: ManifestDigestFacts,
 ): string {
   // tenant safety: the authority key of the target tables is (user_id, id),
   // so target rows are always read scoped to the accepted target user
   const targets: TargetRowDigestEntry[] = [];
   for (const row of statements.traceTargets.all(sourceKind, sourceSha256) as Row[]) {
-    const table = String(row.target_table);
+    const table = String(row.target_table) as "batches" | "daily_observations";
     const id = String(row.target_id);
     const content = table === "batches"
       ? (statements.batchById.get(targetUserId, id) as Row | undefined)
@@ -129,12 +125,41 @@ function computeSourceDigest(
         "target-drift: missing target row " + table + " " + id + " for user " + targetUserId,
       );
     }
-    targets.push({ table, id, dataJson: String(content.data_json) });
+    // frozen ReplayDigestProjection: bind EVERY authoritative persisted
+    // column of the mapped target row, not only data_json
+    if (table === "batches") {
+      targets.push({
+        table,
+        id,
+        dataJson: String(content.data_json),
+        revision: Number(content.revision),
+        currentDay: Number(content.current_day),
+        status: String(content.status),
+        batchId: null,
+        dateLocal: null,
+        observedAt: null,
+        batchRevision: null,
+      });
+    } else {
+      targets.push({
+        table,
+        id,
+        dataJson: String(content.data_json),
+        revision: null,
+        currentDay: null,
+        status: null,
+        batchId: String(content.batch_id),
+        dateLocal: String(content.date_local),
+        observedAt: String(content.observed_at),
+        batchRevision: Number(content.batch_revision),
+      });
+    }
   }
   // complete provenance evidence: every trace record (identity, ordinal,
   // disposition, reason, parent, field paths, and content-bearing payload),
-  // every quarantine record (reason, field paths, resolution status, payload),
-  // and the manifest acceptance facts are bound to the digest
+  // every quarantine record (identity, ordinal, reason, field paths,
+  // parent identity, owner mapping, resolution status, payload),
+  // and the complete manifest acceptance facts are bound to the digest
   const traces = (statements.traceDigestRows.all(sourceKind, sourceSha256) as Row[]).map((row) => ({
     collection: String(row.collection),
     identity: String(row.record_identity),
@@ -143,6 +168,7 @@ function computeSourceDigest(
     reasonCode: row.reason_code == null ? null : String(row.reason_code),
     parentIdentity: row.parent_identity == null ? null : String(row.parent_identity),
     fieldPathsJson: String(row.field_paths_json),
+    rawPayloadBytes: Number(row.raw_payload_bytes),
     rawPayloadSha256: String(row.raw_payload_sha256),
     rawPayloadJson: String(row.raw_payload_json),
   }));
@@ -150,19 +176,34 @@ function computeSourceDigest(
     (row) => ({
       collection: String(row.collection),
       identity: String(row.source_record_identity),
+      ordinal: Number(row.source_ordinal),
       reasonCode: String(row.reason_code),
       fieldPathsJson: String(row.field_paths_json),
+      parentSourceIdentity: row.parent_source_identity == null ? null : String(row.parent_source_identity),
+      ownerMappingSha256: String(row.owner_mapping_sha256),
       resolutionStatus: String(row.resolution_status),
+      rawPayloadBytes: Number(row.raw_payload_bytes),
       rawPayloadSha256: String(row.raw_payload_sha256),
+      rawPayloadJson: String(row.raw_payload_json),
     }),
   );
   return sha256Text(
     JSON.stringify({
-      targetUserId,
+      targetUserId: manifestFacts.targetUserId,
+      sourceKind: manifestFacts.sourceKind,
+      sourceSha256: manifestFacts.sourceSha256,
+      sourceByteLength: manifestFacts.sourceByteLength,
+      sourceSchemaVersion: manifestFacts.sourceSchemaVersion,
+      originalFilenameOrExportLabel: manifestFacts.originalFilenameOrExportLabel,
+      capturedAt: manifestFacts.capturedAt,
+      sanitizationOrOriginRecord: manifestFacts.sanitizationOrOriginRecord,
       ownerMappingSha256: manifestFacts.ownerMappingSha256,
+      importerContractVersion: manifestFacts.importerContractVersion,
       runState: manifestFacts.runState,
       countersJson: manifestFacts.countersJson,
       unknownTopLevelKeysJson: manifestFacts.unknownTopLevelKeysJson,
+      backupSha256: manifestFacts.backupSha256,
+      restoreLocation: manifestFacts.restoreLocation,
       targets,
       traces,
       quarantine,
@@ -238,8 +279,9 @@ export function createImportPersistence(
       " ORDER BY target_table, target_id",
     ),
     quarantineDigestRows: database.prepare(
-      "SELECT collection, source_record_identity, reason_code, field_paths_json," +
-      " resolution_status, raw_payload_sha256 FROM import_quarantine" +
+      "SELECT collection, source_record_identity, source_ordinal, reason_code," +
+      " field_paths_json, parent_source_identity, owner_mapping_sha256, resolution_status," +
+      " raw_payload_bytes, raw_payload_sha256, raw_payload_json FROM import_quarantine" +
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_record_identity",
     ),
     batchById: database.prepare(
@@ -253,15 +295,16 @@ export function createImportPersistence(
     traceDigestRows: database.prepare(
       "SELECT collection, record_identity, source_ordinal, disposition," +
       " reason_code, parent_identity, field_paths_json," +
-      " raw_payload_sha256, raw_payload_json FROM import_record_traces" +
+      " raw_payload_bytes, raw_payload_sha256, raw_payload_json FROM import_record_traces" +
       " WHERE source_kind = ? AND source_sha256 = ? ORDER BY collection, source_ordinal",
     ),
     insertBackupEvidence: database.prepare(
       "INSERT INTO import_backup_evidence (" +
       " id, import_run_id, sha256, restore_location, schema_digest, migration_ledger_sha256," +
       " application_version, importer_contract_version, integrity, foreign_key_violations," +
+      " pre_import_content_digest, pre_import_commit, source_sha256, owner_mapping_sha256," +
       " created_at" +
-      " ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      " ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     ),
     findBackupEvidence: database.prepare(
       "SELECT * FROM import_backup_evidence WHERE import_run_id = ?",
@@ -412,7 +455,18 @@ export function createImportPersistence(
           const row = statement.get(key) as Row | undefined;
           if (row !== undefined) {
             seen.add(key);
-            entries.push({ table, id: String(row.id), dataJson: String(row.data_json) });
+            entries.push({
+              table: table as "batches" | "daily_observations",
+              id: String(row.id),
+              dataJson: String(row.data_json),
+              revision: table === "batches" ? Number(row.revision) : null,
+              currentDay: table === "batches" ? Number(row.current_day) : null,
+              status: table === "batches" ? String(row.status) : null,
+              batchId: table === "daily_observations" ? String(row.batch_id) : null,
+              dateLocal: table === "daily_observations" ? String(row.date_local) : null,
+              observedAt: table === "daily_observations" ? String(row.observed_at) : null,
+              batchRevision: table === "daily_observations" ? Number(row.batch_revision) : null,
+            });
           }
         }
       }
@@ -427,7 +481,7 @@ export function createImportPersistence(
         manifestFacts,
       );
     },
-    createBackup(): BackupEvidence {
+    createBackup(context: { sourceSha256: string; ownerMappingSha256: string; preImportCommit: string }): BackupEvidence {
       const directory = mkdtempSync(join(tmpdir(), "naibaji-import-backup-"));
       const backupPath = join(directory, "backup.db");
       database.exec("VACUUM INTO '" + backupPath + "'");
@@ -456,6 +510,10 @@ export function createImportPersistence(
       } finally {
         check.close();
       }
+      // sealed pre-import proof (contract 11, P2-4-F07.1): the pre-import
+      // content digest is computed FROM the backup snapshot itself by the
+      // backup authority - the restore path may only consume this evidence,
+      // never arbitrary caller input
       return {
         sha256: sha256File(backupPath),
         restoreLocation: backupPath,
@@ -465,6 +523,10 @@ export function createImportPersistence(
         importerContractVersion: "p2-4-import-v1",
         integrity,
         foreignKeyViolations,
+        preImportContentDigest: computeDestinationDigest(backupPath),
+        preImportCommit: context.preImportCommit,
+        sourceSha256: context.sourceSha256,
+        ownerMappingSha256: context.ownerMappingSha256,
         createdAt: new Date().toISOString(),
       };
     },
@@ -480,6 +542,10 @@ export function createImportPersistence(
         row.importerContractVersion,
         row.integrity,
         row.foreignKeyViolations,
+        row.preImportContentDigest,
+        row.preImportCommit,
+        row.sourceSha256,
+        row.ownerMappingSha256,
         row.createdAt,
       );
     },
@@ -497,6 +563,10 @@ export function createImportPersistence(
         importerContractVersion: String(row.importer_contract_version),
         integrity: String(row.integrity),
         foreignKeyViolations: Number(row.foreign_key_violations),
+        preImportContentDigest: String(row.pre_import_content_digest),
+        preImportCommit: String(row.pre_import_commit),
+        sourceSha256: String(row.source_sha256),
+        ownerMappingSha256: String(row.owner_mapping_sha256),
         createdAt: String(row.created_at),
       };
     },
@@ -520,25 +590,26 @@ export function createImportPersistence(
 }
 
 /**
- * Content-bearing digest of the complete destination state (users, target
- * business rows, and all import provenance tables). Used by the restore
- * receipt to prove that the post-restore destination is byte-equivalent to
- * the pre-import destination (frozen contract 11).
+ * Content-bearing digest of the COMPLETE destination state: every authority
+ * table in the schema (users, business rows, SOP/plan/decision tables,
+ * migration ledger, and all import provenance tables) is enumerated from
+ * sqlite_schema and hashed. Used by the restore receipt to prove that the
+ * post-restore destination is byte-equivalent to the pre-import destination
+ * (frozen contract 11, P2-4-F07.1).
  */
 export function computeDestinationDigest(databasePath: string): string {
   const database = new DatabaseSync(databasePath, { readOnly: true });
   try {
     const rows = (table: string) =>
-      database.prepare("SELECT * FROM " + table + " ORDER BY rowid").all() as Row[];
-    const state = {
-      users: rows("users"),
-      batches: rows("batches"),
-      daily_observations: rows("daily_observations"),
-      import_manifests: rows("import_manifests"),
-      import_record_traces: rows("import_record_traces"),
-      import_quarantine: rows("import_quarantine"),
-      import_backup_evidence: rows("import_backup_evidence"),
-    };
+      database.prepare("SELECT * FROM \"" + table + "\" ORDER BY rowid").all() as Row[];
+    const tables = (database.prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table'" +
+      " AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    ).all() as Row[]).map((row) => String(row.name));
+    const state: Record<string, Row[]> = {};
+    for (const table of tables) {
+      state[table] = rows(table);
+    }
     return sha256Text(JSON.stringify(state));
   } finally {
     database.close();
@@ -547,7 +618,10 @@ export function computeDestinationDigest(databasePath: string): string {
 
 export interface RestoreReceipt {
   readonly backupSha256: string;
-  readonly preImportDigest: string;
+  readonly preImportContentDigest: string;
+  readonly preImportCommit: string;
+  readonly sourceSha256: string;
+  readonly ownerMappingSha256: string;
   readonly postRestoreDigest: string;
   readonly digestMatch: boolean;
   readonly integrity: string;
@@ -558,19 +632,22 @@ export interface RestoreReceipt {
 }
 
 /**
- * Restore a database file from an import backup snapshot and produce the
- * frozen rollback receipt: backup identity, pre-import content digest,
- * post-restore content digest, integrity and foreign-key result, and restore
- * log. The caller must close the live connection first; stale WAL/SHM
- * sidecar files are removed so the restored file is authoritative.
+ * Restore a database file from an import backup snapshot, consuming ONLY
+ * the evidence sealed by the backup authority (contract 11, P2-4-F07.1):
+ * backup SHA is verified before any mutation, then the restored file must
+ * match the sealed pre-import content digest with integrity ok and zero
+ * foreign-key violations - otherwise the restore FAILS CLOSED (throws) and
+ * no receipt is emitted. The caller must close the live connection first;
+ * stale WAL/SHM sidecar files are removed so the restored file is
+ * authoritative.
  */
 export function restoreDatabaseFromBackup(
   databasePath: string,
   backupPath: string,
-  input: { preImportDigest: string; backupSha256: string },
+  evidence: BackupEvidence,
 ): RestoreReceipt {
   if (!existsSync(backupPath)) throw new ImportError("backup file missing: " + backupPath);
-  if (sha256File(backupPath) !== input.backupSha256) {
+  if (sha256File(backupPath) !== evidence.sha256) {
     throw new ImportError("restore aborted: backup SHA-256 mismatch");
   }
   copyFileSync(backupPath, databasePath);
@@ -588,11 +665,24 @@ export function restoreDatabaseFromBackup(
     restored.close();
   }
   const postRestoreDigest = computeDestinationDigest(databasePath);
+  const digestMatch = postRestoreDigest === evidence.preImportContentDigest;
+  if (!digestMatch || integrity !== "ok" || foreignKeyViolations !== 0) {
+    throw new ImportError(
+      "restore failed closed: digestMatch=" + digestMatch +
+      " integrity=" + integrity +
+      " foreignKeyViolations=" + foreignKeyViolations +
+      " (sealed preImportContentDigest=" + evidence.preImportContentDigest +
+      " postRestoreDigest=" + postRestoreDigest + ")",
+    );
+  }
   return {
-    backupSha256: input.backupSha256,
-    preImportDigest: input.preImportDigest,
+    backupSha256: evidence.sha256,
+    preImportContentDigest: evidence.preImportContentDigest,
+    preImportCommit: evidence.preImportCommit,
+    sourceSha256: evidence.sourceSha256,
+    ownerMappingSha256: evidence.ownerMappingSha256,
     postRestoreDigest,
-    digestMatch: postRestoreDigest === input.preImportDigest,
+    digestMatch: true,
     integrity,
     foreignKeyViolations,
     restoredAt: new Date().toISOString(),

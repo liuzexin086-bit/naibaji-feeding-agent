@@ -43,7 +43,8 @@
       12,
       13,
       14,
-      15
+      15,
+      16
     ],
     "legacyArchiveVersions": [
       1,
@@ -82,9 +83,15 @@
         "name": "registered-schema-v15-import-evidence",
         "checksum": "22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F",
         "applicationVersion": "0.1.0"
+      },
+      {
+        "version": 16,
+        "name": "registered-schema-v16-sealed-restore-evidence",
+        "checksum": "F79E3F38925EDAF819D7D9CEF19DF36E02FF9BD8258C8BFA980DA6FC5014366D",
+        "applicationVersion": "0.1.0"
       }
     ],
-    "schemaDigest": "50974534C04CC186EFE8793EFFCFE614909A27EC466606D575FAB6FF6E8D2708",
+    "schemaDigest": "172FC285C284475D01701B5A36AC6EDD056682B4DCE1AA3FA75613DF4E86C358",
     "tableInventory": [
       "agent_messages",
       "agent_sessions",

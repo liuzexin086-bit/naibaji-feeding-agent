@@ -1,4 +1,4 @@
-export const MIGRATION_VERSION = 15;
+export const MIGRATION_VERSION = 16;
 
 export const INITIAL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
@@ -405,4 +405,26 @@ CREATE TABLE IF NOT EXISTS import_backup_evidence (
 
 CREATE INDEX IF NOT EXISTS import_backup_evidence_run_idx
   ON import_backup_evidence(import_run_id);
+`;
+
+export const IMPORT_SCHEMA_V16 = `
+CREATE TABLE IF NOT EXISTS import_backup_evidence (
+  id TEXT PRIMARY KEY,
+  import_run_id TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  restore_location TEXT NOT NULL,
+  schema_digest TEXT NOT NULL,
+  migration_ledger_sha256 TEXT NOT NULL,
+  application_version TEXT NOT NULL,
+  importer_contract_version TEXT NOT NULL,
+  integrity TEXT NOT NULL,
+  foreign_key_violations INTEGER NOT NULL CHECK (foreign_key_violations >= 0),
+  pre_import_content_digest TEXT NOT NULL,
+  pre_import_commit TEXT NOT NULL,
+  source_sha256 TEXT NOT NULL,
+  owner_mapping_sha256 TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (import_run_id) REFERENCES import_manifests(id) ON DELETE CASCADE
+    DEFERRABLE INITIALLY DEFERRED
+) STRICT;
 `;

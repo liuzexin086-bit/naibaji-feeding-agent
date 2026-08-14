@@ -7,7 +7,7 @@
  * one transaction; any failure rolls back and the destination is unchanged.
  */
 import { createHash, randomUUID } from "node:crypto";
-import type { ImportPersistencePort, ImportRunResult, ZeroLossCounters } from "./contracts.js";
+import type { ImportPersistencePort, ImportRunResult, ManifestDigestFacts, ZeroLossCounters } from "./contracts.js";
 import {
   IMPORTER_CONTRACT_VERSION,
   ImportError,
@@ -15,7 +15,7 @@ import {
   emptyCounters,
   type RunState,
 } from "./contracts.js";
-import { isProvableSourceId, quarantineIdentity, recordIdentity, rawRowCanonicalSha256 } from "./identity.js";
+import { isProvableSourceId, quarantineIdentity, rawDuplicateQuarantineIdentity, recordIdentity, rawRowCanonicalSha256 } from "./identity.js";
 import { loadOwnerMapping, OwnerMappingError } from "./owner-mapping.js";
 import { readJsonV1Source } from "./source-adapter.js";
 
@@ -26,6 +26,8 @@ export interface ImportLegacyJsonInput {
   readonly ownerMappingPath: string;
   readonly persistence: ImportPersistencePort;
   readonly now?: () => string;
+  /** Pre-import commit sealed into the backup evidence (contract 11). */
+  readonly preImportCommit?: string;
 }
 
 interface RowDecision {
@@ -155,10 +157,21 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
       source.sha256,
       existing.targetUserId,
       {
+        sourceKind: existing.sourceKind,
+        sourceSha256: existing.sourceSha256,
+        sourceByteLength: existing.sourceByteLength,
+        sourceSchemaVersion: existing.sourceSchemaVersion,
+        originalFilenameOrExportLabel: existing.originalFilenameOrExportLabel,
+        capturedAt: existing.capturedAt,
+        sanitizationOrOriginRecord: existing.sanitizationOrOriginRecord,
+        ownerMappingSha256: existing.ownerMappingSha256,
+        targetUserId: existing.targetUserId,
+        importerContractVersion: existing.importerContractVersion,
+        runState: existing.runState,
         countersJson: existing.countersJson,
         unknownTopLevelKeysJson: existing.unknownTopLevelKeysJson,
-        ownerMappingSha256: existing.ownerMappingSha256,
-        runState: existing.runState,
+        backupSha256: existing.backupSha256 ?? "",
+        restoreLocation: existing.restoreLocation ?? "",
       },
     );
     if (currentDigest !== existing.payloadDigest) {
@@ -183,6 +196,10 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
             importerContractVersion: "",
             integrity: "",
             foreignKeyViolations: 0,
+            preImportContentDigest: "",
+            preImportCommit: "",
+            sourceSha256: "",
+            ownerMappingSha256: "",
             createdAt: "",
           },
       payloadDigest: existing.payloadDigest,
@@ -198,7 +215,13 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
     );
   }
 
-  const backup = input.persistence.createBackup();
+  // the backup authority seals the pre-import proof itself: content digest
+  // computed from the backup snapshot, plus commit and source/owner hashes
+  const backup = input.persistence.createBackup({
+    sourceSha256: source.sha256,
+    ownerMappingSha256: mapping.sha256,
+    preImportCommit: input.preImportCommit ?? "unknown",
+  });
   const runId = randomUUID();
   const counters = emptyCounters();
   const mappedBatchIds = new Map<string, string>(); // source batch id -> target batch id
@@ -242,17 +265,30 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
         let disposition: RowDecision["disposition"];
         let reasonCode: string | null = null;
         if (duplicateKeyRow) {
-          // a row with duplicate keys is not canonically serializable and is
-          // quarantined (contract 5.1); the raw payload is the ORIGINAL source
-          // row slice (including the duplicate keys), never a re-serialization
-          // of the last-wins parse
-          identity = quarantineIdentity({
-            sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
-            sourceSha256: source.sha256,
-            collection,
-            rawRowCanonicalSha256: canonicalSha256,
-            sourceOrdinal: ordinal,
-          });
+          // contract 5.2 (P2-4-F09 freeze): a row with duplicate keys is not
+          // canonically serializable. Rule 1: the duplicate key does NOT affect
+          // the source id (id still provable and not itself duplicated) -> keep
+          // the normal record_identity with disposition quarantined. Rule 2: the
+          // duplicate key IS the id field (or the id is otherwise unprovable)
+          // -> raw-slice-bound raw_duplicate_quarantine_identity over the
+          // ORIGINAL raw row slice SHA, never a CJSON of the last-wins parse.
+          const idDuplicated = duplicateKeyRow.duplicateKeys.includes("id");
+          if (!idDuplicated && isProvableSourceId(idValue)) {
+            identity = recordIdentity({
+              sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
+              sourceSha256: source.sha256,
+              collection,
+              sourceRecordId: idValue,
+            });
+          } else {
+            identity = rawDuplicateQuarantineIdentity({
+              sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
+              sourceSha256: source.sha256,
+              collection,
+              originalRawRowSha256: duplicateKeyRow.rawSha256,
+              sourceOrdinal: ordinal,
+            });
+          }
           disposition = "quarantined";
           reasonCode = "duplicate-key";
         } else if (!isProvableSourceId(idValue)) {
@@ -544,11 +580,22 @@ export function importLegacyJson(input: ImportLegacyJsonInput): ImportRunResult 
     const unknownTopLevelKeysJson = source.unknownTopLevelValues.length > 0
       ? JSON.stringify(source.unknownTopLevelValues)
       : null;
-    const manifestFacts = {
+    const manifestFacts: ManifestDigestFacts = {
+      sourceKind: SOURCE_KIND_JSON_DATABASE_V1,
+      sourceSha256: source.sha256,
+      sourceByteLength: source.byteLength,
+      sourceSchemaVersion: String(source.schemaVersion),
+      originalFilenameOrExportLabel: null,
+      capturedAt: null,
+      sanitizationOrOriginRecord: null,
+      ownerMappingSha256: mapping.sha256,
+      targetUserId: mapping.manifest.targetUserId,
+      importerContractVersion: IMPORTER_CONTRACT_VERSION,
+      runState: state,
       countersJson: JSON.stringify(counters),
       unknownTopLevelKeysJson,
-      ownerMappingSha256: mapping.sha256,
-      runState: state,
+      backupSha256: backup.sha256,
+      restoreLocation: backup.restoreLocation,
     };
     const payloadDigest = input.persistence.querySourceDigest(
       SOURCE_KIND_JSON_DATABASE_V1,

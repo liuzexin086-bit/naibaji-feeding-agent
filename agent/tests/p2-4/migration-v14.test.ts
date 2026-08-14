@@ -10,6 +10,8 @@ import {
   SEALED_V14_NAME,
   SEALED_V15_CHECKSUM,
   SEALED_V15_NAME,
+  SEALED_V16_CHECKSUM,
+  SEALED_V16_NAME,
   defineNaibajiMigrationChain,
   runNaibajiMigrations,
 } from "@naibaji/persistence/migrations";
@@ -38,13 +40,16 @@ describe("P2-4 v14 import schema migration", () => {
         { version: 13, name: "registered-schema-v13-repair" },
         { version: 14, name: SEALED_V14_NAME },
         { version: 15, name: SEALED_V15_NAME },
+        { version: 16, name: SEALED_V16_NAME },
       ]);
       expect(chain[0]?.checksum).toBe(SEALED_V12_CHECKSUM);
-      // published identities stay immutable: v14 and v15 are pinned exactly,
+      // published identities stay immutable: v14, v15 and v16 are pinned exactly,
       // independently of CURRENT_MIGRATION_VERSION
       expect(chain[2]?.checksum).toBe("0711127CBEA84AC5D2E07145D535A1BE011176CAF893C8096F498B8FD2C94C33");
       expect(chain[3]?.checksum).toBe(SEALED_V15_CHECKSUM);
-      expect(CURRENT_MIGRATION_VERSION).toBe(15);
+      expect(chain[4]?.checksum).toBe(SEALED_V16_CHECKSUM);
+      expect(chain[4]?.checksum).toBe("F79E3F38925EDAF819D7D9CEF19DF36E02FF9BD8258C8BFA980DA6FC5014366D");
+      expect(CURRENT_MIGRATION_VERSION).toBe(16);
     } finally {
       database.close();
     }
@@ -58,9 +63,10 @@ describe("P2-4 v14 import schema migration", () => {
       try {
         runNaibajiMigrations({ database });
         const ledger = database.prepare("SELECT version, name FROM schema_migrations ORDER BY version").all();
-        expect(ledger.map((row) => Number(row.version))).toEqual([12, 13, 14, 15]);
+        expect(ledger.map((row) => Number(row.version))).toEqual([12, 13, 14, 15, 16]);
         expect(ledger[2]).toMatchObject({ version: 14, name: SEALED_V14_NAME });
         expect(ledger[3]).toMatchObject({ version: 15, name: SEALED_V15_NAME });
+        expect(ledger[4]).toMatchObject({ version: 16, name: SEALED_V16_NAME });
         const tables = names(database, "table");
         for (const table of IMPORT_TABLES) expect(tables).toContain(table);
         expect(tables).toContain("import_backup_evidence");

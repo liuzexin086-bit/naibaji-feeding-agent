@@ -19,7 +19,7 @@ describe("build provenance contract", () => {
     const agent = await computeProvenance({ commit: "provenance-test", agentRoot });
     expect(agent).toMatchObject({
       commit: "provenance-test",
-      schemaVersion: 15,
+      schemaVersion: 16,
       decisionPolicyVersion: "execution-contract-v1",
     });
     expect(agent.feedingModelSourceSha256).toBe(sha256File(resolve(repoRoot, "feeding-model.js")));
@@ -30,7 +30,7 @@ describe("build provenance contract", () => {
 
     const web = await computeWebProvenance({ commit: "provenance-test", agentRoot });
     expect(web.commit).toBe("provenance-test");
-    expect(web.schemaVersion).toBe(15);
+    expect(web.schemaVersion).toBe(16);
     expect(web.decisionPolicyVersion).toBe("execution-contract-v1");
     expect(web.feedingModelSourceSha256).toBe(agent.feedingModelSourceSha256);
     expect(web.feedingModelArtifactSha256).toBe(

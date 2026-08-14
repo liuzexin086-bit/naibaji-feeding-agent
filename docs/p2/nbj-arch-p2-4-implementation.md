@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-4 Legacy JSON Import Implementation
 
-Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F05.1 / F06 / F07.1 / F08) — RE-REVIEW PENDING`
+Status: `IMPLEMENTATION CANDIDATE — CHANGES REQUIRED (P2-4-F05.1 / F07.1 / F09) — THIRD CORRECTION COMMITTED — RE-REVIEW PENDING`
 
 Contract registration: `PASS` (independent re-review of `f921b4f67187494b6d91965d176a3a85857ee938`)
 
@@ -215,6 +215,90 @@ published v14 identity (`0711127C...`) is unchanged. Post-import integrity
 acceptance runs inside the transaction: any integrity or foreign-key
 failure rolls the destination back to the prior reviewed state (test
 proves automatic rollback with zero residual writes).
+## Third correction — F05.1 / F07.1 / F09 (final narrow re-review)
+
+The independent final narrow re-review (contract §18.8) returned
+`REQUEST CHANGES` with three P1 items. This correction closes them as
+follows, in the order required by the review:
+
+### P2-4-F09 — docs-only micro-amendment first, then identity correction
+
+The docs-only micro-amendment is frozen in contract 5.2: a duplicate-key
+row is not canonically serializable, so CJSON(raw_row) is undefined for
+it. Rule 1 — the duplicate key does NOT affect the source id: the row
+keeps the normal `record_identity` with disposition `quarantined` and the
+original raw row slice as evidence. Rule 2 — the duplicate key IS the id
+field (or the id is otherwise unprovable):
+
+```text
+raw_duplicate_quarantine_identity =
+  SHA-256( UTF-8( CJSON([ "quarantine-raw", source_kind, source_sha256,
+                         collection, original_raw_row_sha256,
+                         source_ordinal ]) ) )
+original_raw_row_sha256 = SHA-256( original raw row slice text )
+```
+
+`identity.ts` implements `rawDuplicateQuarantineIdentity` and freezes the
+V7 known vector (`e977a32c...` raw slice / `d1026155...` identity);
+`source-adapter.ts` reports the duplicated key names per row; `importer.ts`
+routes duplicate-key rows by rule 1 or rule 2. Tests assert the V7 bytes,
+the raw-slice binding (never a last-wins CJSON), and the rule-1
+record-identity path.
+
+### P2-4-F05.1 — complete authoritative replay digest projection
+
+`computeSourceDigest` now binds the frozen `ReplayDigestProjection`:
+
+```text
+mapped batches:          id, data_json, revision, current_day, status
+mapped daily_observations: id, data_json, batch_id, date_local,
+                         observed_at, batch_revision
+trace:                   identity, ordinal, disposition, reason, parent,
+                         field paths, raw payload bytes/sha/content
+quarantine:              identity, ordinal, reason, field paths, parent
+                         source identity, owner mapping, resolution,
+                         raw payload bytes/sha/content
+manifest:                every immutable semantic field except
+                         payload_digest itself (and audit-only created_at)
+```
+
+Four new tamper tests prove `batches.status`, `daily_observations.batch_id`
+(FK-safe swap to an existing batch), `import_quarantine.parent_source_identity`
+and `import_manifests.importer_contract_version` mutations each fail replay
+with `target-drift`. No schema change was needed.
+
+### P2-4-F07.1 — sealed pre-import evidence, complete digest, fail-closed restore
+
+`createBackup` now seals `preImportContentDigest` (the complete destination
+content digest computed FROM the backup snapshot itself by the backup
+authority), `preImportCommit`, `sourceSha256` and `ownerMappingSha256`.
+`computeDestinationDigest` enumerates every authority table from
+`sqlite_schema` (all 22 tables, migration ledger included).
+`restoreDatabaseFromBackup` consumes ONLY the sealed evidence, verifies
+the backup SHA before any mutation, and FAILS CLOSED (throws) unless the
+post-restore complete digest matches the sealed pre-import digest with
+integrity ok and zero foreign-key violations; the receipt then carries the
+sealed fields and the restore log. The new evidence columns are persisted
+through forward migration v16 `registered-schema-v16-sealed-restore-evidence`
+(checksum `F79E3F38925EDAF819D7D9CEF19DF36E02FF9BD8258C8BFA980DA6FC5014366D`,
+literal version 16, guarded column inspection, runtime drift assert); v14
+(`0711127C...`) and v15 (`22DAC823...`) are byte-identical. Tests cover the
+happy path, backup tamper, and forged-evidence fail-closed.
+
+### Local verification at the third correction
+
+```text
+p2-4 gate scope (p2-4/p2-3b/migration/architecture/local-db/provenance/ci): 114 passed
+npm test (full agent suite): 60 files / 479 passed
+P2-3A / P2-3B migration gates: green (fixture manifest regenerated for v16)
+npm run check (typecheck): PASS
+npm run build: PASS
+npm run clean-source-gate: PASS
+git diff --check: PASS
+```
+
+The findings stay OPEN until an independent re-review closes them; the
+P2-4 Gate remains CLOSED.
 ## Second correction — F05.1 / F06 / F07.1 / F08
 
 - `P2-4-F05.1` — the replay digest binds manifest acceptance

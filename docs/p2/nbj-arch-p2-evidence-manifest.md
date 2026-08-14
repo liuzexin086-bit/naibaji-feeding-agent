@@ -875,6 +875,78 @@ P2-4-F07.1: OPEN / P1 — correction committed
 P2-4-F08: OPEN / P1 — correction committed
 P2-4 Gate: CLOSED
 ```
+## 18.9 P2-4 Final Narrow Re-review — REQUEST CHANGES and Third Correction
+
+The independent final narrow re-review of
+`bb1aa8aeba92971fd75bac0eb91865e5af7a6af4` (1 commit / 13 files) closed
+`P2-4-F04`, F05 tenant isolation, `P2-4-F06` (lossless duplicate-key raw
+evidence) and `P2-4-F07`, sealed `P2-4-F08` (v15 pinned to literal 15
+with `SEALED_V15_CHECKSUM` and runtime drift assert), and confirmed
+exact-SHA CI (run 31763824664; Full Agent 472 passed + 1 skipped = 473
+total; P2-4 gate 107/107). It returned `REQUEST CHANGES` with three P1
+items: `P2-4-F05.1` (replay digest projection incomplete: mapped target
+rows bind only `data_json`, quarantine omits
+`source_ordinal/parent_source_identity/owner_mapping_sha256`, manifest
+binds only counters/unknown keys/owner mapping/run state), `P2-4-F07.1`
+(restore proof not authoritative: caller-supplied `preImportDigest`,
+`computeDestinationDigest` covers 7 of 22 authority tables, restore not
+fail-closed) and `P2-4-F09` (duplicate-key quarantine identity derived
+from last-wins CJSON although contract 5.1 declares such rows not
+canonically serializable, and provable source IDs were bypassed).
+
+The third correction applies, in order:
+
+1. the docs-only micro-amendment in contract 5.2 (two frozen
+   duplicate-key identity rules plus known vector V7
+   `d102615572048ff6969643a2d4c8ae97ac00c171872140d990c7d1e36d3723d9`),
+2. forward migration v16 `registered-schema-v16-sealed-restore-evidence`
+   (checksum `F79E3F38925EDAF819D7D9CEF19DF36E02FF9BD8258C8BFA980DA6FC5014366D`,
+   literal version 16, runtime drift assert; v14 `0711127C...` and v15
+   `22DAC823...` unchanged; the P2-3B fixture manifest was regenerated to
+   record the new post-migration ledger/schema evidence and still passes
+   46/46),
+3. `P2-4-F05.1` — the frozen ReplayDigestProjection now binds every
+   authoritative persisted column of mapped batches and
+   daily_observations (`status/revision/current_day`;
+   `batch_id/date_local/observed_at/batch_revision`), all immutable
+   quarantine provenance (`source_ordinal`, `parent_source_identity`,
+   `owner_mapping_sha256`, raw payload bytes/content) and all immutable
+   manifest semantic fields except `payload_digest` itself; four new
+   tamper tests prove `batch.status`, `observation.batch_id`,
+   `quarantine.parent_source_identity` and
+   `manifest.importer_contract_version` mutations each fail replay with
+   `target-drift` (no schema change needed),
+4. `P2-4-F07.1` — the backup authority now seals `preImportContentDigest`
+   (computed from the backup snapshot itself), `preImportCommit`,
+   `sourceSha256` and `ownerMappingSha256`; `computeDestinationDigest`
+   covers every authority table enumerated from `sqlite_schema` (22
+   tables); restore consumes ONLY the sealed evidence, verifies the
+   backup SHA before mutation, and FAILS CLOSED (throws) unless the
+   post-restore digest matches the sealed pre-import digest with
+   integrity ok and zero foreign-key violations; the receipt is durable
+   via v16 columns; tests cover the happy path, backup tamper, and
+   forged-evidence fail-closed, and
+5. `P2-4-F09` — duplicate-key rows with a provable source id keep the
+   normal `record_identity` (disposition quarantined, raw slice
+   preserved); rows whose duplicate key is the id (or id unprovable)
+   receive `raw_duplicate_quarantine_identity` over the ORIGINAL raw row
+   slice SHA, never a last-wins CJSON; V7 is asserted byte-for-byte and
+   importer tests cover both rules.
+
+Local gates at the third correction checkpoint: p2-4 gate scope 114
+passed; full suite 60 files / 479 passed; P2-3A/P2-3B migration gates
+green; build, clean-source and `git diff --check` PASS. The findings stay
+OPEN until an independent re-review of this correction closes them; the
+P2-4 Gate stays CLOSED.
+
+```text
+P2-4 Implementation Authorization: OPEN
+P2-4 Implementation: CANDIDATE / CHANGES REQUIRED (third correction committed)
+P2-4-F05.1: OPEN / P1 — correction committed
+P2-4-F07.1: OPEN / P1 — correction committed
+P2-4-F09: OPEN / P1 — correction committed
+P2-4 Gate: CLOSED
+```
 ## 19. P2-3 Closure Contract Review and P2-3B Registration
 
 After the P2-3A Seal, a closure mapping returned `REQUEST CHANGES` for three

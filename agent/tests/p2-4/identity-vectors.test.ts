@@ -5,9 +5,12 @@ import {
   V1_SOURCE_KIND,
   V1_SOURCE_SHA256,
   V6_SOURCE_SHA256,
+  V7_RAW_ROW_SLICE,
+  V7_RAW_ROW_SLICE_SHA,
   assertKnownVectors,
   isProvableSourceId,
   quarantineIdentity,
+  rawDuplicateQuarantineIdentity,
   rawRowCanonicalSha256,
   recordIdentity,
   sha256Utf8,
@@ -103,5 +106,40 @@ describe("P2-4 frozen identity vectors", () => {
     expect(createHash("sha256").update(KNOWN_IDENTITY_VECTORS[0].bytes, "utf8").digest("hex")).toBe(
       KNOWN_IDENTITY_VECTORS[0].hash,
     );
+  });
+
+  it("reproduces the frozen V7 duplicate-key quarantine identity byte-for-byte", () => {
+    // contract 5.2: raw slice SHA must come from the ORIGINAL raw text,
+    // never from a CJSON of the last-wins parse
+    expect(sha256Utf8(V7_RAW_ROW_SLICE)).toBe("e977a32c23f0cf0d65dc87d91b9922bc1a0808f9cebcee7fcf5cbf046ab7adb3");
+    expect(V7_RAW_ROW_SLICE_SHA).toBe(sha256Utf8(V7_RAW_ROW_SLICE));
+    const identity = rawDuplicateQuarantineIdentity({
+      sourceKind: V1_SOURCE_KIND,
+      sourceSha256: V1_SOURCE_SHA256,
+      collection: COLLECTION,
+      originalRawRowSha256: V7_RAW_ROW_SLICE_SHA,
+      sourceOrdinal: 3,
+    });
+    expect(identity).toBe("d102615572048ff6969643a2d4c8ae97ac00c171872140d990c7d1e36d3723d9");
+    // the raw-slice identity must NOT equal a CJSON-based quarantine identity
+    const lastWins = rawRowCanonicalSha256({ id: "b", status: "active" });
+    const cjsonBased = quarantineIdentity({
+      sourceKind: V1_SOURCE_KIND,
+      sourceSha256: V1_SOURCE_SHA256,
+      collection: COLLECTION,
+      rawRowCanonicalSha256: lastWins,
+      sourceOrdinal: 3,
+    });
+    expect(identity).not.toBe(cjsonBased);
+    // rejected inputs: non-sha original hash and negative ordinal
+    expect(() =>
+      rawDuplicateQuarantineIdentity({
+        sourceKind: V1_SOURCE_KIND,
+        sourceSha256: V1_SOURCE_SHA256,
+        collection: COLLECTION,
+        originalRawRowSha256: "not-a-sha",
+        sourceOrdinal: 3,
+      }),
+    ).toThrow(/original_raw_row_sha256/);
   });
 });

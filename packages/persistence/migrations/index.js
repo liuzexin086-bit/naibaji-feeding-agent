@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { IMPORT_SCHEMA_V14, IMPORT_SCHEMA_V15, INITIAL_SCHEMA } from "./schema.js";
+import { IMPORT_SCHEMA_V14, IMPORT_SCHEMA_V15, IMPORT_SCHEMA_V16, INITIAL_SCHEMA } from "./schema.js";
 import {
   applyAuditedSchemaV12Structure,
   backfillLegacyFrozenSnapshots,
@@ -11,11 +11,14 @@ export const LEGACY_APPLICATION_VERSION = "legacy-unknown";
 export const SEALED_V12_NAME = "audited-schema-v12-baseline";
 export const SEALED_V12_CHECKSUM =
   "0B204D099EA0661A836F2F0DD34207A6CEF3B0C79C2FE86263F40FD381F4068E";
-export const CURRENT_MIGRATION_VERSION = 15;
+export const CURRENT_MIGRATION_VERSION = 16;
 export const SEALED_V14_NAME = "registered-schema-v14-import";
 export const SEALED_V15_NAME = "registered-schema-v15-import-evidence";
 export const SEALED_V15_CHECKSUM =
   "22DAC823AA20D7401C3BD5F4A6EA83CC9C037D2AAE3A14B56E1683A90490D08F";
+export const SEALED_V16_NAME = "registered-schema-v16-sealed-restore-evidence";
+export const SEALED_V16_CHECKSUM =
+  "F79E3F38925EDAF819D7D9CEF19DF36E02FF9BD8258C8BFA980DA6FC5014366D";
 
 const LEDGER_COLUMNS = [
   "version",
@@ -278,7 +281,35 @@ export function defineNaibajiMigrationChain(database) {
   if (v15.checksum !== SEALED_V15_CHECKSUM) {
     throw new Error("sealed v15 migration identity drift: " + v15.checksum);
   }
-  return Object.freeze([v12, v13, v14, v15]);
+  const v16 = defineMigration({
+    version: 16,
+    name: SEALED_V16_NAME,
+    canonicalBody: [
+      "NBJ-ARCH-P2/P2-4",
+      "schema-version=16",
+      "sealed-restore-evidence=pre-import-content-digest,pre-import-commit,source-sha256,owner-mapping-sha256",
+      "alter-sealed-restore-evidence=guarded-by-column-inspection",
+      "import-schema-v16-sql:",
+      IMPORT_SCHEMA_V16,
+      "startup-repair=prohibited-when-pending-zero",
+    ].join("\n"),
+    apply: () => {
+      const columns = database
+        .prepare("PRAGMA table_info(import_backup_evidence)")
+        .all()
+        .map((row) => String(row.name));
+      for (const column of ["pre_import_content_digest", "pre_import_commit", "source_sha256", "owner_mapping_sha256"]) {
+        if (!columns.includes(column)) {
+          database.exec("ALTER TABLE import_backup_evidence ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''");
+        }
+      }
+      database.exec(IMPORT_SCHEMA_V16);
+    },
+  });
+  if (v16.checksum !== SEALED_V16_CHECKSUM) {
+    throw new Error("sealed v16 migration identity drift: " + v16.checksum);
+  }
+  return Object.freeze([v12, v13, v14, v15, v16]);
 }
 
 export function runNaibajiMigrations(input) {

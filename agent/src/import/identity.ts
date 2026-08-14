@@ -94,6 +94,38 @@ export function quarantineIdentity(input: QuarantineIdentityInput): string {
   return sha256Utf8(serialized);
 }
 
+export interface RawDuplicateQuarantineIdentityInput {
+  readonly sourceKind: string;
+  readonly sourceSha256: string;
+  readonly collection: string;
+  /** SHA-256 of the ORIGINAL raw row slice text (duplicate occurrences included). */
+  readonly originalRawRowSha256: string;
+  readonly sourceOrdinal: number;
+}
+
+/**
+ * Contract 5.2 (P2-4-F09 freeze): quarantine identity for a duplicate-key
+ * row whose source id is ambiguous/unprovable. Binds the ORIGINAL raw row
+ * slice SHA-256 - never a CJSON of the last-wins parse, because a
+ * duplicate-key row is not canonically serializable.
+ */
+export function rawDuplicateQuarantineIdentity(input: RawDuplicateQuarantineIdentityInput): string {
+  assertSourceSha256(input.sourceSha256);
+  assertSafeInteger(input.sourceOrdinal, "source_ordinal");
+  if (!SHA_HEX.test(input.originalRawRowSha256)) {
+    throw new IdentityError("original_raw_row_sha256 must be 64 lowercase hex chars");
+  }
+  const serialized = canonicalJson([
+    "quarantine-raw",
+    input.sourceKind,
+    input.sourceSha256,
+    input.collection,
+    input.originalRawRowSha256,
+    input.sourceOrdinal,
+  ]);
+  return sha256Utf8(serialized);
+}
+
 export interface IdentityVector {
   readonly id: string;
   readonly kind: "record" | "quarantine";
@@ -141,6 +173,13 @@ const V5_BYTES =
 const V6_BYTES =
   '["quarantine","json-database-v1","6653b072ca9d89fec4eaa7e88a06bcaa6860b6ad3fd7d01020b57e0cd5b12e47","dailyRecords","' +
   V5_RAW_ROW_SHA +
+  '",3]';
+/** V7: contract 5.2 raw-slice-bound duplicate-key quarantine identity. */
+export const V7_RAW_ROW_SLICE = '{"id":"a","id":"b","status":"active"}';
+export const V7_RAW_ROW_SLICE_SHA = sha256Utf8(V7_RAW_ROW_SLICE);
+const V7_BYTES =
+  '["quarantine-raw","json-database-v1","3b5d5c3712955042212316173ccf37bea9d0f9b1c1e2c3d4e5f60718293a4b5c","dailyRecords","' +
+  V7_RAW_ROW_SLICE_SHA +
   '",3]';
 
 export const KNOWN_IDENTITY_VECTORS: readonly IdentityVector[] = [
@@ -192,6 +231,13 @@ export const KNOWN_IDENTITY_VECTORS: readonly IdentityVector[] = [
     "6c55d8371e3befe0e3684662e94cc77bad4a932cd89ccac0df3302fed5cb5f0e",
     "quarantine",
     "cross-source separation: same row/collection/ordinal, different source_sha256; must differ from V5",
+  ),
+  vector(
+    "V7",
+    V7_BYTES,
+    "d102615572048ff6969643a2d4c8ae97ac00c171872140d990c7d1e36d3723d9",
+    "quarantine",
+    "raw-slice-bound duplicate-key quarantine identity: raw row slice {\"id\":\"a\",\"id\":\"b\",\"status\":\"active\"} at ordinal 3; binds original_raw_row_sha256 of the ORIGINAL slice text, never a last-wins CJSON",
   ),
 ];
 

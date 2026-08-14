@@ -26,6 +26,8 @@ export interface DuplicateKeyRowEvidence {
   readonly rawText: string;
   readonly rawSha256: string;
   readonly byteLength: number;
+  /** Canonical key names that occur more than once inside this row (contract 5.2). */
+  readonly duplicateKeys: readonly string[];
 }
 
 export interface UnknownTopLevelValue {
@@ -106,10 +108,18 @@ export function readJsonV1Source(path: string): JsonV1Source {
   // other duplicate (envelope, meta, or unknown top-level structure) makes
   // the source non-canonically serializable and fails closed
   const duplicateKeyRowKeys = new Set<string>();
+  const duplicateKeysByRow = new Map<string, string[]>();
   for (const duplicatePath of duplicatePaths) {
     const rowKey = rowKeyOf(duplicatePath);
     if (rowKey !== null) {
       duplicateKeyRowKeys.add(rowKey);
+      const keyMatch = /\["([^"]+)"\]$/.exec(duplicatePath);
+      if (keyMatch) {
+        const key = keyMatch[1] as string;
+        const keys = duplicateKeysByRow.get(rowKey) ?? [];
+        if (!keys.includes(key)) keys.push(key);
+        duplicateKeysByRow.set(rowKey, keys);
+      }
     } else {
       throw new SourceReadError("malformed-json: duplicate key outside collection rows at " + duplicatePath);
     }
@@ -131,6 +141,7 @@ export function readJsonV1Source(path: string): JsonV1Source {
       rawText,
       rawSha256: createHash("sha256").update(rawText, "utf8").digest("hex"),
       byteLength: Buffer.byteLength(rawText, "utf8"),
+      duplicateKeys: duplicateKeysByRow.get(rowKey) ?? [],
     });
   }
   const unknownTopLevelValues: UnknownTopLevelValue[] = [];
