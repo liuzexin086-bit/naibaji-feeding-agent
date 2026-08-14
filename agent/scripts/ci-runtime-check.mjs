@@ -64,7 +64,7 @@ async function main() {
     ]);
     const agentVersion = await fetchJson("http://127.0.0.1:18080/version");
     assertEqual(agentVersion.commit, expectedCommit, "agent.commit");
-    assertEqual(agentVersion.schemaVersion, 15, "agent.schemaVersion");
+    assertEqual(agentVersion.schemaVersion, 16, "agent.schemaVersion");
     assertEqual(agentVersion.decisionPolicyVersion, "execution-contract-v1", "agent.decisionPolicyVersion");
     assertEqual(agentVersion.feedingModelSourceSha256, sha256File(resolve(repoRoot, "feeding-model.js")), "agent.feedingModelSourceSha256");
     assertEqual(agentVersion.v5LiteModelSourceSha256, sha256File(resolve(repoRoot, "v5lite-model.js")), "agent.v5LiteModelSourceSha256");
