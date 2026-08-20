@@ -2,7 +2,7 @@
 /**
  * P2-6 golden-vector generator (deterministic).
  *
- * Requires the BASELINE parity oracle E:/plan/feeding-model.js and produces
+ * Requires the BASELINE parity oracle <repo-root>/feeding-model.js (resolved
  * >= 100 vectors over a defined input space:
  *   - every age 3..21 (19) x creep grade none/low/medium/high/excellent (5) = 95
  *   - plus boundary cases (below-3 / above-21 / headCount 0 / fractional
@@ -28,7 +28,8 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const BASELINE = require('E:/plan/feeding-model.js');
+// Resolve the baseline parity oracle relative to this script (works on any checkout path).
+const BASELINE = require(path.resolve(__dirname, '../../../feeding-model.js'));
 
 const WEIGHT_STANDARD = BASELINE.WEIGHT_STANDARD;
 const CREEP_GRADE_ORDER = ['none', 'low', 'medium', 'high', 'excellent'];
