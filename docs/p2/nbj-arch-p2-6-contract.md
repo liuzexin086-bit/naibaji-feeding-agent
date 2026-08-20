@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-6 Feeding Model Single Source Contract Registration
 
-Status: `P2-6 CONTRACT REGISTRATION — MICRO-CORRECTION COMMITTED (P2-6-F01.1 / F01.2 / F01.3) — RE-REVIEW PENDING — IMPLEMENTATION NOT AUTHORIZED`
+Status: `P2-6 CONTRACT REGISTRATION — PASS (final) — P2-6 Implementation: PASS — P2-6 GATE OPEN (final closure seal, see §13.4)`
 
 Independent contract registration review of `19ae8322fb412304593cbdbbcc5f2968d34d312e` returned `REQUEST CHANGES` with `P2-6-F01` (target authority contradicted the frozen Authority Map; root transitional sources and V5-Lite were promoted to authority), `P2-6-F02` (missing frozen ≥100 golden-vector parity and Expected Delta pre-approval governance), and `P2-6-F03` (`.bak.*` incorrectly described as tracked). The correction is recorded in §13.2; the findings stay OPEN until an independent re-review closes them.
 
@@ -400,3 +400,34 @@ Independent re-review of `cdbbd9d27f908bd705d284df4eda5047556c651f` closed `P2-6
 - `P2-6-F01.3` — §6 froze "Backend -> root sources via re-export only" as a target consumption rule. Fixed: §6 is split into §6.1 baseline consumption facts and §6.2 the P2-6 TARGET consumption boundary (production consumers consume only the package authority or its verified derived/public API; the root re-export must be re-pointed to the package; the root parity fixture is never a production dependency).
 
 The micro-correction stays docs-only (only `docs/p2/nbj-arch-p2-6-contract.md`); `P2-6-F01` remains OPEN until the independent re-review confirms the root-authority target semantics are gone. Implementation authorization and the P2-6 Gate remain CLOSED.
+
+### 13.4 Final implementation independent review and P2-6 Final Closure Seal — PASS (P2-6 Gate OPEN)
+
+Independent implementation review of the candidate chain `94137fa -> 618431b -> a1edb8f -> 5c9c525` returned `REQUEST CHANGES` (`P2-6-F04` ignored/on-disk F1/F2/F3 fail-open, `P2-6-F05` full-inventory provenance incomplete, `P2-6-F06` root oracle still a production build dependency, `P2-6-F07` stale docs). The narrow correction chain `5c9c525 -> 962a354 -> f59a30c -> ae8d2cb -> d000a09` closed all four: F1/F2 pipeline-owned with fail-closed gate, F3 eliminated, full 12-item artifact-inventory provenance (canonical identity vs runtime presence separated; `write-provenance.mjs` / `agent-provenation.json` / `web-provenance.json` / `ci-runtime-check.mjs` chain), root `feeding-model.js` removed from the production build, and docs updated.
+
+Final independent re-review of `ae8d2cb -> d000a09` (run `32352472468`, exact-SHA success) returned `PASS WITH NON-BLOCKING FINDING`, closing `P2-6-F05` and all of F01-F07:
+
+```text
+P2-6-F01 / F01.1 / F01.2 / F01.3: CLOSED / PASS
+P2-6-F02: CLOSED / PASS
+P2-6-F03: CLOSED / PASS
+P2-6-F04: CLOSED / PASS
+P2-6-F05 (incl. F05.1/F05.2/F05.3): CLOSED / PASS
+P2-6-F06: CLOSED / PASS
+P2-6-F07: CLOSED / PASS
+P2-6-F08: OPEN / P2 / NON-BLOCKING (test-quality: use computeWebProvenance;
+          assert runtimePresence sha == identity sha for present artifacts) -
+          resolved by a follow-up test-quality commit
+
+New P0: 0
+Open P1: 0
+
+P2-6 Contract Registration: PASS
+P2-6 Implementation: PASS
+P2-6 Gate: OPEN
+P2-6 overall: CLOSED / PASS
+```
+
+This docs-only seal freezes `d000a09e56e79d4d58d5fb55306ec643f2203d63` and run
+`32352472468`. It does not open P2-7 implementation; P2-7 Contract/Stage
+Authorization opens only after a separate, independently reviewed seal.

@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 P2-6 Feeding Model Single Source Implementation
 
-Status: `IMPLEMENTATION CANDIDATE — INDEPENDENT REVIEW PENDING — GATE NOT SELF-CERTIFYING`
+Status: `P2-6 IMPLEMENTATION — PASS / P2-6 GATE OPEN (independent final review of d000a09e56e79d4d58d5fb55306ec643f2203d63, run 32352472468)`
 
 Contract registration: `PASS` (frozen `nbj-arch-p2-6-contract.md`, micro-correction chain `P2-6-F01.1 / F01.2 / F01.3`)
 
@@ -202,14 +202,41 @@ implementation review remain required.
 
 ```text
 P2-6 Feeding Model Single Source
-  Stage / Contract Registration Authorization: OPEN
+  Stage / Contract Registration Authorization: CLOSED / COMPLETED
   Contract Registration: PASS
-  Implementation Authorization: OPEN
-  Implementation: CANDIDATE / INDEPENDENT REVIEW PENDING / GATE NOT SELF-CERTIFYING
-  P2-6 Gate: CLOSED
+  Implementation Authorization: OPEN (completed)
+  Implementation: PASS
+  P2-6 Gate: OPEN
 
-P2-4 Gate: OPEN
+P2-4 Gate: OPEN (frozen)
 P2-7 SOP authority: CLOSED
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+## Final independent review — PASS and P2-6 Gate OPEN
+
+Independent implementation review of the candidate chain `94137fa -> 618431b ->
+a1edb8f -> 5c9c525` returned `REQUEST CHANGES` (P2-6-F04/F05/F06/F07). The narrow
+correction chain `5c9c525 -> 962a354 -> f59a30c -> ae8d2cb -> d000a09` closed all
+four (F1/F2 pipeline-owned fail-closed, F3 eliminated, full 12-item provenance
+with canonical identity vs runtime presence, root oracle removed from production
+build). Final independent re-review of `d000a09` (run `32352472468`) returned
+`PASS WITH NON-BLOCKING FINDING`: P2-6-F01 through P2-6-F07 CLOSED/PASS;
+P2-6-F08 OPEN/P2 non-blocking (test-quality; resolved by a follow-up test commit).
+New P0: 0; Open P1: 0.
+
+```text
+P2-6 Contract Registration: PASS
+P2-6 Implementation: PASS
+P2-6 Feeding Model Single Source Gate: OPEN
+P2-6 overall: CLOSED / PASS
+
+P2-7 SOP Authority: CLOSED (requires separate, independently reviewed seal)
 Runtime/Cutover Gate: CLOSED
 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED

@@ -1019,12 +1019,20 @@ by `write-provenance.mjs` and verified by the gate), `P2-6-F06` (root
 preparation/provenance/Docker build locate the package authority without the
 parity oracle; Docker no longer COPYs `feeding-model.js`; negative architecture
 test `prod-build-no-root-oracle.test.ts`), and `P2-6-F07` (stale audit records ->
-fixed here). The P2-6 Gate remains CLOSED pending the correction re-review.
+fixed here). Final independent re-review (F05 closure) of `ae8d2cb -> d000a09`
+(run `32352472468`) returned `PASS WITH NON-BLOCKING FINDING`, closing F01-F07;
+P2-6-F08 (P2, non-blocking test-quality) was resolved by a follow-up test commit.
+This is the P2-6 FINAL CLOSURE SEAL:
 
 ```text
 P2-6 Contract Registration: PASS
-P2-6 Implementation: CANDIDATE / REQUEST CHANGES (correction committed) — RE-REVIEW PENDING
-P2-6 Gate: CLOSED
+P2-6 Implementation: PASS
+P2-6 Feeding Model Single Source Gate: OPEN
+P2-6 overall: CLOSED / PASS
+
+seal baseline: d000a09e56e79d4d58d5fb55306ec643f2203d63 (run 32352472468, exact-SHA success)
+P2-6-F01..F07: CLOSED / PASS  |  P2-6-F08: CLOSED / P2 (test-quality)
+New P0: 0  |  Open P1: 0
 
 P2-7 SOP Authority: CLOSED
 Runtime/Cutover Gate: CLOSED
