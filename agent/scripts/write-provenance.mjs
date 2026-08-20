@@ -52,12 +52,16 @@ async function resolveSourceRoot(agentRoot) {
 // divergent gitignored web/lib/feeding.ts reappears on disk (no pre-approved
 // Expected Delta exists).
 async function buildArtifactInventory(repoRoot) {
-  const present = async (relativePath, disposition) => {
+  // Items absent in a specific context (e.g. the production Docker image does
+  // not ship the root parity oracle / backend / optimizer) are recorded as
+  // { disposition, sha256: null, present: false } - honest, not a throw.
+  // In the repo context every non-eliminated item is present.
+  const entry = async (relativePath, disposition) => {
     const abs = resolve(repoRoot, relativePath);
     if (!(await exists(abs))) {
-      throw new Error("NBJ_P2_6_INVENTORY_MISSING:" + relativePath);
+      return { disposition, sha256: null, present: false };
     }
-    return { disposition, sha256: await sha256InventoryFile(abs) };
+    return { disposition, sha256: await sha256InventoryFile(abs), present: true };
   };
   if (await exists(resolve(repoRoot, "web", "lib", "feeding.ts"))) {
     throw new Error(
@@ -66,18 +70,18 @@ async function buildArtifactInventory(repoRoot) {
     );
   }
   return {
-    packageSource: await present("packages/feeding-model/src/index.ts", "authority"),
-    packageDist: await present("packages/feeding-model/dist/index.js", "derived"),
-    baselineOracle: await present("feeding-model.js", "parity-oracle"),
-    v5ShadowSource: await present("v5lite-model.js", "shadow"),
-    agentGeneratedCjs: await present("agent/.generated-models/feeding-model.cjs", "derived"),
-    webGeneratedMin: await present("agent/.generated-web/feeding-model.min.js", "derived"),
-    rootSyncedMin: await present("feeding-model.min.js", "derived"),
-    containerCopy: await present("agent/container-models/feeding-model.cjs", "derived-pipeline-owned"),
-    publicCopy: await present("agent/public/feeding-model.min.js", "derived-pipeline-owned"),
-    webConsumer: { disposition: "eliminated", sha256: null },
-    productionWrapper: await present("backend/src/models/feedingModel.js", "re-export"),
-    optimizerSurrogate: await present("optimizer/model.py", "experimental-excluded"),
+    packageSource: await entry("packages/feeding-model/src/index.ts", "authority"),
+    packageDist: await entry("packages/feeding-model/dist/index.js", "derived"),
+    baselineOracle: await entry("feeding-model.js", "parity-oracle"),
+    v5ShadowSource: await entry("v5lite-model.js", "shadow"),
+    agentGeneratedCjs: await entry("agent/.generated-models/feeding-model.cjs", "derived"),
+    webGeneratedMin: await entry("agent/.generated-web/feeding-model.min.js", "derived"),
+    rootSyncedMin: await entry("feeding-model.min.js", "derived"),
+    containerCopy: await entry("agent/container-models/feeding-model.cjs", "derived-pipeline-owned"),
+    publicCopy: await entry("agent/public/feeding-model.min.js", "derived-pipeline-owned"),
+    webConsumer: { disposition: "eliminated", sha256: null, present: false },
+    productionWrapper: await entry("backend/src/models/feedingModel.js", "re-export"),
+    optimizerSurrogate: await entry("optimizer/model.py", "experimental-excluded"),
   };
 }
 

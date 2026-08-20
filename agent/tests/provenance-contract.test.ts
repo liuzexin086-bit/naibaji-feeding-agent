@@ -46,7 +46,7 @@ describe("build provenance contract", () => {
       expect(agent.artifactInventory[key], key).toMatchObject({ disposition: expect.any(String) });
       expect(agent.artifactInventory[key].sha256, key).toMatch(/^[0-9a-fA-F]{64}$/);
     }
-    expect(agent.artifactInventory.webConsumer).toEqual({ disposition: "eliminated", sha256: null });
+    expect(agent.artifactInventory.webConsumer).toEqual({ disposition: "eliminated", sha256: null, present: false });
     expect(web.artifactInventory).toEqual(agent.artifactInventory);
   });
 
