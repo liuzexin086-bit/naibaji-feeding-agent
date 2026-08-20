@@ -1,1 +1,1 @@
-module.exports = require('../../../feeding-model')
+module.exports = require('../../../packages/feeding-model/dist/index.js')

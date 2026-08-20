@@ -108,11 +108,14 @@ five-column ledger; that candidate state remains independently review-pending.
 
 | Artifact | Role | SHA-256 |
 |---|---|---|
-| `feeding-model.js` | tracked production source at baseline | `35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d` |
-| generated Agent `feeding-model.cjs` | derived; byte-equivalent to source | `35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d` |
+| `feeding-model.js` | tracked baseline production source / parity oracle (not target authority) | `35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d` |
+| `packages/feeding-model/src/index.ts` | P2-6 single TS source authority | `1350534367dc7efdfffe87e06b18b7a0d0a85c809a3c327b27d93949d245f92d` |
+| `packages/feeding-model/dist/index.js` | compiled package authority artifact | `8d9064d15657d312dcdce65e2dc0aaa1638694b8a1bd3be2ca67f56e579f56cd` |
+| `packages/feeding-model/golden-vectors.json` | golden-vector parity suite (109 vectors) | `4e651481c92460e5a7165592f6f81ef338347f64de495c2bd2ec97c7ef0beaf0` |
+| generated Agent `feeding-model.cjs` | derived; byte-equivalent to package dist | `8d9064d15657d312dcdce65e2dc0aaa1638694b8a1bd3be2ca67f56e579f56cd` |
 | `v5lite-model.js` | tracked V5-Lite shadow source | `124385a11fd247013c7c4dd14fe95642ddebf0b9621a797e72eb91794ec16eae` |
 | generated Agent `v5lite-model.cjs` | derived; byte-equivalent to source | `124385a11fd247013c7c4dd14fe95642ddebf0b9621a797e72eb91794ec16eae` |
-| generated/tracked Web `feeding-model.min.js` | derived minified artifact | `00fc4c4e828901dc648548842549e14e0bfdd14f97883a78f89d0094b9208893` |
+| generated/tracked Web `feeding-model.min.js` | derived minified artifact (from package dist) | `7fb29e2977f680a393fabef6058a01f9ad2e27a6a8ce380ac7740e17aa4ab240` |
 | `agent/ui/liquid-index.html` | tracked production UI source | `0ee23cfe4ce35b4c190c9beec55142380fd2be4d87359cbdb19362cbc4be0deb` |
 | `agent/src/sop/engine.ts` | current default SOP engine/source | `f520d9af5e2203d6611e9b9737a5bf3cf4fdfea4777f647321eb7b5ebf30f711` |
 | `agent/src/sop/types.ts` | current SOP types | `e5ef32d96418290971a5d100d0a2a559cd917c16d3dc577139223d9341e2618c` |

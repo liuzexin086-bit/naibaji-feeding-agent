@@ -72,6 +72,10 @@ jobs:
         working-directory: agent
         run: npm run p2-4-legacy-json-import-gate
 
+      - name: P2-6 Feeding Model Single Source gate
+        working-directory: agent
+        run: npm run p2-6-feeding-model-single-source-gate
+
       - name: P0 release gate
         working-directory: agent
         run: npm run p0-release-gate

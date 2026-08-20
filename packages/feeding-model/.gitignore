@@ -1,0 +1,6 @@
+# Deliberately re-include the compiled dist/ (root .gitignore ignores **/dist/).
+# Per P2-6 contract, dist is the commit-ready built authority boundary so
+# consumers can require the package from its compiled output.
+!dist/
+!dist/**
+node_modules/

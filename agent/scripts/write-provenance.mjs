@@ -49,7 +49,14 @@ export async function computeProvenance({
   sourceRoot,
 } = {}) {
   const resolvedSourceRoot = sourceRoot ?? await resolveSourceRoot(agentRoot);
-  const feedingModelSourceSha256 = await sha256File(resolve(resolvedSourceRoot, "feeding-model.js"));
+  // P2-6 single source: the source authority is packages/feeding-model/src/index.ts
+  // (the single TS authority per contract §5.2/§6.2); the root feeding-model.js is
+  // only the migration parity oracle and is not the provenance source identity.
+  const packageSource = resolve(resolvedSourceRoot, "packages", "feeding-model", "src", "index.ts");
+  if (!(await exists(packageSource))) {
+    throw new Error("NBJ_PACKAGE_AUTHORITY_SOURCE_NOT_FOUND");
+  }
+  const feedingModelSourceSha256 = await sha256File(packageSource);
   const v5LiteModelSourceSha256 = await sha256File(resolve(resolvedSourceRoot, "v5lite-model.js"));
   const feedingModelArtifactSha256 = await sha256File(resolve(agentRoot, ".generated-models", "feeding-model.cjs"));
   const v5LiteModelArtifactSha256 = await sha256File(resolve(agentRoot, ".generated-models", "v5lite-model.cjs"));

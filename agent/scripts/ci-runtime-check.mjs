@@ -66,7 +66,7 @@ async function main() {
     assertEqual(agentVersion.commit, expectedCommit, "agent.commit");
     assertEqual(agentVersion.schemaVersion, 16, "agent.schemaVersion");
     assertEqual(agentVersion.decisionPolicyVersion, "execution-contract-v1", "agent.decisionPolicyVersion");
-    assertEqual(agentVersion.feedingModelSourceSha256, sha256File(resolve(repoRoot, "feeding-model.js")), "agent.feedingModelSourceSha256");
+    assertEqual(agentVersion.feedingModelSourceSha256, sha256File(resolve(repoRoot, "packages", "feeding-model", "src", "index.ts")), "agent.feedingModelSourceSha256");
     assertEqual(agentVersion.v5LiteModelSourceSha256, sha256File(resolve(repoRoot, "v5lite-model.js")), "agent.v5LiteModelSourceSha256");
 
     const agentModelHash = docker([
@@ -88,7 +88,7 @@ async function main() {
     ]);
     const webVersion = await fetchJson("http://127.0.0.1:18081/version");
     assertEqual(webVersion.commit, expectedCommit, "web.commit");
-    assertEqual(webVersion.feedingModelSourceSha256, sha256File(resolve(repoRoot, "feeding-model.js")), "web.feedingModelSourceSha256");
+    assertEqual(webVersion.feedingModelSourceSha256, sha256File(resolve(repoRoot, "packages", "feeding-model", "src", "index.ts")), "web.feedingModelSourceSha256");
 
     const webModelHash = docker([
       "exec", webName, "sh", "-c", "sha256sum /usr/share/nginx/html/feeding-model.min.js",

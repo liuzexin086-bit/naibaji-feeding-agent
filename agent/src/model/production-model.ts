@@ -1,7 +1,12 @@
-// The protected CommonJS models are generated from tracked root sources into
-// agent/.generated-models before check/test/build. The relative path is stable
-// from both src/model and dist/model, so the compiled Agent runtime loads the
-// same artifact without relying on an absolute filesystem location.
+// P2-6 single-source (nbj-arch-p2-6-contract.md §5.2/§6.2): the protected
+// CommonJS feeding model is generated from the packages/feeding-model
+// publication authority into agent/.generated-models/feeding-model.cjs (a
+// byte-copy of the package dist) before check/test/build. The root
+// feeding-model.js is only the migration parity oracle (§4.1) and is no longer
+// a production dependency. v5lite-model.cjs stays a shadow-only copy of the
+// root v5lite-model.js baseline. The relative path is stable from both
+// src/model and dist/model, so the compiled Agent runtime loads the same
+// artifact without relying on an absolute filesystem location.
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.
 import feedingModel from "../../.generated-models/feeding-model.cjs";
 // @ts-expect-error The protected JavaScript model intentionally has no TS declarations.

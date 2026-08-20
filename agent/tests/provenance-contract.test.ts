@@ -22,7 +22,7 @@ describe("build provenance contract", () => {
       schemaVersion: 16,
       decisionPolicyVersion: "execution-contract-v1",
     });
-    expect(agent.feedingModelSourceSha256).toBe(sha256File(resolve(repoRoot, "feeding-model.js")));
+    expect(agent.feedingModelSourceSha256).toBe(sha256File(resolve(repoRoot, "packages", "feeding-model", "src", "index.ts")));
     expect(agent.v5LiteModelSourceSha256).toBe(sha256File(resolve(repoRoot, "v5lite-model.js")));
     expect(agent.feedingModelArtifactSha256).toBe(sha256File(resolve(agentRoot, ".generated-models", "feeding-model.cjs")));
     expect(agent.v5LiteModelArtifactSha256).toBe(sha256File(resolve(agentRoot, ".generated-models", "v5lite-model.cjs")));

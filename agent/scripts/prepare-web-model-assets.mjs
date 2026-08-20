@@ -30,6 +30,13 @@ function sha256Text(text) {
   return createHash("sha256").update(text, "utf8").digest("hex").toUpperCase();
 }
 
+// P2-6 single-source (nbj-arch-p2-6-contract.md §5.2/§6.2): the Web min
+// artifact is derived ONE-WAY from the packages/feeding-model publication
+// authority (dist/index.js), never from the root parity oracle feeding-model.js.
+// syncRoot still writes the tracked root feeding-model.min.js, which becomes the
+// synced copy of the generated Web artifact. Behavior stays parity-identical
+// because the package port is byte/behavior-equal to the baseline (golden-vector
+// parity, contract §8.2).
 export async function generateWebModelArtifact({
   agentRoot = DEFAULT_AGENT_ROOT,
   sourceRoot,
@@ -37,8 +44,12 @@ export async function generateWebModelArtifact({
   syncRoot = false,
 } = {}) {
   const resolvedSourceRoot = sourceRoot ?? await resolveSourceRoot(agentRoot);
-  const source = (await readFile(resolve(resolvedSourceRoot, "feeding-model.js"), "utf8"))
-    .replace(/\r\n/g, "\n");
+  // Source of truth for the Web artifact is the package compiled authority.
+  const packageDist = resolve(resolvedSourceRoot, "packages", "feeding-model", "dist", "index.js");
+  if (!(await exists(packageDist))) {
+    throw new Error("NBJ_PACKAGE_AUTHORITY_DIST_NOT_FOUND");
+  }
+  const source = (await readFile(packageDist, "utf8")).replace(/\r\n/g, "\n");
   const result = await minify(source, {
     compress: true,
     mangle: true,
@@ -50,6 +61,7 @@ export async function generateWebModelArtifact({
   await mkdir(dirname(resolvedOutput), { recursive: true });
   await writeFile(resolvedOutput, code, "utf8");
   if (syncRoot) {
+    // Tracked root feeding-model.min.js is the synced copy of the Web artifact.
     await writeFile(resolve(resolvedSourceRoot, "feeding-model.min.js"), code, "utf8");
   }
   return {
@@ -69,7 +81,7 @@ async function main() {
     sourceRoot,
     syncRoot,
   });
-  console.log(`web model artifact ok sha256=${result.artifactSha256}`);
+  console.log("web model artifact ok sha256=" + result.artifactSha256);
 }
 
 if (

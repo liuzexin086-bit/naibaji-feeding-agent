@@ -1,0 +1,11 @@
+{
+  "formatVersion": 1,
+  "packageName": "@naibaji/feeding-model",
+  "packageVersion": "0.1.0",
+  "behaviorVersion": "naibaji-v2",
+  "sourceSha256": "1350534367dc7efdfffe87e06b18b7a0d0a85c809a3c327b27d93949d245f92d",
+  "baselineSha256": "35a0dd40e66d4c1fc4dc4ef6fb20cf44c28f70aa284eb5dadfe6f05f0e760c6d",
+  "goldenVectorsSha256": "4e651481c92460e5a7165592f6f81ef338347f64de495c2bd2ec97c7ef0beaf0",
+  "artifacts": {},
+  "generatedAt": ""
+}

@@ -31,6 +31,7 @@ describe("CI contract", () => {
       "npm run p2-3a-migration-gate",
       "npm run p2-3b-migration-ownership-gate",
       "npm run p2-4-legacy-json-import-gate",
+      "npm run p2-6-feeding-model-single-source-gate",
       "npm run p0-release-gate",
       "npm run p1-safety-gate",
       "npm run build",
@@ -54,6 +55,7 @@ describe("CI contract", () => {
     expect(workflow).toContain("P2-3A Migration gate");
     expect(workflow).toContain("P2-3B Migration ownership gate");
     expect(workflow).toContain("P2-4 Legacy JSON Import gate");
+    expect(workflow).toContain("P2-6 Feeding Model Single Source gate");
   });
 
   it("verifies runtime provenance against image files and UI markers", () => {
