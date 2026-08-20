@@ -36,6 +36,24 @@ function assertEqual(actual, expected, label) {
   }
 }
 
+// F05 (contract §8.1/§8.4): the runtime artifactInventory must EQUAL the
+// canonical checkpoint identity in the committed publication-manifest. A
+// dropped/changed inventory SHA, or ruffling present:false over a canonical
+// identity, fails the runtime check closed.
+function canonicalArtifacts() {
+  const manifest = JSON.parse(readFileSync(
+    resolve(repoRoot, "packages", "feeding-model", "publication-manifest.json"), "utf8",
+  ));
+  if (!manifest.artifacts) throw new Error("NBJ_CI_MANIFEST_ARTIFACTS_MISSING");
+  return manifest.artifacts;
+}
+function assertInventoryMatches(actual, label) {
+  const expected = canonicalArtifacts();
+  if (!actual || JSON.stringify(actual) !== JSON.stringify(expected)) {
+    throw new Error(`NBJ_CI_PROVENANCE_INVENTORY_MISMATCH:${label}`);
+  }
+}
+
 async function main() {
   const expectedCommit = process.argv[2] ?? "unknown";
   const agentImage = process.argv[3] ?? "naibaji-feeding-agent:local";
@@ -78,6 +96,10 @@ async function main() {
     assertEqual(agentVersion.feedingModelArtifactSha256, agentModelHash, "agent.feedingModelArtifactSha256");
     assertEqual(agentVersion.v5LiteModelArtifactSha256, agentV5Hash, "agent.v5LiteModelArtifactSha256");
     assertEqual(agentVersion.uiSha256, sha256File(resolve(agentRoot, "ui", "liquid-index.html")), "agent.uiSha256");
+    // F05: full-inventory canonical identity must match the committed manifest
+    assertInventoryMatches(agentVersion.artifactInventory, "agent.artifactInventory");
+    // and the identity cross-checks the artifact actually verified in the container
+    assertEqual(agentVersion.artifactInventory.agentGeneratedCjs.sha256, agentVersion.feedingModelArtifactSha256, "agent.inventory.agentGeneratedCjs");
 
     docker([
       "run", "-d", "--name", webName, "-p", "127.0.0.1:18081:8080",
@@ -99,6 +121,9 @@ async function main() {
     assertEqual(webVersion.feedingModelArtifactSha256, webModelHash, "web.feedingModelArtifactSha256");
     assertEqual(webVersion.uiSha256, webUiHash, "web.uiSha256");
     assertEqual(webVersion.uiSha256, sha256File(resolve(agentRoot, "ui", "liquid-index.html")), "web.uiSha256.source");
+    // F05: web inventory identity must equal the committed manifest
+    assertInventoryMatches(webVersion.artifactInventory, "web.artifactInventory");
+    assertEqual(webVersion.artifactInventory.webGeneratedMin.sha256, webVersion.feedingModelArtifactSha256, "web.inventory.webGeneratedMin");
 
     const response = await fetch("http://127.0.0.1:18081/");
     const html = await response.text();

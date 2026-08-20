@@ -23,8 +23,8 @@ async function sha256File(path) {
   return sha256Text(await readFile(path, "utf8"));
 }
 
-// EOL-invariant canonical hash (LF-normalized) for the full-inventory map so
-// provenance values match the committed publication-manifest on any checkout.
+// EOL-invariant canonical hash (LF-normalized) so provenance values match the
+// committed publication-manifest on any checkout (git eol=lf vs core.autocrlf).
 async function sha256InventoryFile(path) {
   const text = (await readFile(path, "utf8")).replace(/\r\n/g, "\n");
   return sha256Text(text).toLowerCase();
@@ -46,49 +46,96 @@ async function resolveSourceRoot(agentRoot) {
   throw new Error("NBJ_MODEL_SOURCE_ROOT_NOT_FOUND");
 }
 
-// F05 (contract §8.1/§9): machine-verifiable FULL 12-item artifact inventory.
-// Every item in contract §3.5 carries its own SHA-256 identity + disposition.
-// webConsumer must be ELIMINATED (F3): the provenance pipeline fails if the
-// divergent gitignored web/lib/feeding.ts reappears on disk (no pre-approved
-// Expected Delta exists).
-async function buildArtifactInventory(repoRoot) {
-  // Items absent in a specific context (e.g. the production Docker image does
-  // not ship the root parity oracle / backend / optimizer) are recorded as
-  // { disposition, sha256: null, present: false } - honest, not a throw.
-  // In the repo context every non-eliminated item is present.
-  const entry = async (relativePath, disposition) => {
-    const abs = resolve(repoRoot, relativePath);
-    if (!(await exists(abs))) {
-      return { disposition, sha256: null, present: false };
-    }
-    return { disposition, sha256: await sha256InventoryFile(abs), present: true };
-  };
-  if (await exists(resolve(repoRoot, "web", "lib", "feeding.ts"))) {
-    throw new Error(
-      "NBJ_P2_6_F3_PRESENT:web/lib/feeding.ts must be eliminated " +
-      "(frozen contract §4.3/§8.3); no pre-approved Expected Delta exists.",
-    );
+// Full 12-item inventory keys (contract §3.5).
+const INVENTORY_KEYS = [
+  "packageSource", "packageDist", "baselineOracle", "v5ShadowSource",
+  "agentGeneratedCjs", "webGeneratedMin", "rootSyncedMin",
+  "containerCopy", "publicCopy", "webConsumer", "productionWrapper", "optimizerSurrogate",
+];
+
+// F05 (contract §8.1/§8.4/§9): validate a canonical artifact-inventory object.
+// Every non-eliminated item MUST carry a 64-hex per-item SHA-256 identity;
+// presence flags may NOT replace identity; webConsumer must be eliminated.
+export function validateInventoryArtifacts(artifacts) {
+  if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts)) {
+    throw new Error("NBJ_P2_6_INVENTORY_EMPTY");
   }
-  return {
-    packageSource: await entry("packages/feeding-model/src/index.ts", "authority"),
-    packageDist: await entry("packages/feeding-model/dist/index.js", "derived"),
-    baselineOracle: await entry("feeding-model.js", "parity-oracle"),
-    v5ShadowSource: await entry("v5lite-model.js", "shadow"),
-    agentGeneratedCjs: await entry("agent/.generated-models/feeding-model.cjs", "derived"),
-    webGeneratedMin: await entry("agent/.generated-web/feeding-model.min.js", "derived"),
-    rootSyncedMin: await entry("feeding-model.min.js", "derived"),
-    containerCopy: await entry("agent/container-models/feeding-model.cjs", "derived-pipeline-owned"),
-    publicCopy: await entry("agent/public/feeding-model.min.js", "derived-pipeline-owned"),
-    webConsumer: { disposition: "eliminated", sha256: null, present: false },
-    productionWrapper: await entry("backend/src/models/feedingModel.js", "re-export"),
-    optimizerSurrogate: await entry("optimizer/model.py", "experimental-excluded"),
+  for (const key of INVENTORY_KEYS) {
+    const entry = artifacts[key];
+    if (!entry || typeof entry.disposition !== "string") {
+      throw new Error("NBJ_P2_6_INVENTORY_MISSING_KEY:" + key);
+    }
+    if (key === "webConsumer") {
+      if (entry.disposition !== "eliminated") {
+        throw new Error("NBJ_P2_6_INVENTORY_WEB_NOT_ELIMINATED:" + key);
+      }
+      continue;
+    }
+    if (typeof entry.sha256 !== "string" || !/^[0-9a-fA-F]{64}$/.test(entry.sha256)) {
+      throw new Error("NBJ_P2_6_INVENTORY_NO_SHA:" + key);
+    }
+  }
+  return true;
+}
+
+// F05.2: artifactInventory is the CANONICAL CHECKPOINT IDENTITY taken verbatim
+// from the committed publication-manifest.artifacts (permanent per-item
+// SHA-256; webConsumer eliminated). It is independent of build context.
+async function canonicalArtifactInventory(sourceRoot) {
+  const manifestPath = resolve(sourceRoot, "packages", "feeding-model", "publication-manifest.json");
+  let manifest;
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  } catch (error) {
+    throw new Error("NBJ_P2_6_MANIFEST_UNREADABLE:" + String(error && error.message || error));
+  }
+  if (!manifest.artifacts) {
+    throw new Error("NBJ_P2_6_MANIFEST_ARTIFACTS_MISSING");
+  }
+  validateInventoryArtifacts(manifest.artifacts);
+  return manifest.artifacts;
+}
+
+// F05.1: runtimePresence is a SEPARATE field describing which artifacts exist
+// in THIS context (repo checkout vs production Docker image). In the Docker
+// build stage agentRoot is /app (agent payload root) and the agent artifacts
+// live directly under it, while repo-only items (root parity oracle, backend
+// wrapper, optimizer) are legitimately absent. Presence never replaces
+// identity (artifactInventory).
+async function buildRuntimePresence(agentRoot, sourceRoot) {
+  const resolvePath = (key) => {
+    switch (key) {
+      case "packageSource": return resolve(sourceRoot, "packages", "feeding-model", "src", "index.ts");
+      case "packageDist": return resolve(sourceRoot, "packages", "feeding-model", "dist", "index.js");
+      case "baselineOracle": return resolve(sourceRoot, "feeding-model.js");
+      case "v5ShadowSource": return resolve(sourceRoot, "v5lite-model.js");
+      case "agentGeneratedCjs": return resolve(agentRoot, ".generated-models", "feeding-model.cjs");
+      case "webGeneratedMin": return resolve(agentRoot, ".generated-web", "feeding-model.min.js");
+      case "rootSyncedMin": return resolve(sourceRoot, "feeding-model.min.js");
+      case "containerCopy": return resolve(agentRoot, "container-models", "feeding-model.cjs");
+      case "publicCopy": return resolve(agentRoot, "public", "feeding-model.min.js");
+      case "productionWrapper": return resolve(sourceRoot, "backend", "src", "models", "feedingModel.js");
+      case "optimizerSurrogate": return resolve(sourceRoot, "optimizer", "model.py");
+      default: return null;
+    }
   };
+  const presence = {};
+  for (const key of INVENTORY_KEYS) {
+    if (key === "webConsumer") { presence[key] = { present: false }; continue; }
+    const p = resolvePath(key);
+    if (p && (await exists(p))) {
+      presence[key] = { present: true, sha256: await sha256InventoryFile(p) };
+    } else {
+      presence[key] = { present: false, sha256: null };
+    }
+  }
+  return presence;
 }
 
 async function extractConstant(file, pattern, name) {
   const source = await readFile(file, "utf8");
   const match = pattern.exec(source);
-  if (!match) throw new Error(`NBJ_PROVENANCE_${name}_MISSING`);
+  if (!match) throw new Error("NBJ_PROVENANCE_" + name + "_MISSING");
   return match[1];
 }
 
@@ -98,9 +145,6 @@ export async function computeProvenance({
   sourceRoot,
 } = {}) {
   const resolvedSourceRoot = sourceRoot ?? await resolveSourceRoot(agentRoot);
-  // P2-6 single source: the source authority is packages/feeding-model/src/index.ts
-  // (the single TS authority per contract §5.2/§6.2); the root feeding-model.js is
-  // only the migration parity oracle and is not the provenance source identity.
   const packageSource = resolve(resolvedSourceRoot, "packages", "feeding-model", "src", "index.ts");
   if (!(await exists(packageSource))) {
     throw new Error("NBJ_PACKAGE_AUTHORITY_SOURCE_NOT_FOUND");
@@ -120,8 +164,14 @@ export async function computeProvenance({
     /export const DECISION_POLICY_VERSION\s*=\s*"([^"]+)"/u,
     "DECISION_POLICY_VERSION",
   );
-  // F05: full 12-item inventory identity (contract §8.1/§9).
-  const artifactInventory = await buildArtifactInventory(resolvedSourceRoot);
+  if (await exists(resolve(resolvedSourceRoot, "web", "lib", "feeding.ts"))) {
+    throw new Error(
+      "NBJ_P2_6_F3_PRESENT:web/lib/feeding.ts must be eliminated " +
+      "(frozen contract §4.3/§8.3); no pre-approved Expected Delta exists.",
+    );
+  }
+  const artifactInventory = await canonicalArtifactInventory(resolvedSourceRoot);
+  const runtimePresence = await buildRuntimePresence(agentRoot, resolvedSourceRoot);
   return {
     commit,
     schemaVersion,
@@ -132,6 +182,7 @@ export async function computeProvenance({
     v5LiteModelArtifactSha256,
     uiSha256,
     artifactInventory,
+    runtimePresence,
   };
 }
 
@@ -149,6 +200,7 @@ export async function computeWebProvenance(input = {}) {
     feedingModelArtifactSha256,
     uiSha256: agentProvenance.uiSha256,
     artifactInventory: agentProvenance.artifactInventory,
+    runtimePresence: agentProvenance.runtimePresence,
   };
 }
 
@@ -158,13 +210,13 @@ async function main() {
   const webProvenance = await computeWebProvenance({ commit });
   await writeFile(
     resolve(DEFAULT_AGENT_ROOT, "agent-provenance.json"),
-    `${JSON.stringify(agentProvenance, null, 2)}\n`,
+    JSON.stringify(agentProvenance, null, 2) + "\n",
   );
   await writeFile(
     resolve(DEFAULT_AGENT_ROOT, "web-provenance.json"),
-    `${JSON.stringify(webProvenance, null, 2)}\n`,
+    JSON.stringify(webProvenance, null, 2) + "\n",
   );
-  console.log(`provenance ok commit=${commit}`);
+  console.log("provenance ok commit=" + commit);
 }
 
 if (
