@@ -18,12 +18,11 @@ async function exists(path) {
   try { await access(path); return true; } catch { return false; }
 }
 
-function sha256FileSync(buf) {
-  return createHash("sha256").update(buf).digest("hex");
-}
-
+// EOL-invariant canonical hash: LF-normalize the UTF-8 content so the
+// committed manifest matches on any checkout (git eol=lf vs core.autocrlf).
 async function sha256File(path) {
-  return sha256FileSync(await readFile(path));
+  const text = (await readFile(path, "utf8")).replace(/\r\n/g, "\n");
+  return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
 async function present(relativePath, disposition) {

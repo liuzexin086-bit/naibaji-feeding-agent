@@ -23,6 +23,13 @@ async function sha256File(path) {
   return sha256Text(await readFile(path, "utf8"));
 }
 
+// EOL-invariant canonical hash (LF-normalized) for the full-inventory map so
+// provenance values match the committed publication-manifest on any checkout.
+async function sha256InventoryFile(path) {
+  const text = (await readFile(path, "utf8")).replace(/\r\n/g, "\n");
+  return sha256Text(text).toLowerCase();
+}
+
 // F06: production discovery locates the PACKAGE authority (src/index.ts) plus
 // the V5-Lite shadow baseline; the root feeding-model.js parity oracle must
 // NOT be a production build/provenance dependency (contract §4.1/§6.2).
@@ -50,7 +57,7 @@ async function buildArtifactInventory(repoRoot) {
     if (!(await exists(abs))) {
       throw new Error("NBJ_P2_6_INVENTORY_MISSING:" + relativePath);
     }
-    return { disposition, sha256: await sha256File(abs) };
+    return { disposition, sha256: await sha256InventoryFile(abs) };
   };
   if (await exists(resolve(repoRoot, "web", "lib", "feeding.ts"))) {
     throw new Error(

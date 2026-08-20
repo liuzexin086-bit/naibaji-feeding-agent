@@ -407,9 +407,13 @@ function checkGoldenVectors() {
   }
   if (!exists(PKG_MANIFEST)) { fail("g", "publication-manifest.json missing"); return; }
   const manifest = JSON.parse(readFileSync(PKG_MANIFEST, "utf8"));
-  const srcSha = sha256Bytes(PKG_SRC);
-  const goldenSha = sha256Bytes(PKG_GOLDEN);
-  const baselineSha = sha256Bytes(ROOT_FEEDING);
+  // EOL-invariant canonical hash (LF-normalized) so committed values match on
+  // any checkout (git eol=lf vs core.autocrlf) - same canonical as
+  // scripts/refresh-publication-manifest.mjs and write-provenance.mjs.
+  const canon = (p) => createHash("sha256").update(readFileSync(p, "utf8").replace(/\r\n/g, "\n")).digest("hex");
+  const srcSha = canon(PKG_SRC);
+  const goldenSha = canon(PKG_GOLDEN);
+  const baselineSha = canon(ROOT_FEEDING);
   const eq = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
   let ok = true;
   if (!eq(manifest.sourceSha256, srcSha)) { fail("g", "manifest.sourceSha256 != src/index.ts"); ok = false; }
@@ -441,7 +445,7 @@ function checkGoldenVectors() {
     }
     const p = inventoryPaths[key];
     if (!exists(p)) { fail("g", "inventory artifact missing on disk: " + key); ok = false; continue; }
-    if (!eq(entry.sha256, sha256Bytes(p))) { fail("g", "manifest.artifacts." + key + " sha256 mismatch"); ok = false; }
+    if (!eq(entry.sha256, canon(p))) { fail("g", "manifest.artifacts." + key + " sha256 mismatch"); ok = false; }
   }
   if (ok) console.log("p2-6 (g) publication-manifest hashes + full 12-item artifact inventory match: PASS");
 }
