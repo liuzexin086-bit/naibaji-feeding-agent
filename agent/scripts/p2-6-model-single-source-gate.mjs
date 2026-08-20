@@ -341,36 +341,38 @@ function checkOptimizerAbsent() {
   else fail("e", "optimizer/ import found in: " + hits.join(", "));
 }
 
-// ── (f) F1/F2/F3 on-disk ───────────────────────────────────────────────────
+// ── (f) F1/F2/F3 lifecycle — FAIL-CLOSED (contract §4.3/§7) ───────────────
+// F04: F1/F2 are PIPELINE-OWNED derived artifacts and F3 must be ELIMINATED.
+// Absence or divergence of a required derived artifact, or any divergent
+// feeding implementation (tracked OR on-disk, including gitignored web/),
+// is a HARD FAILURE.
 function checkF1F2F3() {
-  // F1: container-models feeding cjs byte-equal to generated cjs
+  // F1: container-models feeding cjs is pipeline-owned and MUST equal generated cjs
   const containerCjs = resolve(agentRoot, "container-models", "feeding-model.cjs");
   const genCjs = resolve(GEN_MODELS, "feeding-model.cjs");
-  if (exists(containerCjs)) {
-    if (!exists(genCjs) || !readFileSync(containerCjs).equals(readFileSync(genCjs))) {
-      fail("f", "F1-UNRESOLVED: container-models/feeding-model.cjs != .generated-models/feeding-model.cjs");
-    } else {
-      console.log("p2-6 (f.F1) container-models/feeding-model.cjs == generated cjs: PASS");
-    }
+  if (!exists(containerCjs)) {
+    fail("f", "F1-UNRESOLVED: container-models/feeding-model.cjs MISSING (pipeline-owned; prepare-model-assets must generate it)");
+  } else if (!exists(genCjs) || !readFileSync(containerCjs).equals(readFileSync(genCjs))) {
+    fail("f", "F1-UNRESOLVED: container-models/feeding-model.cjs != .generated-models/feeding-model.cjs");
   } else {
-    console.log("p2-6 (f.F1) container-models/feeding-model.cjs absent: PASS");
+    console.log("p2-6 (f.F1) container-models/feeding-model.cjs == generated cjs (pipeline-owned): PASS");
   }
-  // F2: agent/public min byte-equal to generated web min
+  // F2: agent/public min is pipeline-owned and MUST equal generated web min
   const publicMin = resolve(agentRoot, "public", "feeding-model.min.js");
   const genWeb = resolve(GEN_WEB, "feeding-model.min.js");
-  if (exists(publicMin)) {
-    if (!exists(genWeb) || !readFileSync(publicMin).equals(readFileSync(genWeb))) {
-      fail("f", "F2-UNRESOLVED: agent/public/feeding-model.min.js != .generated-web/feeding-model.min.js");
-    } else {
-      console.log("p2-6 (f.F2) agent/public/feeding-model.min.js == generated web min: PASS");
-    }
+  if (!exists(publicMin)) {
+    fail("f", "F2-UNRESOLVED: agent/public/feeding-model.min.js MISSING (pipeline-owned; prepare-web-model-assets must generate it)");
+  } else if (!exists(genWeb) || !readFileSync(publicMin).equals(readFileSync(genWeb))) {
+    fail("f", "F2-UNRESOLVED: agent/public/feeding-model.min.js != .generated-web/feeding-model.min.js");
   } else {
-    console.log("p2-6 (f.F2) agent/public/feeding-model.min.js absent: PASS");
+    console.log("p2-6 (f.F2) agent/public/feeding-model.min.js == generated web min (pipeline-owned): PASS");
   }
-  // F3: a DIVERGENT feeding implementation must NOT be in the TRACKED tree.
-  // web/ is gitignored and outside the P2 baseline; an on-disk (untracked)
-  // web/lib/feeding.ts is reported as a WARNING, not a failure.
-  const trackedDivergent = [];
+  // F3: NO divergent feeding implementation may survive ANYWHERE (tracked or
+  // on-disk gitignored web/). Contract §4.3/§8.3: eliminate or pre-approved
+  // Expected Delta - a warning is NOT sufficient (F04). web/lib/feeding.ts
+  // MUST be eliminated; the production Web consumer must consume the
+  // package-derived artifact.
+  const divergent = [];
   for (const rel of gitLsFiles()) {
     if (rel.startsWith("docs/")) continue;   // docs describe F3, not an implementation
     if (isDefinePath(rel)) continue;          // DEFINE allowlist is the authority
@@ -378,30 +380,18 @@ function checkF1F2F3() {
     if (!exists(abs)) continue;
     const src = readFileSync(abs, "utf8");
     const m = src.match(/MEALS\s*=\s*(\d+)/);
-    if (m && Number(m[1]) > 10) trackedDivergent.push(rel + " (MEALS=" + m[1] + ")");
-  }
-  if (trackedDivergent.length > 0) {
-    fail("f", "F3-UNRESOLVED: divergent feeding implementation in TRACKED tree: " + trackedDivergent.join(", "));
-  } else {
-    console.log("p2-6 (f.F3) no divergent feeding implementation in the tracked tree: PASS");
+    if (m && Number(m[1]) > 10) divergent.push(rel + " (MEALS=" + m[1] + ")");
   }
   const feedingTs = resolve(repoRoot, "web", "lib", "feeding.ts");
   if (exists(feedingTs)) {
     const src = readFileSync(feedingTs, "utf8");
     const m = src.match(/MEALS\s*=\s*(\d+)/);
-    if (m && Number(m[1]) > 10) {
-      console.warn(
-        "NBJ_P2_6_GATE_WARN:F3-ON-DISK-GITIGNORED web/lib/feeding.ts encodes MEALS=" + m[1] +
-        " (>10). web/ is gitignored and outside the P2 baseline, so this does not fail the gate. " +
-        "Remediation: eliminate web/lib/feeding.ts (Web must consume the package-derived artifact) " +
-        "or register the " + m[1] + "-meal behavior as a pre-approved Expected Delta " +
-        "(nbj-arch-p2-6-contract.md §4.3/§8.3) before it may become authoritative.",
-      );
-    } else {
-      console.log("p2-6 (f.F3) web/lib/feeding.ts present on disk with no MEALS>10: PASS");
-    }
+    if (m && Number(m[1]) > 10) divergent.push("web/lib/feeding.ts (MEALS=" + m[1] + ")");
+  }
+  if (divergent.length > 0) {
+    fail("f", "F3-UNRESOLVED: divergent feeding implementation(s): " + divergent.join(", ") + ". web/lib/feeding.ts must be eliminated (no pre-approved Expected Delta); Web must consume the package-derived artifact (contract §4.3/§8.3).");
   } else {
-    console.log("p2-6 (f.F3) web/lib/feeding.ts absent: PASS");
+    console.log("p2-6 (f.F3) no divergent feeding implementation anywhere (tracked or on-disk): PASS");
   }
 }
 
@@ -425,7 +415,35 @@ function checkGoldenVectors() {
   if (!eq(manifest.sourceSha256, srcSha)) { fail("g", "manifest.sourceSha256 != src/index.ts"); ok = false; }
   if (!eq(manifest.baselineSha256, baselineSha)) { fail("g", "manifest.baselineSha256 != feeding-model.js"); ok = false; }
   if (!eq(manifest.goldenVectorsSha256, goldenSha)) { fail("g", "manifest.goldenVectorsSha256 != golden-vectors.json"); ok = false; }
-  if (ok) console.log("p2-6 (g) publication-manifest hashes match actual files: PASS");
+  // F05: full 12-item artifact inventory must be enumerated with a valid
+  // disposition and, for present artifacts, a matching per-artifact SHA-256.
+  const inventoryPaths = {
+    packageSource: resolve(PKG_DIR, "src", "index.ts"),
+    packageDist: resolve(PKG_DIR, "dist", "index.js"),
+    baselineOracle: ROOT_FEEDING,
+    v5ShadowSource: ROOT_V5,
+    agentGeneratedCjs: resolve(agentRoot, ".generated-models", "feeding-model.cjs"),
+    webGeneratedMin: resolve(GEN_WEB, "feeding-model.min.js"),
+    rootSyncedMin: ROOT_MIN,
+    containerCopy: resolve(agentRoot, "container-models", "feeding-model.cjs"),
+    publicCopy: resolve(agentRoot, "public", "feeding-model.min.js"),
+    productionWrapper: resolve(repoRoot, "backend", "src", "models", "feedingModel.js"),
+    optimizerSurrogate: resolve(repoRoot, "optimizer", "model.py"),
+  };
+  const expectedKeys = Object.keys(inventoryPaths).concat(["webConsumer"]);
+  const manifestInv = manifest.artifacts && typeof manifest.artifacts === "object" ? manifest.artifacts : {};
+  for (const key of expectedKeys) {
+    const entry = manifestInv[key];
+    if (!entry || typeof entry.disposition !== "string") { fail("g", "manifest.artifacts missing entry: " + key); ok = false; continue; }
+    if (key === "webConsumer") {
+      if (entry.disposition !== "eliminated") { fail("g", "manifest.artifacts.webConsumer must be eliminated"); ok = false; }
+      continue;
+    }
+    const p = inventoryPaths[key];
+    if (!exists(p)) { fail("g", "inventory artifact missing on disk: " + key); ok = false; continue; }
+    if (!eq(entry.sha256, sha256Bytes(p))) { fail("g", "manifest.artifacts." + key + " sha256 mismatch"); ok = false; }
+  }
+  if (ok) console.log("p2-6 (g) publication-manifest hashes + full 12-item artifact inventory match: PASS");
 }
 
 async function main() {

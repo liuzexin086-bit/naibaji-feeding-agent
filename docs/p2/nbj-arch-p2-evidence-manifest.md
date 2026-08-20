@@ -1,6 +1,6 @@
 # NBJ-ARCH-P2 Evidence Manifest
 
-Status: `P2-4 CONTRACT REGISTRATION — PASS / IMPLEMENTATION AUTHORIZATION OPEN`
+Status: `P2-4 CLOSED / PASS — P2-4 GATE OPEN — P2-6 ONGOING (contract registration PASS; implementation candidate + correction chain)`
 
 Baseline: `76187e1a3d4c7b83a70fc2aabb0a6fb4a8f05232`
 
@@ -69,7 +69,7 @@ Hash semantics: lowercase SHA-256 over raw committed file content bytes (as retu
 | P2-4 second correction remote CI | run `31758897344`, `agent-safety`, success | Exact correction checkpoint CI evidence |
 | Post-merge CI | run `31465609647`, `workflow_dispatch`, main, success | `gh run view 31465609647` |
 
-The ignored `.planning/` directory and ignored local `web/` directory are not in this Git tree and are not P2 baseline artifacts.
+The ignored `.planning/` directory is not in this Git tree and is not a P2 baseline artifact. The ignored local `web/` directory is not a P2 baseline artifact either, BUT the P2-6 frozen contract includes `web/lib/feeding.ts` in the full 12-item artifact inventory (finding F3): the divergent `MEALS=12` implementation was ELIMINATED at the implementation candidate, and the `p2-6-feeding-model-single-source-gate` fails closed if any divergent feeding implementation (tracked or on-disk gitignored `web/`) reappears.
 
 Checkpoint `fead997b78afb2b03c372a957f9fe8c19fd6d4a0` contains the four original `docs/p2/` contract documents and no runtime, schema, CI, lock, UI, model, or data changes. P2-0.1 is limited to correcting those documents and adding the independent Review 0 receipt.
 
@@ -994,6 +994,39 @@ P2-4 Gate: OPEN
 P2-4 overall: CLOSED / PASS
 
 P2-6 stage / contract registration authorization: OPEN (implementation not authorized)
+Runtime/Cutover Gate: CLOSED
+Compose Replacement Gate: CLOSED
+P2 Merge Gate: CLOSED
+Architecture Unification Gate: CLOSED
+Optimizer Production Gate: CLOSED
+Real Device Control Gate: CLOSED
+```
+
+## 18.11 P2-6 Feeding Model Single Source — Implementation Candidate
+
+P2-6 contract registration PASS (frozen `nbj-arch-p2-6-contract.md`; authority map
+targets `packages/feeding-model`; micro-corrections P2-6-F01.1/F01.2/F01.3 closed).
+Implementation candidate chain: `94137fa -> 618431b` (TS package authority + schema
++ 109 golden vectors + publication manifest + package-derived artifacts + p2-6 gate
+wiring) `-> a1edb8f` (portable golden-vector generator) `-> 5c9c525` (Docker build
+context wiring). Independent implementation review returned `REQUEST CHANGES` with
+`P2-6-F04` (F1/F2/F3 fail-open -> fixed: pipeline-owned F1/F2 + F3 eliminated +
+gate FAILS CLOSED on any divergent feeding implementation anywhere), `P2-6-F05`
+(full-inventory provenance missing -> fixed: publication-manifest full 12-item
+artifact inventory, refreshed by `scripts/refresh-publication-manifest.mjs`, bound
+by `write-provenance.mjs` and verified by the gate), `P2-6-F06` (root
+`feeding-model.js` remained a production build dependency -> fixed:
+preparation/provenance/Docker build locate the package authority without the
+parity oracle; Docker no longer COPYs `feeding-model.js`; negative architecture
+test `prod-build-no-root-oracle.test.ts`), and `P2-6-F07` (stale audit records ->
+fixed here). The P2-6 Gate remains CLOSED pending the correction re-review.
+
+```text
+P2-6 Contract Registration: PASS
+P2-6 Implementation: CANDIDATE / REQUEST CHANGES (correction committed) — RE-REVIEW PENDING
+P2-6 Gate: CLOSED
+
+P2-7 SOP Authority: CLOSED
 Runtime/Cutover Gate: CLOSED
 Compose Replacement Gate: CLOSED
 P2 Merge Gate: CLOSED

@@ -12,7 +12,7 @@ COPY agent/tsconfig.json ./
 COPY agent/src ./src
 COPY agent/scripts ./scripts
 COPY agent/ui ./ui
-COPY feeding-model.js v5lite-model.js ./
+COPY v5lite-model.js ./
 RUN npm run build
 RUN node scripts/write-provenance.mjs "$GIT_COMMIT"
 RUN npm prune --omit=dev

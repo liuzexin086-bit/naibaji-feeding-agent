@@ -37,6 +37,17 @@ describe("build provenance contract", () => {
       sha256File(resolve(agentRoot, ".generated-web", "feeding-model.min.js")),
     );
     expect(web.uiSha256).toBe(agent.uiSha256);
+    // F05: full 12-item artifact inventory is bound in provenance (contract §8.1/§9)
+    for (const key of [
+      "packageSource", "packageDist", "baselineOracle", "v5ShadowSource",
+      "agentGeneratedCjs", "webGeneratedMin", "rootSyncedMin",
+      "containerCopy", "publicCopy", "productionWrapper", "optimizerSurrogate",
+    ] as const) {
+      expect(agent.artifactInventory[key], key).toMatchObject({ disposition: expect.any(String) });
+      expect(agent.artifactInventory[key].sha256, key).toMatch(/^[0-9a-fA-F]{64}$/);
+    }
+    expect(agent.artifactInventory.webConsumer).toEqual({ disposition: "eliminated", sha256: null });
+    expect(web.artifactInventory).toEqual(agent.artifactInventory);
   });
 
   it("wires provenance files, dockerignore, and /version endpoints", () => {
@@ -58,8 +69,10 @@ describe("build provenance contract", () => {
 
     const dockerfile = readFileSync(resolve(repoRoot, "agent", "Dockerfile"), "utf8");
     expect(dockerfile).toContain("COPY agent/ui ./ui");
-    expect(dockerfile).toContain("COPY feeding-model.js v5lite-model.js ./");
-    expect(dockerfile).not.toContain("COPY feeding-model.js v5lite-model.js feeding-model.min.js ./");
+    // F06: the root feeding-model.js parity oracle must NOT be a production build dependency
+    expect(dockerfile).toContain("COPY v5lite-model.js ./");
+    expect(dockerfile).not.toContain("COPY feeding-model.js");
+    expect(dockerfile).toContain("COPY packages/feeding-model packages/feeding-model");
     expect(dockerfile).toContain("COPY --from=build /app/.generated-web/feeding-model.min.js /tmp/naibaji-assets/feeding-model.min.js");
     expect(dockerfile).not.toContain("COPY admin.html admin.js chart.umd.min.js feeding-model.min.js");
     expect(dockerfile).toContain('RUN node scripts/write-provenance.mjs "$GIT_COMMIT"');

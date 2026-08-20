@@ -22,10 +22,13 @@ async function exists(path) {
 // feeding-model.js serves only as the migration parity oracle (§4.1) and is no
 // longer a production dependency. v5lite-model.cjs stays a shadow-only copy of
 // the root v5lite-model.js baseline (frozen Authority Map row 57).
+// F06: production discovery locates the PACKAGE authority plus the V5-Lite
+// shadow baseline. The root feeding-model.js parity oracle must NOT be a
+// production build dependency (nbj-arch-p2-6-contract.md §4.1/§6.2).
 let sourceRoot;
 for (const candidate of candidates) {
   if (
-    (await exists(resolve(candidate, "feeding-model.js"))) &&
+    (await exists(resolve(candidate, "packages", "feeding-model", "dist", "index.js"))) &&
     (await exists(resolve(candidate, "v5lite-model.js")))
   ) {
     sourceRoot = candidate;
@@ -50,3 +53,9 @@ await mkdir(targetRoot, { recursive: true });
 await cp(packageDist, resolve(targetRoot, "feeding-model.cjs"));
 // v5lite-model.cjs stays from the root shadow baseline (unchanged).
 await cp(resolve(sourceRoot, "v5lite-model.js"), resolve(targetRoot, "v5lite-model.cjs"));
+// F04: container-models copies are PIPELINE-OWNED derived artifacts (contract
+// §4.3), never manually synced; the gate verifies byte-equality hard-fail.
+const containerRoot = resolve(agentRoot, "container-models");
+await mkdir(containerRoot, { recursive: true });
+await cp(packageDist, resolve(containerRoot, "feeding-model.cjs"));
+await cp(resolve(sourceRoot, "v5lite-model.js"), resolve(containerRoot, "v5lite-model.cjs"));

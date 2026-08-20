@@ -16,10 +16,13 @@ async function exists(path) {
   }
 }
 
+// F06: production discovery locates the PACKAGE authority (dist/index.js)
+// inside the repo; the root feeding-model.js parity oracle must NOT be a
+// production build dependency (nbj-arch-p2-6-contract.md §4.1/§6.2).
 async function resolveSourceRoot(agentRoot) {
   const candidates = [agentRoot, resolve(agentRoot, "..")];
   for (const candidate of candidates) {
-    if (await exists(resolve(candidate, "feeding-model.js"))) {
+    if (await exists(resolve(candidate, "packages", "feeding-model", "dist", "index.js"))) {
       return candidate;
     }
   }
@@ -64,6 +67,11 @@ export async function generateWebModelArtifact({
     // Tracked root feeding-model.min.js is the synced copy of the Web artifact.
     await writeFile(resolve(resolvedSourceRoot, "feeding-model.min.js"), code, "utf8");
   }
+  // F04: agent/public/feeding-model.min.js is a PIPELINE-OWNED derived
+  // artifact (contract §4.3), never manually synced; gate verifies byte-eq.
+  const publicDir = resolve(agentRoot, "public");
+  await mkdir(publicDir, { recursive: true });
+  await writeFile(resolve(publicDir, "feeding-model.min.js"), code, "utf8");
   return {
     code,
     outputPath: resolvedOutput,
