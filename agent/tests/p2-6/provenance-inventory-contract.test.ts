@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { computeProvenance, validateInventoryArtifacts } from "../../scripts/write-provenance.mjs";
+import { computeProvenance, computeWebProvenance, validateInventoryArtifacts } from "../../scripts/write-provenance.mjs";
 
 const repoRoot = resolve(import.meta.dirname, "../../..");
 const agentRoot = resolve(repoRoot, "agent");
@@ -29,8 +29,10 @@ describe("P2-6 artifactInventory is the canonical checkpoint identity (F05)", ()
   it("computeProvenance artifactInventory equals the committed publication-manifest.artifacts verbatim", async () => {
     const agent = await computeProvenance({ commit: "provenance-test", agentRoot });
     expect(agent.artifactInventory).toEqual(manifest.artifacts);
-    const web = await computeProvenance({ commit: "provenance-test", agentRoot });
+    // F08: exercise the real Web provenance path (not a second agent call)
+    const web = await computeWebProvenance({ commit: "provenance-test", agentRoot });
     expect(web.artifactInventory).toEqual(manifest.artifacts);
+    expect(web.runtimePresence).toEqual(agent.runtimePresence);
   });
 
   it("runtimePresence is a separate context field and never replaces identity", async () => {
@@ -43,6 +45,8 @@ describe("P2-6 artifactInventory is the canonical checkpoint identity (F05)", ()
         expect(entry.sha256, key).toMatch(/^[0-9a-fA-F]{64}$/);
         // identity is untouched regardless of presence
         expect(agent.artifactInventory[key].sha256, key).toMatch(/^[0-9a-fA-F]{64}$/);
+        // F08: for byte-identical present artifacts, runtime SHA == canonical identity
+        expect(agent.runtimePresence[key].sha256, key).toBe(agent.artifactInventory[key].sha256);
       }
     }
   });
