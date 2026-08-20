@@ -10,5 +10,6 @@ agent/data
 *.sqlite*
 coverage
 dist
+!packages/feeding-model/dist
 .pytest_cache
 __pycache__

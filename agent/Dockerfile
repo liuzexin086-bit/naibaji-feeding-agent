@@ -5,6 +5,7 @@ RUN echo "$GIT_COMMIT" > /app/version
 
 COPY agent/package.json agent/package-lock.json ./
 COPY packages/persistence /packages/persistence
+COPY packages/feeding-model packages/feeding-model
 RUN npm ci
 
 COPY agent/tsconfig.json ./
